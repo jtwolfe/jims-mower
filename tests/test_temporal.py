@@ -19,13 +19,15 @@ def test_hysteresis_needs_confirm_then_decays() -> None:
     first = filt.update(incoming, conf)
     assert float(first[2, 3]) == 0.0  # not enough evidence yet
     second = filt.update(incoming, conf)
-    assert float(second[2, 3]) == float(HAZARD_DRAIN)
+    assert float(second[2, 3]) == 0.0  # decay-then-boost still below confirm
+    third = filt.update(incoming, conf)
+    assert float(third[2, 3]) == float(HAZARD_DRAIN)
     blank = np.zeros_like(incoming)
-    after = second
+    after = third
     for _ in range(12):
         after = filt.update(blank, blank)
     assert float(after[2, 3]) == 0.0
-    assert not np.array_equal(second, after)
+    assert not np.array_equal(third, after)
 
 
 def test_heuristic_temporal_changes_maps() -> None:

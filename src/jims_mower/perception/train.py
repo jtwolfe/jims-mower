@@ -111,8 +111,10 @@ def samples_from_export(
             world_cam = camera_world_pose(pose, cam)
             hx, hy, valid = ground_hits(world_cam, width, height, ground_z=0.0)
             feats = pixel_features(image, world_x=hx, world_y=hy, world_size=world_size)
-            rows = np.floor(hy / max(resolution, 1e-6)).astype(np.int32)
-            cols = np.floor(hx / max(resolution, 1e-6)).astype(np.int32)
+            rows_f = np.where(valid, hy / max(resolution, 1e-6), -1.0)
+            cols_f = np.where(valid, hx / max(resolution, 1e-6), -1.0)
+            rows = np.floor(rows_f).astype(np.int32)
+            cols = np.floor(cols_f).astype(np.int32)
             inb = (
                 valid
                 & (rows >= 0)

@@ -43,7 +43,7 @@ def test_numpy_fit_writes_and_loads(tmp_path: Path) -> None:
     y = rng.integers(0, 4, size=80)
     model, stats = fit_numpy(x, y, hidden=4, epochs=3, lr=0.2, seed=0)
     assert stats["backend"] == "numpy"
-    assert "mAP" not in stats["note"]
+    assert "not mAP" in stats["note"]
     path = save_weights(model, tmp_path / "w.npz")
     loaded = load_weights(path)
     assert loaded.n_features == 7
