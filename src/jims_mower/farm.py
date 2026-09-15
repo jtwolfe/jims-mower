@@ -127,7 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-drains", type=int, default=DEFAULT_MAX_DRAINS)
     p.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind"),
+        choices=("heuristic", "oracle", "blind", "learned"),
         default=None,
     )
     return p

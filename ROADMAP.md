@@ -5,10 +5,10 @@ Hardware bring-up (wiring, JetPack flash, field calibration) lives elsewhere.
 There are no claimed mAP / FPS numbers on this list.
 
 WAVE **1A** is the foundation package. WAVE **1C** expanded yards / renderer.
-WAVE **1B** (EKF / record-replay) is on `main`. WAVE **2A** (this PR) is
-dynamic world + behaviour: movers, geofences, recovery, hand-signal
-policy hooks, and multi-session resume. Later waves stay unchecked until
-they land.
+WAVE **1B** (EKF / record-replay) and WAVE **2A** (movers, geofences,
+recovery, hand-signal hooks, mission resume) are on `main`. WAVE **2B**
+(this wave) is the sim-only perception pipeline: exporter → numpy terrain
+stub, multi-camera BEV fuse, temporal filters. No claimed mAP / FPS.
 
 ## WAVE 2A — dynamic world + behaviour (done)
 
@@ -46,14 +46,14 @@ they land.
 
 ## Perception
 
-- [ ] Replace `classify_terrain_rgb` with a learned drain / lip / bank / grass head (train on exporter labels)
-- [ ] Temporal consistency on hazard stamps (track lips across frames)
-- [ ] Multi-camera NMS / association for `Detector` (one object, many views)
+- [x] Replace `classify_terrain_rgb` with a learned drain / lip / bank / grass head (train on exporter labels) — WAVE 2B **numpy stub**, no claimed accuracy ([`docs/WAVE2B.md`](docs/WAVE2B.md))
+- [x] Temporal consistency on hazard stamps (hysteresis / decay) — WAVE 2B
+- [x] Multi-camera BEV fuse for hazard stamps + person/dog tracklets stub — WAVE 2B (not published MOT / NMS scores)
 - [ ] Person / animal / toy categories beyond `MockDetector` blobs
 - [ ] Hand-signal classifier behind `HandSignalCurriculum` (optional)
 - [ ] Grass coverage net behind `GrassObserver` (replace color heuristic)
-- [ ] Domain-randomised lighting / wet / dawn from scenario flags
-- [ ] Uncertainty maps on `TerrainEstimate` (no fake confidence scores)
+- [x] Domain-randomised lighting / wet / dawn from scenario flags — WAVE 1C renderer + WAVE 2B `--domain-rand` export note
+- [x] Optional `TerrainEstimate.confidence` merge weights (relative, not a published score) — WAVE 2B
 
 ## Mapping
 
@@ -114,6 +114,7 @@ they land.
 - [x] Episode scorecards + JSON report (WAVE 1A)
 - [x] Overnight farm + dry-run (WAVE 1A)
 - [x] BEV debugger composites in demo output (WAVE 1A)
+- [x] Train stub from export (`scripts/train_terrain_seg.py` / `python -m jims_mower.perception.train`) — WAVE 2B
 - [ ] Replay a `frames/*.json` folder without re-simulating
 - [ ] Label review: overlay hazard PNG on top-down
 - [ ] Dataset versioning (schema field already `jims_mower.dataset.v1`)
@@ -127,12 +128,14 @@ they land.
 - [ ] Trimmer offset / radius vs leftover strips
 - [ ] Heuristic vs oracle coverage gap (already sketched in README; keep honest)
 
-## Verify WAVE 1A
+## Verify WAVE 1A + 2B
 
 ```bash
 python -m pip install -e ".[dev]"
 pytest
 python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --out dataset_out
+python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --domain-rand --out dataset_dr
+python scripts/train_terrain_seg.py --dataset dataset_out --out terrain_mlp.npz --epochs 12
 python -m jims_mower.farm --dry-run --out farm_out
 python -m jims_mower.demo --config suburban --steps 12 --out demo_out
 # expect demo_out/bev_final.png and demo_out/step_000/bev.png

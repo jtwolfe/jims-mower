@@ -107,9 +107,10 @@ These are **class recommendations**, not a shopping cart with fake benchmarks.
 **Do not** drop a full VIO/SLAM stack into this repo. On the robot, run your
 own fusion behind `TerrainObserver` (and a real `Detector`). The gym ships
 `HeuristicTerrainObserver` (RGB colour + ground-plane back-projection + ToF
-+ IMU; demo default), `OracleTerrainObserver` for training, and
++ IMU; demo default), `LearnedTerrainObserver` (exporter-trained numpy
+colour+position stub), `OracleTerrainObserver` for training, and
 `BlindTerrainObserver` as the empty swap-in for a real segmentation / depth
-net.
+net. There are no claimed mAP / FPS numbers here.
 
 ## Terrain and recommended behaviour
 
@@ -161,7 +162,8 @@ flowchart LR
 1. **Detect / estimate** — `TerrainObserver` fills `elevation`, `slope`, and
    `hazard` (`0` free, `1` steep, `2` drain lip, `3` channel). Demo default
    is the RGB+ToF heuristic (colour/geometry cues from the renderer’s ditch
-   shading, back-projected onto a ground plane). Oracle is training-only.
+   shading, multi-camera BEV fuse onto a ground plane). `learned` loads a
+   numpy stub trained on exporter labels. Oracle is training-only.
    On the robot, replace the classifier + back-project with your
    segmentation / depth head.
 2. **Costmap** — free = 1; steep below `planner.max_climb_slope_rad` = slow
@@ -239,9 +241,10 @@ flowchart LR
   hook can tell a ditch from flat grass. No OpenGL, no GUI.
 - **Perception** — `Detector` / `GrassObserver` / `TerrainObserver`
   protocols. Sim default is `MockDetector` plus `HeuristicTerrainObserver`
-  (RGB drain/bank cues + ToF + IMU). `OracleTerrainObserver` is the
-  training god-view. `BlindDetector` / `BlindTerrainObserver` are working
-  empty stubs.
+  (RGB drain/bank cues + ToF + IMU, multi-camera BEV fuse).
+  `LearnedTerrainObserver` loads exporter-trained numpy weights.
+  `OracleTerrainObserver` is the training god-view. `BlindDetector` /
+  `BlindTerrainObserver` are working empty stubs.
 - **Hand signals** — optional curriculum labels `stop`, `go`, `follow`,
   `back` on people. Off by default.
 
@@ -297,8 +300,17 @@ Sensor noise (`sensors.imu` / `sensors.gps` / `sensors.tof`): white noise
 stds, IMU accel bias (drawn once per episode), GPS dropout probability.
 
 `perception.terrain_mode`: `heuristic` (demo default), `oracle` (training
-god-view), or `blind` (empty stub). Override from the CLI with
-`--terrain-observer`.
+god-view), `learned` (numpy stub + `perception.weights_path`), or `blind`
+(empty stub). Override from the CLI with `--terrain-observer`.
+
+Train the stub from an export (CPU, no torch):
+
+```bash
+python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --out dataset_out
+python scripts/train_terrain_seg.py --dataset dataset_out --out terrain_mlp.npz
+# Domain-rand training dump (lighting / dirt / vignette). See docs/WAVE2B.md.
+python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --domain-rand --out dataset_dr
+```
 
 Coverage planner (`planner`):
 
@@ -329,13 +341,15 @@ Swap perception:
 
 ```python
 from jims_mower.env import MowerEnv
-from jims_mower.perception import BlindDetector, BlindTerrainObserver
+from jims_mower.perception import BlindDetector, BlindTerrainObserver, LearnedTerrainObserver
 
 env = MowerEnv(
     detector=BlindDetector(),
     terrain_observer=BlindTerrainObserver(),
     hand_signals=True,
 )
+# After scripts/train_terrain_seg.py:
+# env = MowerEnv(terrain_observer=LearnedTerrainObserver("terrain_mlp.npz"))
 ```
 
 A real onboard detector should implement `detect(images, context) -> list[Detection]`
@@ -367,6 +381,7 @@ IMU + GNSS    ─┘         ▼
 | IMU slope disk | Keep; fuse with `EkfPoseFilter` (or the complementary stub). |
 | `OracleTerrainObserver` | Training / eval only. Never run on-box. |
 | `BlindTerrainObserver` | Empty stub while you wire the net. Same `estimate(...)` contract. |
+| `LearnedTerrainObserver` | Sim-only numpy stub trained on exporter labels. Not a production head. |
 | Costmap + planner + controller | Keep in-process. The rasters are small. |
 
 `HeuristicTerrainObserver` is a **working sim stand-in**: it is good enough
@@ -402,20 +417,22 @@ pytest
 Unit tests cover kinematics (including zero-turn and slope attitude), drain
 and tip-over hazards, IMU/GPS observation shapes, the trimmer interlock,
 maps, camera math, the mock detector, RGB terrain classification and
-back-projection, terrain observers (oracle / heuristic / blind), the
-uncertainty-aware costmap and coverage planner (channels forbidden), the
-controller (slows on steep / stops on tip / replans when the vision map
-grows), the EKF pose filter (observability sanity) plus the complementary
-stub, the runtime contract, record/replay roundtrip, the latency scorecard
-(no FPS claims), reward, the renderer’s non-flat shading and plan overlay,
-the Gymnasium env checker, heuristic+planner episodes on `steep_yard`
-(fixed seeds: no channel entry; coverage vs oracle is reported without a
-fake mAP), the scenario loader, dataset-export layout, scorecards on
-frozen seeds, a farm dry-run, moving-agent trajectories, geofence
-costmaps, recovery / hand-signal overrides, and mission save/load.
-GitHub Actions PR CI runs the same suite headless on Python 3.10–3.12
-plus short terrain-policy, suburban, geofence, mission, and record/replay
-smokes (heuristic default). The full seed×scenario farm is a separate
+back-projection, terrain observers (oracle / heuristic / learned / blind),
+BEV fuse, hazard hysteresis, person/dog tracklets, the uncertainty-aware
+costmap and coverage planner (channels forbidden), the controller (slows
+on steep / stops on tip / replans when the vision map grows), the EKF pose
+filter (observability sanity) plus the complementary stub, the runtime
+contract, record/replay roundtrip, the latency scorecard (no FPS claims),
+reward, the renderer’s non-flat shading and plan overlay, the Gymnasium
+env checker, heuristic+planner episodes on `steep_yard` (fixed seeds: no
+channel entry; coverage vs oracle is reported without a fake mAP), the
+scenario loader, dataset-export layout, scorecards on frozen seeds, a farm
+dry-run, moving-agent trajectories, geofence costmaps, recovery /
+hand-signal overrides, and mission save/load. GitHub Actions PR CI runs
+the same suite headless on Python 3.10–3.12 plus short terrain-policy,
+suburban, geofence, mission, and record/replay smokes (heuristic default).
+Torch is an optional extra and is not installed in CI. The full
+seed×scenario farm is a separate
 [manual / nightly workflow](.github/workflows/farm.yml), not PR CI.
 
 ## WAVE 1A foundation
@@ -428,6 +445,7 @@ smokes (heuristic default). The full seed×scenario farm is a separate
 | Overnight farm | `python -m jims_mower.farm` (exit 1 if tip/drain gates fail) |
 | BEV debugger | [`src/jims_mower/bev.py`](src/jims_mower/bev.py) → `bev_final.png` |
 | ICD / roadmap | [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md) |
+| WAVE 2B train stub | [`docs/WAVE2B.md`](docs/WAVE2B.md), `scripts/train_terrain_seg.py` |
 
 Exporter labels are **oracle** height-field / grass rasters. The env
 observer can still be heuristic. Dataset folder layout is written to
@@ -454,7 +472,7 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo
 configs/scenarios/            WAVE 1A/1C/2A yards (suburban, geofence_movers, …)
-docs/                         WAVE1B / WAVE1C / WAVE2A notes + runtime contract
+docs/                         WAVE1B / WAVE1C / WAVE2A / WAVE2B notes + runtime contract
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/scenarios.py   YAML scenario loader
 src/jims_mower/geofence.py    keep-in / keep-out polygons
@@ -463,9 +481,12 @@ src/jims_mower/export.py      dataset dump
 src/jims_mower/metrics.py     episode scorecards
 src/jims_mower/farm.py        seed × scenario farm
 src/jims_mower/bev.py         BEV composite
+src/jims_mower/perception/    observers, BEV fuse, temporal filters, train stub
 src/jims_mower/planning/      costmap, boustrophedon+A*, controller, EKF
 src/jims_mower/contract.py    versioned message schemas
 src/jims_mower/episode.py     record / replay
+scripts/train_terrain_seg.py  export → numpy terrain weights
+docs/WAVE2B.md                domain-rand training note
 tests/                        pytest
 ```
 

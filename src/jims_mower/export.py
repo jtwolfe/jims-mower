@@ -83,6 +83,7 @@ def export_dataset(
     policy: str = "terrain",
     include_tof: bool = True,
     terrain_observer: Optional[str] = None,
+    domain_rand: bool = False,
 ) -> dict[str, Any]:
     name = (policy or "terrain").strip().lower()
     if name not in POLICIES:
@@ -93,9 +94,18 @@ def export_dataset(
         cfg.sensors.cameras = []
     if terrain_observer:
         key = terrain_observer.strip().lower()
-        if key not in {"oracle", "heuristic", "blind"}:
-            raise ValueError(f"terrain_observer must be oracle|heuristic|blind; got {key!r}")
+        if key not in {"oracle", "heuristic", "blind", "learned"}:
+            raise ValueError(
+                f"terrain_observer must be oracle|heuristic|blind|learned; got {key!r}"
+            )
         cfg.perception.terrain_mode = key
+    if domain_rand:
+        cfg.domain_randomization.enabled = True
+        cfg.domain_randomization.lighting = True
+        cfg.domain_randomization.colour_jitter = True
+        cfg.domain_randomization.shadow_blobs = True
+        cfg.domain_randomization.camera_dirt = True
+        cfg.domain_randomization.vignette = True
     env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
     obs, info = env.reset(seed=seed)
     out_dir = Path(out_dir)
@@ -217,6 +227,27 @@ def export_dataset(
         "image_size": [int(env.cfg.sensors.width), int(env.cfg.sensors.height)],
         "map_shape": list(env._coverage.cut.shape),
         "resolution_m": env.cfg.world.resolution_m,
+        "world_size": [env.cfg.world.width_m, env.cfg.world.height_m],
+        "camera_specs": [
+            {
+                "name": c.name,
+                "x": c.x,
+                "y": c.y,
+                "z": c.z,
+                "yaw_deg": c.yaw_deg,
+                "pitch_deg": c.pitch_deg,
+                "fov_deg": c.fov_deg,
+            }
+            for c in env.cameras
+        ],
+        "domain_randomization": {
+            "enabled": bool(env.cfg.domain_randomization.enabled),
+            "lighting": bool(env.cfg.domain_randomization.lighting),
+            "colour_jitter": bool(env.cfg.domain_randomization.colour_jitter),
+            "shadow_blobs": bool(env.cfg.domain_randomization.shadow_blobs),
+            "camera_dirt": bool(env.cfg.domain_randomization.camera_dirt),
+            "vignette": bool(env.cfg.domain_randomization.vignette),
+        },
     }
     coco = {
         "info": {
@@ -250,9 +281,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-tof", action="store_true", help="Omit ToF from sidecars")
     p.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind"),
+        choices=("heuristic", "oracle", "blind", "learned"),
         default=None,
         help="Observer used for env obs (labels stay oracle)",
+    )
+    p.add_argument(
+        "--domain-rand",
+        action="store_true",
+        help="Enable renderer domain randomisation for training exports (see docs/WAVE2B.md)",
     )
     return p
 
@@ -268,6 +304,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         policy=args.policy,
         include_tof=not args.no_tof,
         terrain_observer=args.terrain_observer,
+        domain_rand=args.domain_rand,
     )
     print(
         f"Wrote {meta['frames']} frames, cameras={meta['cameras']}, "

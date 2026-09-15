@@ -89,8 +89,12 @@ class TerrainObserver(Protocol):
 - Returns `TerrainEstimate(elevation, slope, hazard, source)` at `context.map_shape`.
 - A real head **must ignore** `context.terrain` (god-view `HeightField`).
 - Modes: `heuristic` (default, RGB+ToF, no `context.terrain`), `oracle`
-  (training), `blind` (zeros).
+  (training), `blind` (zeros), `learned` (exporter-trained numpy stub;
+  weights via `perception.weights_path` or `LearnedTerrainObserver(...)`).
+- Optional `TerrainEstimate.confidence` is a **relative merge weight** from
+  the multi-camera BEV fuse — not a published score.
 - `imu` is the 6-vector; `gps` is the 4-vector.
+- `info["tracklets"]` — person/dog association stub (`id`, `x`, `y`, `hits`).
 
 ## GrassObserver
 
@@ -134,4 +138,8 @@ Not observation keys. Loaded via [`scenarios.load_source`](src/jims_mower/scenar
 
 [`export.py`](src/jims_mower/export.py) writes **oracle** rasters from
 `MowerEnv.oracle_labels()` (true height field + grass), even if the env
-observer is heuristic. Layout is in the dump's `LAYOUT.md`.
+observer is heuristic. Layout is in the dump's `LAYOUT.md`. `meta.json`
+includes `camera_specs` and a `domain_randomization` snapshot so
+[`perception.train`](src/jims_mower/perception/train.py) can back-project
+pixels. `--domain-rand` turns renderer DR on for training dumps — see
+[`docs/WAVE2B.md`](docs/WAVE2B.md).

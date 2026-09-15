@@ -67,6 +67,10 @@ def test_export_layout(tmp_path: Path) -> None:
     elev = np.load(tmp_path / "labels" / "000000_elevation.npy")
     assert elev.ndim == 2
     assert elev.dtype == np.float32
+    assert meta["camera_specs"]
+    assert meta["world_size"] == [8.0, 8.0]
+    assert "domain_randomization" in meta
+    assert meta["domain_randomization"]["enabled"] is False
 
 
 def test_export_omits_tof_when_requested(tmp_path: Path) -> None:
@@ -81,6 +85,20 @@ def test_export_omits_tof_when_requested(tmp_path: Path) -> None:
     )
     sidecar = json.loads((tmp_path / "frames" / "000000.json").read_text(encoding="utf-8"))
     assert sidecar["tof"] is None
+
+
+def test_export_domain_rand_flag(tmp_path: Path) -> None:
+    meta = export_dataset(
+        tmp_path,
+        steps=1,
+        seed=2,
+        config=_tiny_export_cfg(),
+        cameras=4,
+        policy="scripted",
+        domain_rand=True,
+    )
+    assert meta["domain_randomization"]["enabled"] is True
+    assert meta["domain_randomization"]["lighting"] is True
 
 
 def test_export_deterministic(tmp_path: Path) -> None:

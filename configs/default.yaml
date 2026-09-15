@@ -91,8 +91,10 @@ curriculum:
 
 perception:
   # heuristic: RGB + ToF drain/bank maps (demo default). oracle: god-view
-  # for training. blind: empty stub for a real onboard net.
+  # for training. blind: empty stub. learned: exporter-trained numpy stub.
   terrain_mode: heuristic
+  weights_path: ""
+  temporal: false
 
 planner:
   # Coverage planner + controller. Steep below max_climb is a slow corridor;

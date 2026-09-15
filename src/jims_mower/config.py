@@ -211,7 +211,9 @@ class CurriculumConfig:
 
 @dataclass
 class PerceptionConfig:
-    terrain_mode: str = "heuristic"  # heuristic | oracle | blind
+    terrain_mode: str = "heuristic"  # heuristic | oracle | blind | learned
+    weights_path: str = ""  # optional .npz for LearnedTerrainObserver
+    temporal: bool = False  # hysteresis on heuristic; learned defaults on in factory
 
 
 @dataclass
@@ -442,8 +444,10 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     if tof.noise_std_m < 0 or tof.max_range_m <= 0:
         raise ConfigError("ToF noise must be >= 0 and max_range_m positive")
     mode = cfg.perception.terrain_mode
-    if mode not in {"oracle", "blind", "heuristic"}:
-        raise ConfigError(f"perception.terrain_mode must be oracle|blind|heuristic; got {mode!r}")
+    if mode not in {"oracle", "blind", "heuristic", "learned"}:
+        raise ConfigError(
+            f"perception.terrain_mode must be oracle|blind|heuristic|learned; got {mode!r}"
+        )
     plan = cfg.planner
     if plan.max_climb_slope_rad <= 0:
         raise ConfigError("planner.max_climb_slope_rad must be positive")

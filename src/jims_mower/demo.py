@@ -116,9 +116,9 @@ def run_demo(
         cfg.sensors.cameras = []
     if terrain_observer:
         key = terrain_observer.strip().lower()
-        if key not in {"oracle", "heuristic", "blind"}:
+        if key not in {"oracle", "heuristic", "blind", "learned"}:
             raise ValueError(
-                f"terrain_observer must be oracle|heuristic|blind; got {terrain_observer!r}"
+                f"terrain_observer must be oracle|heuristic|blind|learned; got {terrain_observer!r}"
             )
         cfg.perception.terrain_mode = key
     env = MowerEnv(
@@ -317,7 +317,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind"),
+        choices=("heuristic", "oracle", "blind", "learned"),
         default=None,
         help="override perception.terrain_mode (default: YAML, heuristic)",
     )
