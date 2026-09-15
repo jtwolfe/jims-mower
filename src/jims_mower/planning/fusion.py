@@ -100,10 +100,15 @@ class ComplementaryPoseFilter:
             yaw_rate = 0.75 * yaw_rate + 0.25 * gyro_yaw
         self.theta = wrap_angle(self.theta + yaw_rate * dt)
 
-        roll_a, pitch_a = attitude_from_accel(imu)
-        a = self.accel_blend
-        self.roll = (1.0 - a) * (self.roll + gyro_roll * dt) + a * roll_a
-        self.pitch = (1.0 - a) * (self.pitch + gyro_pitch * dt) + a * pitch_a
+        spec = float(np.linalg.norm(imu[:3])) if imu.size >= 3 else GRAVITY_MPS2
+        self.roll = self.roll + gyro_roll * dt
+        self.pitch = self.pitch + gyro_pitch * dt
+        # Accel tilt is only trustworthy when specific force ≈ g (not a launch).
+        if abs(spec - GRAVITY_MPS2) < 0.75:
+            roll_a, pitch_a = attitude_from_accel(imu)
+            a = self.accel_blend
+            self.roll = (1.0 - a) * self.roll + a * roll_a
+            self.pitch = (1.0 - a) * self.pitch + a * pitch_a
 
         self.x += float(commanded_v) * math.cos(self.theta) * dt
         self.y += float(commanded_v) * math.sin(self.theta) * dt

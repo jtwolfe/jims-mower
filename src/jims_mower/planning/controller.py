@@ -8,7 +8,7 @@ from typing import Any, Optional
 import numpy as np
 
 from jims_mower.config import EnvConfig
-from jims_mower.constants import HAZARD_DRAIN_EDGE, TERRAIN_ADVICE
+from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN_EDGE, TERRAIN_ADVICE
 from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wrap_angle
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
@@ -41,9 +41,13 @@ def imu_advice(
     pose_roll: float = 0.0,
 ) -> str:
     """Cross-check: accel tilt *or* fused/true pitch-roll vs tip thresholds."""
-    roll_a, pitch_a = attitude_from_accel(imu)
-    roll = roll_a if abs(roll_a) >= abs(pose_roll) else pose_roll
-    pitch = pitch_a if abs(pitch_a) >= abs(pose_pitch) else pose_pitch
+    roll, pitch = pose_roll, pose_pitch
+    imu_arr = np.asarray(imu, dtype=np.float32).reshape(-1)
+    spec = float(np.linalg.norm(imu_arr[:3])) if imu_arr.size >= 3 else GRAVITY_MPS2
+    if abs(spec - GRAVITY_MPS2) < 0.75:
+        roll_a, pitch_a = attitude_from_accel(imu_arr)
+        roll = roll_a if abs(roll_a) >= abs(roll) else roll
+        pitch = pitch_a if abs(pitch_a) >= abs(pitch) else pitch
     if abs(roll) >= stop_frac * tip_roll_rad or abs(pitch) >= stop_frac * tip_pitch_rad:
         return "stop"
     if abs(roll) >= slow_frac * tip_roll_rad or abs(pitch) >= slow_frac * tip_pitch_rad:
@@ -168,9 +172,10 @@ class TerrainPolicy:
             commanded_omega=self._last_omega,
             seed_xy=(pose_hint.x, pose_hint.y),
         )
-        # Track the fused pose (planner frame). IMU / chassis attitude are
-        # extra votes on advice; physics still terminates on tip / drain.
-        pose = fused
+        # Plan is in the map / world frame. Track the observed pose (the same
+        # contract an RL policy sees). Fusion still owns planner start + IMU
+        # attitude; swap `pose = fused` on the Orin when this *is* localization.
+        pose = pose_hint
         env_advice = str(info.get("terrain_advice") or "ok")
         sensed = imu_advice(
             obs["imu"],

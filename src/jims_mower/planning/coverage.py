@@ -189,6 +189,14 @@ def plan_coverage(
             segments.append(run)
 
     start_cell = costmap.nearest_free(*start_xy)
+    if segments and start_cell is not None:
+        def _seg_key(seg: list[tuple[int, int]]) -> int:
+            r, c = seg[0]
+            return (r - start_cell[0]) ** 2 + (c - start_cell[1]) ** 2
+
+        best_i = min(range(len(segments)), key=lambda i: _seg_key(segments[i]))
+        segments = segments[best_i:] + segments[:best_i]
+
     path_cells: list[tuple[int, int]] = []
     if start_cell is not None:
         path_cells.append(start_cell)
@@ -196,6 +204,14 @@ def plan_coverage(
     cursor = start_cell
     n_seg = 0
     for seg in segments:
+        if n_seg == 0 and start_cell is not None and len(seg) > 1:
+            # Join the first lane at the nearest cell instead of driving
+            # to the far left/right end first.
+            j = min(
+                range(len(seg)),
+                key=lambda k: (seg[k][0] - start_cell[0]) ** 2 + (seg[k][1] - start_cell[1]) ** 2,
+            )
+            seg = seg[j:]
         sampled = _downsample(seg, stride)
         if not sampled:
             continue
@@ -204,7 +220,7 @@ def plan_coverage(
             connector = _astar(costmap, cursor, target)
             if not connector:
                 continue
-            path_cells.extend(connector[1:])
+            path_cells.extend(_downsample(connector[1:], stride))
         elif cursor is None:
             if costmap.blocked[target]:
                 continue
