@@ -12,14 +12,14 @@ from jims_mower.radio import RadioLink, RadioSim, default_links
 
 def test_preference_wifi_then_bt_then_lora() -> None:
     links = {
-        "wifi": RadioLink("wifi", 1e6, 40.0, drop_prob=0.0),
-        "bt": RadioLink("bt", 1e5, 12.0, drop_prob=0.0),
+        "wifi": RadioLink("wifi", 1e6, 8.0, drop_prob=0.0),
+        "bt": RadioLink("bt", 1e5, 25.0, drop_prob=0.0),
         "lora": RadioLink("lora", 1e3, 2000.0, drop_prob=0.0),
     }
     sim = RadioSim(enabled=True, links=links, seed=0)
     near = sim.send(distance_m=5.0)
     assert near.ok and near.channel == "wifi"
-    mid = sim.send(distance_m=20.0)
+    mid = sim.send(distance_m=15.0)
     assert mid.ok and mid.channel == "bt"
     far = sim.send(distance_m=100.0)
     assert far.ok and far.channel == "lora"
