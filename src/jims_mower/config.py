@@ -8,6 +8,7 @@ from typing import Any, Optional, Union
 
 import yaml
 
+from jims_mower.constants import WEATHER_PACKS, WORLD_LAYOUTS
 from jims_mower.types import CameraSpec
 
 def _discover_default_config() -> Path:
@@ -119,6 +120,41 @@ class TerrainConfig:
     max_slope_rad: float = 0.45
     noise_amp_m: float = 0.015
     keepout_m: float = 1.6
+    puddle_radius_m: float = 0.45
+    puddle_depth_m: float = 0.04
+
+
+@dataclass
+class GrassGrowthConfig:
+    """Multi-session stub: grow cut grass back and persist the yard mask."""
+
+    enabled: bool = False
+    regenerate_frac: float = 0.05
+    persist_path: Optional[str] = None
+
+
+@dataclass
+class WeatherConfig:
+    """Time-of-day / weather pack applied by the geometric renderer."""
+
+    pack: str = "clear"
+    porch_lights: bool = False
+    colour_temperature_k: float = 0.0
+
+
+@dataclass
+class DomainRandomizationConfig:
+    """Seeded renderer appearance knobs. Off → pre-1C geometric look."""
+
+    enabled: bool = False
+    seed: int = 0
+    lighting: bool = True
+    colour_jitter: bool = True
+    shadow_blobs: bool = True
+    motion_blur: bool = False
+    camera_dirt: bool = True
+    vignette: bool = True
+    wet_specular: bool = False
 
 
 @dataclass
@@ -133,7 +169,14 @@ class WorldConfig:
     n_trees: int = 3
     n_furniture: int = 1
     n_toys: int = 2
+    n_hoses: int = 0
+    n_cords: int = 0
+    n_puddles: int = 0
+    layout: str = "random"
+    orchard_rows: int = 3
+    orchard_cols: int = 4
     terrain: TerrainConfig = field(default_factory=TerrainConfig)
+    grass: GrassGrowthConfig = field(default_factory=GrassGrowthConfig)
 
 
 @dataclass
@@ -192,6 +235,10 @@ class EnvConfig:
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     planner: PlannerConfig = field(default_factory=PlannerConfig)
+    weather: WeatherConfig = field(default_factory=WeatherConfig)
+    domain_randomization: DomainRandomizationConfig = field(
+        default_factory=DomainRandomizationConfig
+    )
 
     def resolved_cameras(self) -> list[CameraSpec]:
         """Return the 4–6 camera rig, applying the default FOV when needed."""
@@ -292,6 +339,27 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("max_slope_rad must be positive")
     if terr.noise_amp_m < 0:
         raise ConfigError("noise_amp_m must be >= 0")
+    if terr.puddle_radius_m <= 0 or terr.puddle_depth_m < 0:
+        raise ConfigError("puddle_radius_m must be > 0 and puddle_depth_m >= 0")
+    if cfg.world.n_hoses < 0 or cfg.world.n_cords < 0 or cfg.world.n_puddles < 0:
+        raise ConfigError("hose/cord/puddle counts must be >= 0")
+    if cfg.world.layout not in WORLD_LAYOUTS:
+        raise ConfigError(
+            f"world.layout must be one of {sorted(WORLD_LAYOUTS)}; got {cfg.world.layout!r}"
+        )
+    if cfg.world.orchard_rows < 1 or cfg.world.orchard_cols < 1:
+        raise ConfigError("orchard_rows/orchard_cols must be >= 1")
+    grass = cfg.world.grass
+    if not 0.0 <= grass.regenerate_frac <= 1.0:
+        raise ConfigError("world.grass.regenerate_frac must be in [0, 1]")
+    if cfg.weather.pack not in WEATHER_PACKS:
+        raise ConfigError(
+            f"weather.pack must be one of {sorted(WEATHER_PACKS)}; got {cfg.weather.pack!r}"
+        )
+    if cfg.weather.colour_temperature_k < 0:
+        raise ConfigError("weather.colour_temperature_k must be >= 0")
+    if cfg.domain_randomization.seed < 0:
+        raise ConfigError("domain_randomization.seed must be >= 0")
     imu = cfg.sensors.imu
     gps = cfg.sensors.gps
     tof = cfg.sensors.tof

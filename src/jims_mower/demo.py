@@ -47,6 +47,7 @@ def _drain_camera_view(env: MowerEnv) -> Optional[np.ndarray]:
         env.cfg.sensors.height,
         (env.cfg.world.width_m, env.cfg.world.height_m),
         terrain=env._terrain,
+        appearance=env._appearance,
     )
 
 

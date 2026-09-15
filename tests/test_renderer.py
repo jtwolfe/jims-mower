@@ -159,6 +159,71 @@ def test_topdown_shows_drain() -> None:
     assert not np.array_equal(img, flat)
 
 
+def test_domain_randomization_changes_saved_frames(tmp_path) -> None:
+    from PIL import Image
+
+    from jims_mower.appearance import Appearance, sample_appearance
+    from jims_mower.config import EnvConfig
+
+    coverage = _coverage()
+    pose = Pose(4.0, 4.0, 0.0)
+    cam = CameraSpec("front", 0.25, 0.0, 0.38, 0.0, -22.0)
+    base = render_camera(pose, cam, coverage, [], 32, 24, (8.0, 8.0))
+    cfg = EnvConfig()
+    cfg.weather.pack = "dusk"
+    cfg.domain_randomization.enabled = True
+    cfg.domain_randomization.lighting = True
+    cfg.domain_randomization.colour_jitter = True
+    cfg.domain_randomization.shadow_blobs = True
+    cfg.domain_randomization.vignette = True
+    cfg.domain_randomization.camera_dirt = True
+    cfg.domain_randomization.motion_blur = True
+    cfg.domain_randomization.wet_specular = True
+    app = sample_appearance(cfg, np.random.default_rng(11), (8.0, 8.0), [])
+    jittered = render_camera(
+        pose, cam, coverage, [], 32, 24, (8.0, 8.0), appearance=app
+    )
+    assert not np.array_equal(base, jittered)
+    again = render_camera(
+        pose,
+        cam,
+        coverage,
+        [],
+        32,
+        24,
+        (8.0, 8.0),
+        appearance=sample_appearance(cfg, np.random.default_rng(11), (8.0, 8.0), []),
+    )
+    assert np.array_equal(jittered, again)
+    Image.fromarray(base, mode="RGB").save(tmp_path / "base.png")
+    Image.fromarray(jittered, mode="RGB").save(tmp_path / "domain_rand.png")
+    assert (tmp_path / "domain_rand.png").stat().st_size > 0
+
+
+def test_weather_packs_change_sky() -> None:
+    from jims_mower.appearance import sample_appearance
+    from jims_mower.config import EnvConfig
+
+    coverage = _coverage()
+    pose = Pose(4.0, 4.0, 0.0)
+    cam = CameraSpec("front", 0.25, 0.0, 0.38, 0.0, 12.0)
+    clear = render_camera(pose, cam, coverage, [], 32, 24, (8.0, 8.0))
+    cfg = EnvConfig()
+    cfg.weather.pack = "night"
+    cfg.weather.porch_lights = True
+    night = render_camera(
+        pose,
+        cam,
+        coverage,
+        [],
+        32,
+        24,
+        (8.0, 8.0),
+        appearance=sample_appearance(cfg, np.random.default_rng(0), (8.0, 8.0), []),
+    )
+    assert not np.array_equal(clear, night)
+
+
 def test_scalar_map_shapes() -> None:
     grid = np.linspace(-0.2, 0.4, 20 * 20, dtype=np.float32).reshape(20, 20)
     img = render_scalar_map(grid, cmap="elev", image_size=40)

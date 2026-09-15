@@ -51,6 +51,41 @@ def test_movers_stay_in_yard() -> None:
         assert 0.1 < obst.y < 7.9
 
 
+def test_hose_and_cord_are_soft_clutter() -> None:
+    rng = np.random.default_rng(3)
+    yard = spawn_yard(
+        rng,
+        10.0,
+        10.0,
+        {"hose": 1, "cord": 1, "tree": 1},
+        (5.0, 5.0, 1.2),
+    )
+    clutter = [o for o in yard.obstacles if o.kind in {"hose", "cord"}]
+    assert len(clutter) == 2
+    for obst in clutter:
+        assert obst.is_soft
+        assert obst.is_cutter_risk
+        assert obst.length_m > 1.0
+
+
+def test_orchard_layout_places_tree_rows() -> None:
+    rng = np.random.default_rng(4)
+    yard = spawn_yard(
+        rng,
+        12.0,
+        10.0,
+        {"tree": 12},
+        (6.0, 5.0, 1.2),
+        layout="orchard",
+        orchard_rows=3,
+        orchard_cols=4,
+    )
+    trees = [o for o in yard.obstacles if o.kind == "tree"]
+    ys = {round(o.y, 1) for o in trees}
+    assert len(trees) >= 6
+    assert len(ys) >= 2
+
+
 def test_empty_counts_spawn_nothing() -> None:
     yard = spawn_yard(np.random.default_rng(0), 6.0, 6.0, {}, (3.0, 3.0, 1.0))
     assert yard.obstacles == []

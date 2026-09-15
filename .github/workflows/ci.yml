@@ -22,4 +22,6 @@ jobs:
       - name: Unit tests
         run: pytest
       - name: Headless demo smoke
-        run: jims-mower-demo --steps 4 --out /tmp/jims-mower-ci-demo --cameras 4 --policy terrain --terrain-observer heuristic
+        run: jims-mower-demo --steps 4 --out /tmp/jims-mower-ci-demo --cameras 4 --policy terrain
+      - name: Scenario demo smoke
+        run: jims-mower-demo --config configs/scenarios/suburban.yaml --steps 3 --out /tmp/jims-mower-ci-suburban --cameras 4 --policy scripted --terrain-observer heuristic

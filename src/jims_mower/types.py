@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from jims_mower.constants import CUTTER_RISK_KINDS, SOFT_KINDS
+
 
 @dataclass(frozen=True)
 class Pose:
@@ -46,6 +48,9 @@ class Obstacle:
     heading: float = 0.0
     hand_signal: Optional[str] = None
     name: str = ""
+    length_m: float = 0.0
+    soft: bool = False
+    cutter_risk: bool = False
 
     @property
     def xy(self) -> tuple[float, float]:
@@ -57,6 +62,25 @@ class Obstacle:
         if self.kind == "bird":
             return self.z
         return 0.5 * self.z
+
+    @property
+    def is_soft(self) -> bool:
+        return self.soft or self.kind in SOFT_KINDS
+
+    @property
+    def is_cutter_risk(self) -> bool:
+        return self.cutter_risk or self.kind in CUTTER_RISK_KINDS
+
+    def segment_ends(self) -> tuple[float, float, float, float]:
+        """World-XY endpoints for elongated clutter (hose / cord)."""
+        import math
+
+        half = 0.5 * max(self.length_m, 0.0)
+        if half <= 1e-6:
+            return self.x, self.y, self.x, self.y
+        dx = half * math.cos(self.heading)
+        dy = half * math.sin(self.heading)
+        return self.x - dx, self.y - dy, self.x + dx, self.y + dy
 
 
 @dataclass(frozen=True)

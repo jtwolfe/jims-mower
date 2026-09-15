@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from pathlib import Path
+from typing import Iterable, Optional, Union
 
 import numpy as np
 
@@ -113,6 +114,44 @@ class GrassCoverageMap:
         if not self.grass[row, col]:
             return -1.0
         return 1.0 if self.cut[row, col] else 0.0
+
+    def regenerate(self, rng: np.random.Generator, frac: float) -> int:
+        """Turn a fraction of cut grass back to uncut. Returns cells grown."""
+        if frac <= 0.0:
+            return 0
+        cut_idx = np.argwhere(self.cut & self.grass)
+        if cut_idx.size == 0:
+            return 0
+        n = int(np.ceil(float(len(cut_idx)) * float(frac)))
+        n = min(n, len(cut_idx))
+        pick = rng.choice(len(cut_idx), size=n, replace=False)
+        grown = cut_idx[pick]
+        self.cut[grown[:, 0], grown[:, 1]] = False
+        return int(n)
+
+    def save_state(self, path: Union[str, Path]) -> Path:
+        dest = Path(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            dest,
+            cut=self.cut.astype(np.bool_),
+            grass=self.grass.astype(np.bool_),
+            width_m=np.float32(self.width_m),
+            height_m=np.float32(self.height_m),
+            resolution_m=np.float32(self.resolution_m),
+        )
+        return dest
+
+    def load_state(self, path: Union[str, Path]) -> None:
+        data = np.load(Path(path))
+        cut = np.asarray(data["cut"], dtype=bool)
+        grass = np.asarray(data["grass"], dtype=bool)
+        if cut.shape != self.cut.shape or grass.shape != self.grass.shape:
+            raise ValueError(
+                f"grass state shape {cut.shape} does not match map {self.cut.shape}"
+            )
+        self.cut = cut
+        self.grass = grass
 
 
 class OccupancyMap:

@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from jims_mower.appearance import Appearance, appearance_rng, sample_appearance
 from jims_mower.cameras import camera_world_pose
 from jims_mower.config import EnvConfig, load_config
 from jims_mower.constants import (
@@ -33,7 +34,13 @@ from jims_mower.perception.base import Detector, GrassObserver
 from jims_mower.perception.terrain import TerrainObserver, terrain_observer_from_mode
 from jims_mower.renderer import render_camera, render_scalar_map, render_topdown
 from jims_mower.reward import compute_reward
-from jims_mower.safety import first_collision, in_yard, terrain_hazards, trimmer_interlock
+from jims_mower.safety import (
+    cutter_risk_hit,
+    first_collision,
+    in_yard,
+    terrain_hazards,
+    trimmer_interlock,
+)
 from jims_mower.sensors import (
     imu_to_array,
     sample_accel_bias,
@@ -221,6 +228,10 @@ class MowerEnv(gym.Env):
         self._last_gps = np.zeros(4, dtype=np.float32)
         self._last_tof = np.zeros(4, dtype=np.float32)
         self._last_terrain_est = None
+        self._appearance = Appearance.neutral()
+        self._had_episode = False
+        self._grass_save_path: Optional[str] = None
+        self._grass_loaded = False
 
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None
@@ -229,6 +240,13 @@ class MowerEnv(gym.Env):
         options = options or {}
         self._steps = 0
         self._trimmer_on = False
+        grow_cfg = self.cfg.world.grass
+        persist = options.get("save_grass", grow_cfg.persist_path)
+        load_path = options.get("load_grass", grow_cfg.persist_path)
+        self._grass_save_path = str(persist) if persist else None
+        previous_cut = None
+        if grow_cfg.enabled and self._had_episode:
+            previous_cut = self._coverage.cut.copy()
         self._pose = robot_start_pose(self.cfg.world.width_m, self.cfg.world.height_m)
         counts = {
             "person": self.cfg.world.n_people,
@@ -238,6 +256,8 @@ class MowerEnv(gym.Env):
             "tree": self.cfg.world.n_trees,
             "furniture": self.cfg.world.n_furniture,
             "toy": self.cfg.world.n_toys,
+            "hose": self.cfg.world.n_hoses,
+            "cord": self.cfg.world.n_cords,
         }
         if "counts" in options:
             counts.update(options["counts"])
@@ -262,6 +282,10 @@ class MowerEnv(gym.Env):
             noise_amp_m=terr_cfg.noise_amp_m,
             keepout=[robot_keep],
             enabled=terr_cfg.enabled,
+            layout=self.cfg.world.layout,
+            n_puddles=self.cfg.world.n_puddles,
+            puddle_radius_m=terr_cfg.puddle_radius_m,
+            puddle_depth_m=terr_cfg.puddle_depth_m,
         )
         self._yard = spawn_yard(
             self.np_random,
@@ -270,12 +294,38 @@ class MowerEnv(gym.Env):
             counts,
             robot_keep,
             extra_keepout=self._terrain.feature_keepouts(),
+            layout=self.cfg.world.layout,
+            orchard_rows=self.cfg.world.orchard_rows,
+            orchard_cols=self.cfg.world.orchard_cols,
         )
         self._coverage.reset()
         for obst in self._yard.static():
             if obst.kind in {"tree", "furniture"}:
                 self._coverage.exclude_circle(obst.x, obst.y, obst.radius)
         self._coverage.exclude_mask(self._terrain.labels != TERRAIN_DRAIN)
+        loaded = False
+        if load_path and Path(load_path).is_file():
+            self._coverage.load_state(load_path)
+            for obst in self._yard.static():
+                if obst.kind in {"tree", "furniture"}:
+                    self._coverage.exclude_circle(obst.x, obst.y, obst.radius)
+            self._coverage.exclude_mask(self._terrain.labels != TERRAIN_DRAIN)
+            loaded = True
+        elif previous_cut is not None:
+            self._coverage.cut = previous_cut & self._coverage.grass
+            self._coverage.regenerate(self.np_random, grow_cfg.regenerate_frac)
+        if self.cfg.domain_randomization.enabled:
+            look_rng = appearance_rng(self.np_random, self.cfg.domain_randomization)
+        else:
+            look_rng = np.random.default_rng(0)
+        self._appearance = sample_appearance(
+            self.cfg,
+            look_rng,
+            (self.cfg.world.width_m, self.cfg.world.height_m),
+            self._yard.obstacles,
+        )
+        self._had_episode = True
+        self._grass_loaded = loaded
         self._pose = sit_on_terrain(
             self._pose,
             self._terrain,
@@ -334,9 +384,15 @@ class MowerEnv(gym.Env):
         self._trimmer_on = decision.trimmer_enabled
 
         newly = 0
+        cord_hit = None
         if self._trimmer_on:
             hx, hy = trimmer_xy(self._pose, self.cfg.robot.trimmer.offset_m)
             newly = self._coverage.mark_circle(hx, hy, self.cfg.robot.trimmer.radius_m)
+            cord_hit = cutter_risk_hit(
+                (hx, hy),
+                self._yard.obstacles,
+                self.cfg.robot.trimmer.radius_m,
+            )
 
         hit = first_collision(
             self._pose, self._yard.obstacles, self.cfg.robot.collision_radius_m
@@ -398,9 +454,21 @@ class MowerEnv(gym.Env):
                 "terrain_advice": terrain_ev.advice,
                 "terrain_reason": terrain_ev.reason,
                 "wheels_in_drain": list(terrain_ev.wheels_in_drain),
+                "cutter_risk": cord_hit is not None,
+                "cutter_risk_kind": cord_hit.kind if cord_hit is not None else None,
             }
         )
+        if terminated or truncated:
+            self._persist_grass()
         return obs, float(breakdown.total), terminated, truncated, info
+
+    def close(self) -> None:
+        self._persist_grass()
+        super().close()
+
+    def _persist_grass(self) -> None:
+        if self._grass_save_path:
+            self._coverage.save_state(self._grass_save_path)
 
     def render(self) -> Optional[np.ndarray]:
         if self.render_mode == "rgb_array":
@@ -432,6 +500,7 @@ class MowerEnv(gym.Env):
                 self.cfg.sensors.height,
                 yard,
                 terrain=self._terrain,
+                appearance=self._appearance,
             )
         return images
 
@@ -596,6 +665,10 @@ class MowerEnv(gym.Env):
             "trimmer_xyz": [hx, hy, hz],
             "n_drains": len(self._terrain.drains),
             "n_banks": len(self._terrain.banks),
+            "n_puddles": len(self._terrain.puddles),
+            "layout": self.cfg.world.layout,
+            "weather_pack": self.cfg.weather.pack,
+            "grass_loaded": self._grass_loaded,
             "terrain_source": terrain_est.source,
             "terrain_advice": terrain_ev.advice,
             "terrain_reason": terrain_ev.reason,

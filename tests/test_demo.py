@@ -57,6 +57,20 @@ def test_demo_scripted_policy_still_works(tmp_path: Path) -> None:
     assert (tmp_path / "plan_overlay_final.png").is_file()
 
 
+def test_demo_scenario_yaml(tmp_path: Path) -> None:
+    summary = run_demo(
+        tmp_path,
+        steps=2,
+        seed=4,
+        cameras=4,
+        policy="scripted",
+        config="configs/scenarios/suburban.yaml",
+    )
+    assert summary["steps_run"] >= 1
+    assert (tmp_path / "summary.json").is_file()
+    assert (tmp_path / "step_000" / "cam_front.png").is_file()
+
+
 def test_demo_rejects_unknown_policy(tmp_path: Path) -> None:
     import pytest
 

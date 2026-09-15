@@ -7,6 +7,7 @@ import math
 import pytest
 
 from jims_mower.safety import (
+    cutter_risk_hit,
     first_collision,
     in_yard,
     is_body_collision,
@@ -34,6 +35,8 @@ def test_living_kinds() -> None:
     assert not is_living("tree")
     assert not is_living("furniture")
     assert not is_living("toy")
+    assert not is_living("hose")
+    assert not is_living("cord")
 
 
 def test_nearest_living_empty() -> None:
@@ -152,6 +155,22 @@ def test_terrain_hazards_without_field() -> None:
     assert ev.advice == "ok"
     assert ev.tipover is False
     assert ev.drain_drop is False
+
+
+def test_soft_hose_is_not_a_body_collision() -> None:
+    pose = Pose(0.0, 0.0, 0.0)
+    hose = Obstacle("hose", 0.1, 0.0, 0.06, z=0.03, length_m=2.0, soft=True, cutter_risk=True)
+    assert hose.is_soft
+    assert not is_body_collision(pose, hose, 0.28)
+    assert first_collision(pose, [hose], 0.28) is None
+
+
+def test_cutter_risk_flag_when_trimmer_hits_cord() -> None:
+    cord = Obstacle("cord", 0.32, 0.0, 0.04, z=0.02, length_m=1.5, heading=1.2)
+    hit = cutter_risk_hit((0.32, 0.0), [cord], 0.16)
+    assert hit is cord
+    miss = cutter_risk_hit((3.0, 3.0), [cord], 0.16)
+    assert miss is None
 
 
 def test_in_yard_and_out() -> None:
