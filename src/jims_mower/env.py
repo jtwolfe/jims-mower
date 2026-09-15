@@ -49,6 +49,7 @@ from jims_mower.safety import (
     terrain_hazards,
     trimmer_interlock,
 )
+from jims_mower.runtime.budget import OrinBudget, budget_from_config
 from jims_mower.sensors import (
     imu_to_array,
     sample_accel_bias,
@@ -255,6 +256,7 @@ class MowerEnv(gym.Env):
         self._mission_save_path: Optional[str] = None
         self._mission_loaded = False
         self._episode_seed: Optional[int] = None
+        self.budget: OrinBudget = budget_from_config(self.cfg)
 
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None
@@ -378,6 +380,7 @@ class MowerEnv(gym.Env):
         self._last_v = 0.0
         self._last_omega = 0.0
         self._accel_bias = sample_accel_bias(self.np_random, self.cfg.sensors.imu.accel_bias_std)
+        self.budget = budget_from_config(self.cfg)
         self._signals.assign(self._yard.obstacles, self.np_random)
         reset_obs = getattr(self.terrain_observer, "reset", None)
         if callable(reset_obs):
@@ -473,6 +476,11 @@ class MowerEnv(gym.Env):
             steep=terrain_ev.steep,
         )
         self._steps += 1
+        self.budget.step(
+            self.cfg.dt,
+            np.array([left_n, right_n, 1.0 if self._trimmer_on else 0.0], dtype=np.float32),
+            n_cameras=len(self.cameras),
+        )
         terminated = bool(
             hit is not None
             or oob
@@ -662,6 +670,7 @@ class MowerEnv(gym.Env):
             noise_std_m=self.cfg.sensors.tof.noise_std_m,
             max_range_m=self.cfg.sensors.tof.max_range_m,
             enabled=self.cfg.sensors.tof.enabled,
+            count=int(self.cfg.sensors.tof.count),
         )
         self._last_imu = imu
         self._last_gps = gps
@@ -804,6 +813,7 @@ class MowerEnv(gym.Env):
             "geofence_advice": fence_advice,
             "living_advice": living.advice,
             "living_reason": living.reason,
+            **self.budget.as_info(),
         }
         return obs, info
 

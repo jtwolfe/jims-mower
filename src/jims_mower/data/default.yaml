@@ -44,6 +44,7 @@ sensors:
     include_altitude: true
   tof:
     enabled: true
+    count: 4
     noise_std_m: 0.012
     max_range_m: 1.2
 
@@ -133,3 +134,16 @@ planner:
     safe_after_limp_steps: 12
     limp_scale: 0.35
     recover_ok_steps: 4
+
+runtime:
+  enabled: false
+  battery:
+    capacity_wh: 50.0
+    soc: 1.0
+    limp_soc: 0.15
+    stop_soc: 0.05
+  thermal:
+    t_c: 45.0
+    t_ambient_c: 35.0
+    t_hot_c: 75.0
+    t_crit_c: 85.0

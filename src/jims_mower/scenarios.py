@@ -43,6 +43,7 @@ ENV_OVERLAY_KEYS = frozenset(
         "perception",
         "planner",
         "domain_randomization",
+        "runtime",
     }
 )
 

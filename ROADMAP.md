@@ -6,13 +6,38 @@ There are no claimed mAP / FPS numbers on this list.
 
 WAVE **1A** is the foundation package. WAVE **1C** expanded yards / renderer.
 WAVE **1B** (EKF / record-replay), WAVE **2A** (movers, geofences,
-recovery, hand-signal hooks, mission resume), and WAVE **2B** (sim-only
-perception: exporter → numpy terrain stub, BEV fuse, temporal filters)
-are on `main`. WAVE **3A** (this PR) is learning + ops tooling:
-behaviour cloning, an RL scaffold, incident / telemetry / ESTOP, and a
-phone overlay stub. Later waves stay unchecked until they land.
+recovery, hand-signal hooks, mission resume), WAVE **2B** (sim-only
+perception: exporter → numpy terrain stub, BEV fuse, temporal filters),
+and WAVE **3A** (behaviour cloning, RL scaffold, incident / telemetry /
+ESTOP, owner overlay) are on `main`. WAVE **3B** (this PR) is runtime /
+Orin packaging / design studies: fake drivers, a stdlib multiprocessing
+bridge, Jetson notes, tip/drain-entry ablations, and a battery/thermal
+limp stub. Later waves stay unchecked until they land.
 
-## WAVE 3A — learning + ops tooling (done)
+## WAVE 3B — runtime / Orin packaging / design studies (done)
+
+- [x] Fake I2C IMU / UART GNSS / CSI camera (and I2C ToF) drivers that
+      publish gym or recorded streams onto in-process queues matching
+      [`runtime_contract.md`](docs/runtime_contract.md)
+- [x] ROS 2-lite **stdlib multiprocessing** bridge (no ZMQ / gRPC in the
+      default install); optional `[ros2]` extra is a marker with
+      import-guarded node stubs
+- [x] Record / replay compatibility: `jims-mower-bridge` consumes a
+      `jims-mower-record` episode directory
+- [x] Jetson packaging notes — [`docs/JETSON.md`](docs/JETSON.md),
+      [`docker/Dockerfile.aarch64`](docker/Dockerfile.aarch64),
+      TensorRT export **placeholder** (`jims-mower-export-trt --dry-run`;
+      no weights, `fps_claim: null`)
+- [x] What **not** to run on-box: gym renderer, `OracleTerrainObserver`,
+      farm / study sweeps, desktop OpenCV GUI
+- [x] Design-study scripts — camera 4/5/6, ToF 0/2/4, IMU noise on
+      frozen seeds; markdown/CSV of **tip_rate** / **drain_entry_rate**
+      (physics counts, not mAP)
+- [x] Orin-class battery / thermal stub that can limp / stop
+      `TerrainPolicy` when hot or low SOC (`runtime.enabled`)
+- [x] ROADMAP checkboxes for the items above
+
+## WAVE 3A — learning + ops tooling (done, on main)
 
 - [x] Behaviour cloning hook — log (obs→action) from terrain-policy demos;
       train a tiny numpy MLP stub; `jims-mower-demo --policy bc` loads
@@ -94,6 +119,7 @@ phone overlay stub. Later waves stay unchecked until they land.
 
 - [x] Online completeness: resume uncut cells after a person forces a stop (WAVE 2A)
 - [x] Dynamic people: temporary block + replan (not just collision terminate) (WAVE 2A)
+- [x] Battery / thermal limp stub (WAVE 3B; not strip reordering)
 - [ ] Energy / battery-aware strip order
 - [ ] Wet-slope cost (scenario `weather.wet` → extra slow corridor)
 - [x] Geofence-aware `in_yard` already exists; planner treats the polygon as blocked margin (WAVE 2A)
@@ -118,12 +144,15 @@ phone overlay stub. Later waves stay unchecked until they land.
 
 ## Orin runtime
 
+- [x] Fake I2C / UART / CSI publishers matching the runtime contract (WAVE 3B)
 - [ ] GStreamer / NVMM capture adapter that fills `obs["cameras"]`
+- [x] TensorRT export **placeholder** (no ONNX shipped, no FPS) (WAVE 3B)
 - [ ] TensorRT (or similar) behind `Detector` / `TerrainObserver`
-- [ ] Complementary filter / small EKF behind `ComplementaryPoseFilter`
+- [x] Complementary filter / small EKF behind `ComplementaryPoseFilter` (WAVE 1B)
 - [ ] Watchdog process: stop wheels if vision or IMU stalls
 - [ ] YAML extrinsics for the real 4–6 cam rig (same `CameraSpec`)
-- [ ] No desktop OpenCV GUI / no gym renderer on-box (see README)
+- [x] No desktop OpenCV GUI / no gym renderer on-box (see [`docs/JETSON.md`](docs/JETSON.md))
+- [x] Stdlib multiprocessing bridge; optional `[ros2]` stubs (WAVE 3B)
 
 ## Safety / ops
 
@@ -141,14 +170,16 @@ phone overlay stub. Later waves stay unchecked until they land.
 - [x] Overnight farm + dry-run (WAVE 1A)
 - [x] BEV debugger composites in demo output (WAVE 1A)
 - [x] Train stub from export (`scripts/train_terrain_seg.py` / `python -m jims_mower.perception.train`) — WAVE 2B
-- [x] Replay a recorded episode without re-simulating (WAVE 1B offline + WAVE 3A incident scrubber)
+- [x] Replay a recorded episode without re-simulating (`jims-mower-replay --mode offline`; WAVE 1B + WAVE 3A incident scrubber)
 - [x] Label / hazard overlay on the incident viewer (WAVE 3A)
+- [x] Replay recorded frames through fake drivers (`jims-mower-bridge`; WAVE 3B)
 - [ ] Dataset versioning (schema field already `jims_mower.dataset.v1`)
 
 ## Design studies
 
-- [ ] Camera count (4 vs 6) vs drain-lip recall on frozen seeds
-- [ ] ToF vs RGB-only lips (ablate `stamp_tof_corners`)
+- [x] Camera count (4 / 5 / 6) vs tip / drain-entry rates on frozen seeds (WAVE 3B; not mAP)
+- [x] ToF 0 / 2 / 4 vs RGB-only lips (ablate unused corners; WAVE 3B)
+- [x] IMU noise scale vs tip / drain-entry rates (WAVE 3B)
 - [ ] Front pitch (−12° vs −22°) vs channel visibility
 - [ ] `drain_clearance_m` vs coverage % (scorecard, not mAP)
 - [ ] Trimmer offset / radius vs leftover strips
@@ -181,4 +212,9 @@ jims-mower-record --out /tmp/ep --steps 8 --cameras 4
 jims-mower-incident /tmp/ep --out /tmp/incident
 jims-mower-telemetry /tmp/ep --out /tmp/telemetry.json
 jims-mower-owner --config geofence_movers --out owner_overlay.html
+
+# WAVE 3B
+jims-mower-study --dry-run --out study_out
+jims-mower-bridge /tmp/ep --out /tmp/ep-bridge.json
+jims-mower-export-trt --dry-run --out /tmp/trt.json
 ```

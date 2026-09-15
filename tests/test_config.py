@@ -198,6 +198,29 @@ def test_rejects_bad_pose_filter() -> None:
         load_config({"planner": {"pose_filter": "ukf-paper"}})
 
 
+def test_tof_count_presets() -> None:
+    for n in (0, 2, 4):
+        cfg = load_config({"sensors": {"tof": {"count": n}}})
+        assert cfg.sensors.tof.count == n
+
+
+def test_rejects_bad_tof_count() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"sensors": {"tof": {"count": 3}}})
+
+
+def test_runtime_budget_defaults_off() -> None:
+    cfg = load_config()
+    assert cfg.runtime.enabled is False
+    assert cfg.sensors.tof.count == 4
+    assert 0.0 <= cfg.runtime.battery.limp_soc <= 1.0
+
+
+def test_rejects_bad_battery_soc() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"runtime": {"battery": {"soc": 1.5}}})
+
+
 def test_rejects_bad_uncertainty_floor() -> None:
     with pytest.raises(ConfigError):
         load_config({"planner": {"uncertainty": {"confidence_floor": 1.5}}})

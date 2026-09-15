@@ -10,6 +10,7 @@ import yaml
 
 from jims_mower.constants import (
     MOVER_DENSITIES,
+    TOF_COUNTS,
     TRAJECTORY_MODES,
     WEATHER_PACKS,
     WORLD_LAYOUTS,
@@ -94,6 +95,7 @@ class GPSConfig:
 @dataclass
 class ToFConfig:
     enabled: bool = True
+    count: int = 4  # 0, 2 (FL/FR), or 4 (FL, FR, RL, RR)
     noise_std_m: float = 0.012
     max_range_m: float = 1.2
 
@@ -292,6 +294,41 @@ class PlannerConfig:
 
 
 @dataclass
+class BatteryConfig:
+    """Orin-class pack stub (watt-hours / watts are class-scale, not measured)."""
+
+    capacity_wh: float = 50.0
+    soc: float = 1.0
+    idle_w: float = 8.0
+    drive_w: float = 25.0
+    compute_w: float = 7.0
+    trimmer_w: float = 12.0
+    limp_soc: float = 0.15
+    stop_soc: float = 0.05
+
+
+@dataclass
+class ThermalConfig:
+    """First-order thermal RC. Not a board TDP claim."""
+
+    t_c: float = 45.0
+    t_ambient_c: float = 35.0
+    t_hot_c: float = 75.0
+    t_crit_c: float = 85.0
+    tau_s: float = 90.0
+    heat_c_per_w: float = 0.35
+
+
+@dataclass
+class RuntimeConfig:
+    """On-box budget stub. Off by default so short gym tests stay unchanged."""
+
+    enabled: bool = False
+    battery: BatteryConfig = field(default_factory=BatteryConfig)
+    thermal: ThermalConfig = field(default_factory=ThermalConfig)
+
+
+@dataclass
 class EnvConfig:
     dt: float = 0.10
     max_steps: int = 500
@@ -306,6 +343,7 @@ class EnvConfig:
     domain_randomization: DomainRandomizationConfig = field(
         default_factory=DomainRandomizationConfig
     )
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     def resolved_cameras(self) -> list[CameraSpec]:
         """Return the 4–6 camera rig, applying the default FOV when needed."""
@@ -459,6 +497,24 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("gps.dropout_prob must be in [0, 1]")
     if tof.noise_std_m < 0 or tof.max_range_m <= 0:
         raise ConfigError("ToF noise must be >= 0 and max_range_m positive")
+    if int(tof.count) not in TOF_COUNTS:
+        raise ConfigError(f"sensors.tof.count must be one of {sorted(TOF_COUNTS)}; got {tof.count!r}")
+    rt = cfg.runtime
+    batt = rt.battery
+    therm = rt.thermal
+    if batt.capacity_wh <= 0:
+        raise ConfigError("runtime.battery.capacity_wh must be positive")
+    if not 0.0 <= batt.soc <= 1.0:
+        raise ConfigError("runtime.battery.soc must be in [0, 1]")
+    for name in ("idle_w", "drive_w", "compute_w", "trimmer_w"):
+        if float(getattr(batt, name)) < 0.0:
+            raise ConfigError(f"runtime.battery.{name} must be >= 0")
+    if not 0.0 <= batt.stop_soc <= batt.limp_soc <= 1.0:
+        raise ConfigError("runtime.battery stop_soc <= limp_soc must hold in [0, 1]")
+    if therm.tau_s <= 0 or therm.heat_c_per_w < 0:
+        raise ConfigError("runtime.thermal tau_s must be > 0 and heat_c_per_w >= 0")
+    if not (therm.t_ambient_c < therm.t_hot_c <= therm.t_crit_c):
+        raise ConfigError("runtime.thermal t_ambient_c < t_hot_c <= t_crit_c")
     mode = cfg.perception.terrain_mode
     if mode not in {"oracle", "blind", "heuristic", "learned"}:
         raise ConfigError(

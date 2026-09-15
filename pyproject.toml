@@ -39,6 +39,8 @@ rl = [
     "stable-baselines3>=2.3",
     "torch>=2.1",
 ]
+# Marker extra. rclpy comes from a ROS 2 distro, not PyPI / this extra.
+ros2 = []
 
 [project.scripts]
 jims-mower-demo = "jims_mower.demo:main"
@@ -53,6 +55,9 @@ jims-mower-rl = "jims_mower.rl_cli:main"
 jims-mower-incident = "jims_mower.incident_cli:main"
 jims-mower-telemetry = "jims_mower.telemetry_cli:main"
 jims-mower-owner = "jims_mower.owner_cli:main"
+jims-mower-bridge = "jims_mower.runtime.bridge:main"
+jims-mower-study = "jims_mower.studies:main"
+jims-mower-export-trt = "jims_mower.runtime.export_trt:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"
