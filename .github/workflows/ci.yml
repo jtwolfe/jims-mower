@@ -32,7 +32,12 @@ jobs:
           jims-mower-replay /tmp/jims-mower-ci-ep --mode env
           jims-mower-bridge /tmp/jims-mower-ci-ep --out /tmp/jims-mower-ci-bridge.json
       - name: Design-study dry-run
-        run: jims-mower-study --dry-run --out /tmp/jims-mower-ci-study
+        run: |
+          jims-mower-study --dry-run --out /tmp/jims-mower-ci-study
+          jims-mower-study --kind pitch --dry-run --out /tmp/jims-mower-ci-study-pitch
+          jims-mower-study --kind clearance --dry-run --out /tmp/jims-mower-ci-study-clear
+          jims-mower-study --kind trimmer --dry-run --out /tmp/jims-mower-ci-study-trim
+          jims-mower-study --kind observer --dry-run --out /tmp/jims-mower-ci-study-obs
       - name: TensorRT placeholder dry-run
         run: jims-mower-export-trt --dry-run --out /tmp/jims-mower-ci-trt.json
       - name: Geofence + movers demo smoke
@@ -54,3 +59,11 @@ jobs:
           jims-mower-telemetry /tmp/jims-mower-ci-ep --out /tmp/jims-mower-ci-telemetry.json
       - name: Owner overlay smoke
         run: jims-mower-owner --config geofence_movers --cameras 4 --out /tmp/jims-mower-ci-owner.html
+      - name: WAVE 4 hooks smoke
+        run: |
+          jims-mower-sequence --yards paddock,suburban --dry-run --out /tmp/jims-mower-ci-seq
+          jims-mower-curriculum --out /tmp/jims-mower-ci-curr.json
+          jims-mower-import-yard configs/surveys/example_yard.json
+          jims-mower-farm --dry-run --scenarios suburban --quarantine playground --out /tmp/jims-mower-ci-farm-q
+          jims-mower-demo --config configs/scenarios/narrow_gate.yaml --steps 3 --out /tmp/jims-mower-ci-gate --cameras 4 --policy scripted
+          jims-mower-demo --config configs/orin/extrinsics_6cam.yaml --steps 2 --out /tmp/jims-mower-ci-ext --policy scripted

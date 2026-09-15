@@ -8,6 +8,7 @@ import numpy as np
 
 from jims_mower.cameras import camera_world_pose, focal_length_px, project_point
 from jims_mower.constants import ANIMAL_KINDS, LIVING_KINDS
+from jims_mower.perception.classify import HandSignalClassifier, refine_category
 from jims_mower.types import CameraSpec, Detection, Obstacle, PerceptionContext, Pose
 
 
@@ -16,6 +17,8 @@ def category_for(label: str) -> str:
         return "person"
     if label in ANIMAL_KINDS:
         return "animal"
+    if label == "toy":
+        return "toy"
     return "static"
 
 
@@ -62,7 +65,16 @@ def detection_from_obstacle(
 
 
 class MockDetector:
-    """Project world obstacles into each camera. For training in this gym."""
+    """Project world obstacles into each camera. For training in this gym.
+
+    After the geometric projection, a cheap appearance model (palette +
+    crop stats) refines person / animal / toy categories. Not a claimed
+    detector. Optional ``HandSignalClassifier`` sits behind the curriculum.
+    """
+
+    def __init__(self, *, appearance: bool = True) -> None:
+        self.appearance = bool(appearance)
+        self._signals = HandSignalClassifier()
 
     def detect(
         self,
@@ -74,9 +86,13 @@ class MockDetector:
             any_img = next(iter(images.values()))
             height, width = any_img.shape[:2]
         out: list[Detection] = []
+        use_classifier = bool(
+            context.hand_signals_enabled and context.hand_signal_classifier
+        )
         for cam in context.cameras:
             if images and cam.name not in images:
                 continue
+            frame = images.get(cam.name) if images else None
             for obst in context.obstacles:
                 det = detection_from_obstacle(
                     obst,
@@ -84,10 +100,37 @@ class MockDetector:
                     context.pose,
                     width,
                     height,
-                    include_signal=context.hand_signals_enabled,
+                    include_signal=context.hand_signals_enabled and not use_classifier,
                 )
-                if det is not None:
-                    out.append(det)
+                if det is None:
+                    continue
+                if self.appearance and frame is not None:
+                    _label, category, score = refine_category(frame, det.bbox, det.label)
+                    signal = det.hand_signal
+                    if use_classifier and det.label == "person":
+                        signal = self._signals.classify(frame, det.bbox)
+                    det = Detection(
+                        label=det.label,
+                        camera=det.camera,
+                        bbox=det.bbox,
+                        confidence=float(np.clip(0.65 * det.confidence + 0.35 * score, 0.05, 0.99)),
+                        world_xy=det.world_xy,
+                        hand_signal=signal,
+                        category=category,
+                        depth_m=det.depth_m,
+                    )
+                elif use_classifier and frame is not None and det.label == "person":
+                    det = Detection(
+                        label=det.label,
+                        camera=det.camera,
+                        bbox=det.bbox,
+                        confidence=det.confidence,
+                        world_xy=det.world_xy,
+                        hand_signal=self._signals.classify(frame, det.bbox),
+                        category=det.category,
+                        depth_m=det.depth_m,
+                    )
+                out.append(det)
         return out
 
 

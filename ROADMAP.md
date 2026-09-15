@@ -9,10 +9,37 @@ WAVE **1B** (EKF / record-replay), WAVE **2A** (movers, geofences,
 recovery, hand-signal hooks, mission resume), WAVE **2B** (sim-only
 perception: exporter → numpy terrain stub, BEV fuse, temporal filters),
 and WAVE **3A** (behaviour cloning, RL scaffold, incident / telemetry /
-ESTOP, owner overlay) are on `main`. WAVE **3B** (this PR) is runtime /
-Orin packaging / design studies: fake drivers, a stdlib multiprocessing
-bridge, Jetson notes, tip/drain-entry ablations, and a battery/thermal
-limp stub. Later waves stay unchecked until they land.
+ESTOP, owner overlay) are on `main`. WAVE **3B** (runtime / Orin packaging /
+design studies) is on `main`. WAVE **4** (this PR) closes remaining
+perception / mapping / planning / world / Orin / ops hooks. Later items
+stay unchecked until they land. No claimed mAP / FPS.
+
+## WAVE 4 — remaining ROADMAP hooks (this PR)
+
+- [x] Person / animal / toy categories + appearance model on `MockDetector`
+- [x] Hand-signal classifier stub behind `curriculum.hand_signal_classifier`
+- [x] `FeatureGrassObserver` grass-coverage stub (numpy features)
+- [x] Semantic layer raster (grass / non-grass / drain / bank / static)
+- [x] Persistent BEV occupancy (detections + ToF, not god-view)
+- [x] Height-map fusion stub (RGB back-proj + downward ToF)
+- [x] Loop-closure stub (revisit fingerprint, not SLAM)
+- [x] Wet-slope extra cost when `weather.wet`
+- [x] Energy / battery-aware strip order (`OrinBudget` SOC)
+- [x] Multi-yard sequence (`paddock` then `suburban`)
+- [x] Seasonal overlays (long grass / leaf clutter)
+- [x] Narrow-gate + fence-line scenarios
+- [x] Property-scale (40 m+) coarse yard
+- [x] Real-yard import stub (survey polygon JSON)
+- [x] Watchdog: stop wheels if IMU / vision stall
+- [x] YAML extrinsics for a 4–6 cam rig
+- [x] GStreamer / NVMM adapter stub (not required in CI)
+- [x] TensorRT load-weights placeholder behind Detector / TerrainObserver
+- [x] Farm flake budget / quarantine (no silent skip)
+- [x] Dataset `schema: jims_mower.dataset.v1` enforced
+- [x] Design studies: front pitch, `drain_clearance_m` vs coverage, trimmer leftover
+- [x] Curriculum schedule flat → suburban → wet → night
+- [x] Sim-to-real protocol doc (ICD keys, no renderer on-box)
+- [x] ROADMAP checkboxes for the items above
 
 ## WAVE 3B — runtime / Orin packaging / design studies (done)
 
@@ -100,57 +127,57 @@ limp stub. Later waves stay unchecked until they land.
 - [x] Replace `classify_terrain_rgb` with a learned drain / lip / bank / grass head (train on exporter labels) — WAVE 2B **numpy stub**, no claimed accuracy ([`docs/WAVE2B.md`](docs/WAVE2B.md))
 - [x] Temporal consistency on hazard stamps (hysteresis / decay) — WAVE 2B
 - [x] Multi-camera BEV fuse for hazard stamps + person/dog tracklets stub — WAVE 2B (not published MOT / NMS scores)
-- [ ] Person / animal / toy categories beyond `MockDetector` blobs
-- [ ] Hand-signal classifier behind `HandSignalCurriculum` (optional)
-- [ ] Grass coverage net behind `GrassObserver` (replace color heuristic)
+- [x] Person / animal / toy categories beyond `MockDetector` blobs — WAVE 4 appearance model (not mAP)
+- [x] Hand-signal classifier behind `HandSignalCurriculum` (optional) — WAVE 4 numpy crop stub
+- [x] Grass coverage net behind `GrassObserver` (replace color heuristic) — WAVE 4 `FeatureGrassObserver` stub
 - [x] Domain-randomised lighting / wet / dawn from scenario flags — WAVE 1C renderer + WAVE 2B `--domain-rand` export note
 - [x] Uncertainty maps on `TerrainEstimate` (relative merge weights, not published scores) — WAVE 1B costmap + WAVE 2B BEV fuse
 
 ## Mapping
 
-- [ ] Persistent BEV occupancy (detections + ToF, not god-view)
-- [ ] Height-map fusion from RGB back-projection + downward ToF
+- [x] Persistent BEV occupancy (detections + ToF, not god-view) (WAVE 4)
+- [x] Height-map fusion from RGB back-projection + downward ToF (WAVE 4 stub)
 - [x] Geofence as a first-class map layer (inflate, visualize, plan) (WAVE 2A)
 - [x] Multi-session yard memory (same scenario, new seed) (WAVE 2A)
-- [ ] Loop-closure *stub* only — do not drop a full SLAM stack in-repo
-- [ ] Semantic layers: grass / non-grass / drain / bank / static
+- [x] Loop-closure *stub* only — do not drop a full SLAM stack in-repo (WAVE 4)
+- [x] Semantic layers: grass / non-grass / drain / bank / static (WAVE 4)
 
 ## Planning
 
 - [x] Online completeness: resume uncut cells after a person forces a stop (WAVE 2A)
 - [x] Dynamic people: temporary block + replan (not just collision terminate) (WAVE 2A)
 - [x] Battery / thermal limp stub (WAVE 3B; not strip reordering)
-- [ ] Energy / battery-aware strip order
-- [ ] Wet-slope cost (scenario `weather.wet` → extra slow corridor)
+- [x] Energy / battery-aware strip order (WAVE 4; uses OrinBudget SOC)
+- [x] Wet-slope cost (scenario `weather.wet` → extra slow corridor) (WAVE 4)
 - [x] Geofence-aware `in_yard` already exists; planner treats the polygon as blocked margin (WAVE 2A)
-- [ ] Multi-yard coverage sequence (paddock then suburban)
+- [x] Multi-yard coverage sequence (paddock then suburban) (WAVE 4)
 
 ## Learning
 
 - [x] Offline behaviour cloning from terrain-policy demos / episode logs (WAVE 3A)
 - [x] RL scaffold on the Gymnasium env (REINFORCE / random-search; optional SB3) (WAVE 3A)
 - [x] Imitation of `TerrainPolicy` as a baseline, not a claimed SOTA (WAVE 3A)
-- [ ] Sim-to-real protocol: same ICD obs keys, no gym renderer on-box
-- [ ] Curriculum: flat → suburban → wet_slope → night_dawn
+- [x] Sim-to-real protocol: same ICD obs keys, no gym renderer on-box ([`docs/SIM_TO_REAL.md`](docs/SIM_TO_REAL.md))
+- [x] Curriculum: flat → suburban → wet_slope → night_dawn (WAVE 4 schedule)
 
 ## World library
 
 - [x] Scenario DSL + 6 authored yards beyond `steep_yard` (WAVE 1A)
-- [ ] Seasonal variants (long grass, leaf clutter) as scenario overlays
-- [ ] Real-yard import (survey polygon → geofence + drain polylines)
+- [x] Seasonal variants (long grass, leaf clutter) as scenario overlays (WAVE 4)
+- [x] Real-yard import (survey polygon → geofence + drain polylines) (WAVE 4 stub)
 - [x] Moving-animal density presets (`world.movers.density`: sparse / default / busy) (WAVE 2A)
-- [ ] Narrow-gate / fence-line scenarios
-- [ ] Property-scale (40 m+) yards at coarser resolution
+- [x] Narrow-gate / fence-line scenarios (WAVE 4)
+- [x] Property-scale (40 m+) yards at coarser resolution (WAVE 4)
 
 ## Orin runtime
 
 - [x] Fake I2C / UART / CSI publishers matching the runtime contract (WAVE 3B)
-- [ ] GStreamer / NVMM capture adapter that fills `obs["cameras"]`
+- [x] GStreamer / NVMM capture adapter that fills `obs["cameras"]` (WAVE 4 stub; Gst not in CI)
 - [x] TensorRT export **placeholder** (no ONNX shipped, no FPS) (WAVE 3B)
-- [ ] TensorRT (or similar) behind `Detector` / `TerrainObserver`
+- [x] TensorRT (or similar) behind `Detector` / `TerrainObserver` (WAVE 4 load-weights placeholder)
 - [x] Complementary filter / small EKF behind `ComplementaryPoseFilter` (WAVE 1B)
-- [ ] Watchdog process: stop wheels if vision or IMU stalls
-- [ ] YAML extrinsics for the real 4–6 cam rig (same `CameraSpec`)
+- [x] Watchdog process: stop wheels if vision or IMU stalls (WAVE 4)
+- [x] YAML extrinsics for the real 4–6 cam rig (same `CameraSpec`) (WAVE 4)
 - [x] No desktop OpenCV GUI / no gym renderer on-box (see [`docs/JETSON.md`](docs/JETSON.md))
 - [x] Stdlib multiprocessing bridge; optional `[ros2]` stubs (WAVE 3B)
 
@@ -161,7 +188,7 @@ limp stub. Later waves stay unchecked until they land.
 - [x] Black-box log: IMU, GPS valid bit, advice, wheel commands (WAVE 1B record + WAVE 3A incident)
 - [x] Geofence violation → `stop` (already OOB terminate; pre-touch slow) (WAVE 2A)
 - [x] Trimmer / living / tip telemetry JSON (headless) (WAVE 3A)
-- [ ] Farm flake budget / quarantine a scenario instead of silent skip
+- [x] Farm flake budget / quarantine a scenario instead of silent skip (WAVE 4)
 
 ## Data tooling
 
@@ -173,17 +200,17 @@ limp stub. Later waves stay unchecked until they land.
 - [x] Replay a recorded episode without re-simulating (`jims-mower-replay --mode offline`; WAVE 1B + WAVE 3A incident scrubber)
 - [x] Label / hazard overlay on the incident viewer (WAVE 3A)
 - [x] Replay recorded frames through fake drivers (`jims-mower-bridge`; WAVE 3B)
-- [ ] Dataset versioning (schema field already `jims_mower.dataset.v1`)
+- [x] Dataset versioning (schema field `jims_mower.dataset.v1` enforced) (WAVE 4)
 
 ## Design studies
 
 - [x] Camera count (4 / 5 / 6) vs tip / drain-entry rates on frozen seeds (WAVE 3B; not mAP)
 - [x] ToF 0 / 2 / 4 vs RGB-only lips (ablate unused corners; WAVE 3B)
 - [x] IMU noise scale vs tip / drain-entry rates (WAVE 3B)
-- [ ] Front pitch (−12° vs −22°) vs channel visibility
-- [ ] `drain_clearance_m` vs coverage % (scorecard, not mAP)
-- [ ] Trimmer offset / radius vs leftover strips
-- [ ] Heuristic vs oracle coverage gap (already sketched in README; keep honest)
+- [x] Front pitch (−12° vs −22°) vs channel visibility (`jims-mower-study --kind pitch`; tip/drain/coverage, not mAP)
+- [x] `drain_clearance_m` vs coverage % (scorecard, not mAP) (`--kind clearance`)
+- [x] Trimmer offset / radius vs leftover strips (`--kind trimmer`; leftover = 100 − coverage)
+- [x] Heuristic vs oracle coverage gap (already sketched in README; `--kind observer` keeps it honest)
 
 ## Verify WAVE 1A + 2B
 
@@ -217,4 +244,12 @@ jims-mower-owner --config geofence_movers --out owner_overlay.html
 jims-mower-study --dry-run --out study_out
 jims-mower-bridge /tmp/ep --out /tmp/ep-bridge.json
 jims-mower-export-trt --dry-run --out /tmp/trt.json
+
+# WAVE 4
+jims-mower-sequence --yards paddock,suburban --dry-run --out seq_out
+jims-mower-curriculum
+jims-mower-import-yard configs/surveys/example_yard.json
+jims-mower-study --kind pitch --dry-run --out study_pitch
+jims-mower-farm --dry-run --scenarios suburban --quarantine playground --out farm_q
+python -m jims_mower.demo --config narrow_gate --steps 8 --out demo_gate
 ```

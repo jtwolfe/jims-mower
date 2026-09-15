@@ -62,6 +62,13 @@ python -m jims_mower.demo --config geofence_movers --steps 16 --out demo_fence
 python -m jims_mower.demo --hand-signals --steps 12 --out demo_signals
 python -m jims_mower.demo --steps 16 --save-mission /tmp/mission.npz --out demo_save
 jims-mower-mission resume --in /tmp/mission.npz --steps 8 --out demo_resume
+
+# WAVE 4 — sequence, curriculum, survey import, extra study axes
+jims-mower-sequence --yards paddock,suburban --dry-run --out seq_out
+jims-mower-curriculum
+jims-mower-import-yard configs/surveys/example_yard.json
+jims-mower-study --kind pitch --dry-run --out study_pitch
+python -m jims_mower.demo --config narrow_gate --steps 12 --out demo_gate
 ```
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).

@@ -121,6 +121,8 @@ def build_costmap(
     uncertain_confidence_floor: float = 0.25,
     geofence: Optional[GeofenceSpec] = None,
     geofence_inflate_m: float = 0.30,
+    wet: bool = False,
+    wet_slope_extra: float = 3.0,
 ) -> Costmap:
     """Build a traversal costmap.
 
@@ -133,6 +135,10 @@ def build_costmap(
     Occupancy > 0.5 is blocked (trees / detections). A yard-edge margin keeps
     the body inside ``in_yard``. Cells outside a keep-in polygon (or inside a
     keep-out) are blocked after ``geofence_inflate_m``.
+
+    When ``wet`` is set (scenario ``weather.wet``), steep corridors get
+    ``wet_slope_extra`` added so A* prefers a drier path — still traversable
+    below ``max_climb_slope_rad``.
 
     ``confidence`` (0–1, same shape) inflates finite costs when low:
     ``cost *= 1 + uncertainty_inflate * (1 - conf)``, plus
@@ -150,6 +156,8 @@ def build_costmap(
     too_steep = slope >= float(max_climb_slope_rad)
     steep_corridor = (hazard >= HAZARD_STEEP) & (hazard < HAZARD_DRAIN_EDGE) & ~too_steep
     cost[steep_corridor] = STEEP_COST
+    if wet and wet_slope_extra > 0.0:
+        cost[steep_corridor] = cost[steep_corridor] + float(wet_slope_extra)
     # Unlabeled but still over the climb cap (heuristic maps, etc.).
     cost[too_steep] = BLOCKED_COST
     blocked[too_steep] = True

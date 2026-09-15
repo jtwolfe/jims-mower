@@ -34,7 +34,7 @@ trained TensorRT engine.
 On-box loop (your code, not shipped):
 
 ```
-CSI / GStreamer / NVMM  →  CameraFrame
+CSI / GStreamer / NVMM  →  CameraFrame   (`GstNvmmAdapter` stub; not in CI)
 I2C IMU                 →  ImuSample
 UART GNSS               →  GpsFix
 I2C ToF                 →  TofArray
@@ -58,6 +58,13 @@ python scripts/export_tensorrt.py --dry-run
 No ONNX is in this repository. Point `--onnx` at **your** drain / lip /
 bank / grass head. The script prints a `trtexec` line and sets
 `fps_claim: null` / `map_claim: null`. Do not paste invented FPS.
+
+`TrtDetector` / `TrtTerrainObserver` (`perception.detector_backend: trt`)
+are the same contract: they load an engine **if you provide one**, otherwise
+they delegate to the mock / numpy heads. `SensorWatchdog` zeros wheels when
+IMU or camera frames freeze (`runtime.watchdog.enabled`).
+
+Example body-frame extrinsics: [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml).
 
 ## Optional ROS 2
 

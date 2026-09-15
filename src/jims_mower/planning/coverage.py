@@ -149,6 +149,30 @@ def _dedup_adjacent(cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return out
 
 
+def _energy_reorder(
+    segments: list[list[tuple[int, int]]],
+    start_cell: Optional[tuple[int, int]],
+    battery_soc: float,
+    limp_soc: float,
+) -> list[list[tuple[int, int]]]:
+    """When SOC is low, prefer short nearby strips over a long boustrophedon."""
+    if not segments or start_cell is None:
+        return segments
+    soc = float(battery_soc)
+    if soc > float(limp_soc) + 0.15:
+        return segments
+
+    def _len(seg: list[tuple[int, int]]) -> int:
+        return len(seg)
+
+    def _dist(seg: list[tuple[int, int]]) -> int:
+        r, c = seg[0]
+        return (r - start_cell[0]) ** 2 + (c - start_cell[1]) ** 2
+
+    # Closest-then-shortest: dump remaining energy on nearby grass.
+    return sorted(segments, key=lambda seg: (_dist(seg), _len(seg)))
+
+
 def plan_coverage(
     costmap: Costmap,
     start_xy: tuple[float, float],
@@ -156,6 +180,9 @@ def plan_coverage(
     strip_spacing_m: float = 0.28,
     waypoint_stride_m: float = 0.32,
     mowable: Optional[np.ndarray] = None,
+    battery_soc: Optional[float] = None,
+    limp_soc: float = 0.15,
+    energy_aware: bool = False,
 ) -> CoveragePlan:
     """Lawnmower (boustrophedon) strips on free cells, A* across gaps.
 
@@ -190,12 +217,15 @@ def plan_coverage(
 
     start_cell = costmap.nearest_free(*start_xy)
     if segments and start_cell is not None:
-        def _seg_key(seg: list[tuple[int, int]]) -> int:
-            r, c = seg[0]
-            return (r - start_cell[0]) ** 2 + (c - start_cell[1]) ** 2
+        if energy_aware and battery_soc is not None:
+            segments = _energy_reorder(segments, start_cell, float(battery_soc), limp_soc)
+        else:
+            def _seg_key(seg: list[tuple[int, int]]) -> int:
+                r, c = seg[0]
+                return (r - start_cell[0]) ** 2 + (c - start_cell[1]) ** 2
 
-        best_i = min(range(len(segments)), key=lambda i: _seg_key(segments[i]))
-        segments = segments[best_i:] + segments[:best_i]
+            best_i = min(range(len(segments)), key=lambda i: _seg_key(segments[i]))
+            segments = segments[best_i:] + segments[:best_i]
 
     path_cells: list[tuple[int, int]] = []
     if start_cell is not None:

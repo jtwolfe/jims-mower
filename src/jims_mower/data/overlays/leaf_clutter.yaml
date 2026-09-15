@@ -1,0 +1,8 @@
+schema: jims_mower.overlay.v1
+kind: overlay
+name: leaf_clutter
+season: leaf_clutter
+description: Extra static toys as leaf piles on the lawn.
+world:
+  season: leaf_clutter
+  n_toys: 8

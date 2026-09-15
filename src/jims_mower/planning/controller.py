@@ -160,6 +160,8 @@ class TerrainPolicy:
         self.safe = SafeStateMachine.from_config(cfg.planner.safe_state)
         self.last_safe_mode = self.safe.mode
         self.last_budget = "ok"
+        self._wet = False
+        self._battery_soc: Optional[float] = None
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> CoveragePlan:
         info = info or {}
@@ -189,6 +191,12 @@ class TerrainPolicy:
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self.last_budget = "ok"
+        weather = info.get("weather") or {}
+        self._wet = bool(weather.get("wet", False))
+        if "battery_soc" in info:
+            self._battery_soc = float(info["battery_soc"])
+        else:
+            self._battery_soc = None
         self._remember_map_size(obs)
         self._drain_cells = _drain_cell_count(obs.get("hazard"))
         self._occ_cells = _occ_cell_count(obs.get("occupancy"))
@@ -234,6 +242,10 @@ class TerrainPolicy:
         fence = str(info.get("geofence_advice") or "ok")
         power = budget_advice(info)
         self.last_budget = power
+        weather = info.get("weather") or {}
+        self._wet = bool(weather.get("wet", False))
+        if "battery_soc" in info:
+            self._battery_soc = float(info["battery_soc"])
         advice = combine_advice(env_advice, sensed, chassis, living, fence, power)
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
@@ -241,6 +253,9 @@ class TerrainPolicy:
 
         if estop_requested(obs, info):
             self.safe.request_estop("software/hardware estop")
+        if info.get("watchdog_stalled"):
+            self.last_advice = "stop"
+            return self._hold()
 
         signal = observed_hand_signal(obs, self.cfg.curriculum.hand_signals)
         self.last_signal = signal
@@ -367,6 +382,8 @@ class TerrainPolicy:
             np.asarray(obs["confidence"], dtype=np.float32) if "confidence" in obs else None
         )
         unc = self.cfg.planner.uncertainty
+        wet = bool(getattr(self, "_wet", False))
+        soc = getattr(self, "_battery_soc", None)
         costmap = build_costmap(
             hazard,
             slope,
@@ -385,14 +402,20 @@ class TerrainPolicy:
             uncertain_confidence_floor=unc.confidence_floor,
             geofence=self._geofence,
             geofence_inflate_m=self.cfg.planner.geofence_inflate_m,
+            wet=wet,
+            wet_slope_extra=self.cfg.planner.wet_slope_extra,
         )
         mowable = _mowable_mask(coverage, costmap.blocked.shape)
+        limp_soc = float(self.cfg.runtime.battery.limp_soc)
         return plan_coverage(
             costmap,
             (pose.x, pose.y),
             strip_spacing_m=self.cfg.planner.strip_spacing_m,
             waypoint_stride_m=self.cfg.planner.waypoint_stride_m,
             mowable=mowable,
+            battery_soc=soc,
+            limp_soc=limp_soc,
+            energy_aware=bool(self.cfg.planner.energy_aware_strips),
         )
 
     def _replan(

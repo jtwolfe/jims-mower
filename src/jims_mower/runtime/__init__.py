@@ -10,6 +10,8 @@ without a circular import through record/replay.
 
 from jims_mower.runtime.budget import OrinBudget, budget_advice, budget_from_config
 from jims_mower.runtime.bus import InProcessBus
+from jims_mower.runtime.gstreamer import FakeGstAdapter, GstNvmmAdapter, gstreamer_available
+from jims_mower.runtime.watchdog import SensorWatchdog
 from jims_mower.runtime.drivers import (
     FakeCsiDriver,
     FakeGnssDriver,
@@ -22,14 +24,18 @@ from jims_mower.runtime.drivers import (
 __all__ = [
     "FakeCsiDriver",
     "FakeGnssDriver",
+    "FakeGstAdapter",
     "FakeImuDriver",
     "FakeTofDriver",
+    "GstNvmmAdapter",
     "InProcessBus",
     "MultiprocessBridge",
     "OrinBudget",
     "SensorRig",
+    "SensorWatchdog",
     "budget_advice",
     "budget_from_config",
+    "gstreamer_available",
     "publish_obs",
     "replay_through_bridge",
 ]

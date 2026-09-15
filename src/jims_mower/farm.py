@@ -46,6 +46,34 @@ def plan_matrix(seeds: list[int], scenarios: list[str]) -> list[dict[str, object
     return [{"seed": s, "scenario": sc} for sc in scenarios for s in seeds]
 
 
+def load_quarantine(path: Optional[Path]) -> set[str]:
+    if path is None or not Path(path).is_file():
+        return set()
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(raw, dict):
+        names = raw.get("quarantined") or raw.get("scenarios") or []
+    elif isinstance(raw, list):
+        names = raw
+    else:
+        names = []
+    return {str(n) for n in names}
+
+
+def write_quarantine(path: Path, names: set[str], reasons: dict[str, str]) -> None:
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(
+        json.dumps(
+            {
+                "quarantined": sorted(names),
+                "reasons": {k: reasons[k] for k in sorted(reasons)},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
 def run_farm(
     out_dir: Path,
     *,
@@ -58,10 +86,16 @@ def run_farm(
     max_tips: int = DEFAULT_MAX_TIPS,
     max_drain_entries: int = DEFAULT_MAX_DRAINS,
     terrain_observer: Optional[str] = None,
+    flake_budget: int = 1,
+    quarantine_path: Optional[Path] = None,
+    quarantine: Optional[list[str]] = None,
 ) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     matrix = plan_matrix(seeds, scenarios)
+    quarantined = load_quarantine(quarantine_path)
+    if quarantine:
+        quarantined.update(str(n) for n in quarantine)
     summary: dict = {
         "dry_run": bool(dry_run),
         "steps": int(steps),
@@ -72,6 +106,10 @@ def run_farm(
         "matrix": matrix,
         "thresholds": {"max_tips": int(max_tips), "max_drain_entries": int(max_drain_entries)},
         "breached": False,
+        "flake_budget": int(flake_budget),
+        "quarantined": sorted(quarantined),
+        "skipped": [],
+        "flakes": [],
     }
     if dry_run:
         (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -79,24 +117,50 @@ def run_farm(
         return summary
 
     cards: list[EpisodeScorecard] = []
+    flakes: dict[str, int] = {}
+    flake_reasons: dict[str, str] = {}
+    q_path = Path(quarantine_path) if quarantine_path is not None else out_dir / "quarantine.json"
     for item in matrix:
         seed = int(item["seed"])
         name = str(item["scenario"])
-        cfg, scenario = load_source(name)
-        if cameras is not None:
-            cfg.sensors.camera_count = int(cameras)
-            cfg.sensors.cameras = []
-        if terrain_observer:
-            cfg.perception.terrain_mode = terrain_observer.strip().lower()
-        env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
-        card = evaluate_episode(env, seed=seed, steps=steps, policy=policy, close=True)
+        if name in quarantined:
+            summary["skipped"].append(
+                {"seed": seed, "scenario": name, "reason": "quarantined"}
+            )
+            continue
+        try:
+            cfg, scenario = load_source(name)
+            if cameras is not None:
+                cfg.sensors.camera_count = int(cameras)
+                cfg.sensors.cameras = []
+            if terrain_observer:
+                cfg.perception.terrain_mode = terrain_observer.strip().lower()
+            env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
+            card = evaluate_episode(env, seed=seed, steps=steps, policy=policy, close=True)
+        except Exception as exc:  # noqa: BLE001 — farm records flakes instead of silent skip
+            flakes[name] = flakes.get(name, 0) + 1
+            flake_reasons[name] = f"{type(exc).__name__}: {exc}"
+            summary["flakes"].append(
+                {"seed": seed, "scenario": name, "error": flake_reasons[name]}
+            )
+            if flakes[name] >= int(flake_budget):
+                quarantined.add(name)
+                write_quarantine(q_path, quarantined, flake_reasons)
+            continue
         if not card.scenario:
             card.scenario = name
         cards.append(card)
         write_path = out_dir / f"{name}_seed{seed}.json"
         write_path.write_text(json.dumps(card.to_dict(), indent=2), encoding="utf-8")
+    summary["quarantined"] = sorted(quarantined)
+    if quarantined:
+        write_quarantine(q_path, quarantined, flake_reasons)
 
-    stats = summarize_scorecards(cards)
+    stats = summarize_scorecards(cards) if cards else {
+        "n_episodes": 0,
+        "n_tips": 0,
+        "n_drain_entries": 0,
+    }
     breached = stats["n_tips"] > max_tips or stats["n_drain_entries"] > max_drain_entries
     summary.update(stats)
     summary["breached"] = bool(breached)
@@ -130,6 +194,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("heuristic", "oracle", "blind", "learned"),
         default=None,
     )
+    p.add_argument(
+        "--flake-budget",
+        type=int,
+        default=1,
+        help="quarantine a scenario after this many exceptions (not a silent skip)",
+    )
+    p.add_argument(
+        "--quarantine",
+        type=str,
+        default="",
+        help="comma-separated scenario names to skip (recorded as quarantined)",
+    )
+    p.add_argument(
+        "--quarantine-file",
+        type=Path,
+        default=None,
+        help="JSON list of quarantined scenarios (read/write)",
+    )
     return p
 
 
@@ -147,6 +229,9 @@ def main(argv: Optional[list[str]] = None) -> None:
             max_tips=args.max_tips,
             max_drain_entries=args.max_drains,
             terrain_observer=args.terrain_observer,
+            flake_budget=args.flake_budget,
+            quarantine_path=args.quarantine_file,
+            quarantine=[p.strip() for p in str(args.quarantine).split(",") if p.strip()],
         )
     except FarmThresholdError as exc:
         print(str(exc), file=sys.stderr)

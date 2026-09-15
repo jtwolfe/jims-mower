@@ -16,6 +16,7 @@ from jims_mower.constants import (
     DRAIN_EDGE_RGB,
     DRAIN_RGB,
     KIND_RGB,
+    LONG_GRASS_RGB,
     PUDDLE_RGB,
     SKY_RGB,
     TERRAIN_BANK,
@@ -42,6 +43,8 @@ def _terrain_base_color(
     terrain: Optional[HeightField],
     x: float,
     y: float,
+    *,
+    long_grass: bool = False,
 ) -> tuple[int, int, int]:
     if terrain is not None:
         label = terrain.sample_label(x, y)
@@ -58,7 +61,7 @@ def _terrain_base_color(
         return CUT_GRASS_RGB
     if terrain is not None and terrain.sample_label(x, y) == TERRAIN_BANK:
         return BANK_RGB
-    return UNCUT_GRASS_RGB
+    return LONG_GRASS_RGB if long_grass else UNCUT_GRASS_RGB
 
 
 def render_camera(
@@ -103,7 +106,7 @@ def render_camera(
     for r, c in zip(rows.tolist(), cols.tolist()):
         x = float(hx[r, c])
         y = float(hy[r, c])
-        color = _terrain_base_color(coverage, terrain, x, y)
+        color = _terrain_base_color(coverage, terrain, x, y, long_grass=app.long_grass)
         shade = float(app.ambient)
         if terrain is not None:
             nx, ny, nz = terrain.normal_at(x, y)

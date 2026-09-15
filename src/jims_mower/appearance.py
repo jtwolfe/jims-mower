@@ -99,6 +99,8 @@ class Appearance:
     dirt_specks: list[tuple[float, float, float, float]] = field(default_factory=list)
     night: bool = False
     pack: str = "clear"
+    long_grass: bool = False
+    leaf_clutter: bool = False
 
     @classmethod
     def neutral(cls) -> "Appearance":
@@ -147,6 +149,8 @@ def sample_appearance(
         wet_specular=wet,
         night=pack == "night",
         pack=pack,
+        long_grass=cfg.world.season == "long_grass",
+        leaf_clutter=cfg.world.season == "leaf_clutter",
     )
     if weather.porch_lights or pack == "night":
         app.porch_lights = _porch_lights(yard_size, obstacles)

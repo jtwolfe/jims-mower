@@ -33,11 +33,15 @@ from jims_mower.kinematics import (
 )
 from jims_mower.geofence import GeofenceSpec, geofence_advice
 from jims_mower.maps import GrassCoverageMap, occupancy_from_detections
+from jims_mower.mapping import LoopClosureStub, PersistentOccupancy, fuse_height_rgb_tof
 from jims_mower.mission import apply_mission, load_mission, save_mission
-from jims_mower.perception import ColorGrassObserver, HandSignalCurriculum, MockDetector
+from jims_mower.perception import HandSignalCurriculum, MockDetector
 from jims_mower.perception.base import Detector, GrassObserver
+from jims_mower.perception.grass import grass_observer_from_mode
+from jims_mower.perception.semantic import semantic_raster
 from jims_mower.perception.temporal import DetectionTracklets
 from jims_mower.perception.terrain import TerrainObserver, terrain_observer_from_mode
+from jims_mower.perception.trt import TrtDetector, TrtTerrainObserver
 from jims_mower.renderer import render_camera, render_scalar_map, render_topdown
 from jims_mower.reward import compute_reward
 from jims_mower.safety import (
@@ -50,6 +54,7 @@ from jims_mower.safety import (
     trimmer_interlock,
 )
 from jims_mower.runtime.budget import OrinBudget, budget_from_config
+from jims_mower.runtime.watchdog import SensorWatchdog
 from jims_mower.sensors import (
     imu_to_array,
     sample_accel_bias,
@@ -131,13 +136,29 @@ class MowerEnv(gym.Env):
         self.render_mode = render_mode
         self.cameras: list[CameraSpec] = self.cfg.resolved_cameras()
         self.camera_index = {c.name: i for i, c in enumerate(self.cameras)}
-        self.detector: Detector = detector or MockDetector()
-        self.grass_observer: GrassObserver = grass_observer or ColorGrassObserver()
-        self.terrain_observer: TerrainObserver = terrain_observer or terrain_observer_from_mode(
+        inner_det: Detector = detector or MockDetector()
+        backend = str(self.cfg.perception.detector_backend or "mock").strip().lower()
+        if backend in {"trt", "tensorrt"}:
+            self.detector = TrtDetector(self.cfg.perception.engine_path or None, inner_det)
+        else:
+            self.detector = inner_det
+        self.grass_observer: GrassObserver = grass_observer or grass_observer_from_mode(
+            self.cfg.perception.grass_mode,
+            self.cfg.perception.weights_path,
+        )
+        inner_terrain = terrain_observer or terrain_observer_from_mode(
             self.cfg.perception.terrain_mode,
             weights_path=self.cfg.perception.weights_path or None,
             temporal=self.cfg.perception.temporal or None,
         )
+        if backend in {"trt", "tensorrt"} or self.cfg.perception.engine_path:
+            self.terrain_observer = TrtTerrainObserver(
+                self.cfg.perception.engine_path or None,
+                inner=inner_terrain,
+                weights_path=self.cfg.perception.weights_path or None,
+            )
+        else:
+            self.terrain_observer = inner_terrain
         self._tracklets = DetectionTracklets()
         self._signals = HandSignalCurriculum(
             self.cfg.curriculum.hand_signals,
@@ -257,6 +278,11 @@ class MowerEnv(gym.Env):
         self._mission_loaded = False
         self._episode_seed: Optional[int] = None
         self.budget: OrinBudget = budget_from_config(self.cfg)
+        self.watchdog = SensorWatchdog.from_config(self.cfg, dt=self.cfg.dt)
+        self._occ_persist: Optional[PersistentOccupancy] = None
+        self._loop = LoopClosureStub()
+        self._fused_elev: Optional[np.ndarray] = None
+        self._last_semantic: Optional[np.ndarray] = None
 
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None
@@ -381,6 +407,17 @@ class MowerEnv(gym.Env):
         self._last_omega = 0.0
         self._accel_bias = sample_accel_bias(self.np_random, self.cfg.sensors.imu.accel_bias_std)
         self.budget = budget_from_config(self.cfg)
+        self.watchdog = SensorWatchdog.from_config(self.cfg, dt=self.cfg.dt)
+        self.watchdog.reset()
+        shape = self._coverage.cut.shape
+        self._occ_persist = PersistentOccupancy(
+            shape[0],
+            shape[1],
+            decay=self.cfg.perception.occupancy_decay,
+        )
+        self._loop.reset()
+        self._fused_elev = np.zeros(shape, dtype=np.float32)
+        self._last_semantic = None
         self._signals.assign(self._yard.obstacles, self.np_random)
         reset_obs = getattr(self.terrain_observer, "reset", None)
         if callable(reset_obs):
@@ -393,6 +430,8 @@ class MowerEnv(gym.Env):
         action = np.asarray(action, dtype=np.float32).reshape(-1)
         if action.size != 3:
             raise ValueError("action must have shape (3,)")
+        self.watchdog.observe(self._last_imu, self._last_images, dt=self.cfg.dt)
+        action = self.watchdog.filter_action(action)
         left_n = float(np.clip(action[0], -1.0, 1.0))
         right_n = float(np.clip(action[1], -1.0, 1.0))
         requested = bool(action[2] > 0.5)
@@ -682,6 +721,7 @@ class MowerEnv(gym.Env):
             obstacles=list(self._yard.obstacles),
             image_size=(self.cfg.sensors.width, self.cfg.sensors.height),
             hand_signals_enabled=self.cfg.curriculum.hand_signals,
+            hand_signal_classifier=self.cfg.curriculum.hand_signal_classifier,
             imu=imu,
             gps=gps,
             terrain=self._terrain,
@@ -697,17 +737,50 @@ class MowerEnv(gym.Env):
         detections = self.detector.detect(images, context)
         self._last_detections = detections
         tracklets = self._tracklets.update(detections)
-        occupancy = occupancy_from_detections(
-            self._coverage.cut.shape,
-            detections,
-            self.cfg.world.resolution_m,
-        )
+        if self.cfg.perception.persistent_occupancy:
+            if self._occ_persist is None or self._occ_persist.grid.shape != self._coverage.cut.shape:
+                self._occ_persist = PersistentOccupancy(
+                    *self._coverage.cut.shape,
+                    decay=self.cfg.perception.occupancy_decay,
+                )
+            occupancy = self._occ_persist.update(
+                detections,
+                resolution_m=self.cfg.world.resolution_m,
+                tof=tof,
+                pose=self._pose,
+                length_m=self.cfg.robot.length_m,
+                track_m=self.cfg.robot.track_m,
+            )
+        else:
+            occupancy = occupancy_from_detections(
+                self._coverage.cut.shape,
+                detections,
+                self.cfg.world.resolution_m,
+            )
         vision = self.grass_observer.estimate(images)
         terrain_est = self.terrain_observer.estimate(images, imu, gps, context)
         self._last_terrain_est = terrain_est
-        signal_name = self._signals.nearest_person_signal(
-            self._yard.obstacles, (self._pose.x, self._pose.y)
-        )
+        if self.cfg.perception.height_fusion:
+            if self._fused_elev is None or self._fused_elev.shape != self._coverage.cut.shape:
+                self._fused_elev = np.zeros(self._coverage.cut.shape, dtype=np.float32)
+            self._fused_elev = fuse_height_rgb_tof(
+                images,
+                self.cameras,
+                self._pose,
+                tof,
+                shape=self._coverage.cut.shape,
+                resolution_m=self.cfg.world.resolution_m,
+                world_size=(self.cfg.world.width_m, self.cfg.world.height_m),
+                length_m=self.cfg.robot.length_m,
+                track_m=self.cfg.robot.track_m,
+                elevation=self._fused_elev,
+            )
+        if self.cfg.curriculum.hand_signal_classifier:
+            signal_name = _nearest_detection_signal(detections, (self._pose.x, self._pose.y))
+        else:
+            signal_name = self._signals.nearest_person_signal(
+                self._yard.obstacles, (self._pose.x, self._pose.y)
+            )
         signal_id = SIGNAL_TO_ID.get(signal_name or "", 0)
         self._last_topdown = self._topdown()
         hx, hy, hz = trimmer_xyz(
@@ -814,8 +887,42 @@ class MowerEnv(gym.Env):
             "living_advice": living.advice,
             "living_reason": living.reason,
             **self.budget.as_info(),
+            **self.watchdog.as_info(),
         }
+        if self.cfg.perception.semantic:
+            sem = semantic_raster(self._coverage.as_float(), terrain_est.hazard, occupancy)
+            self._last_semantic = sem
+            info["semantic"] = sem
+            info["semantic_names"] = (
+                "free",
+                "grass",
+                "non_grass",
+                "drain",
+                "bank",
+                "static",
+            )
+        if self.cfg.perception.height_fusion and self._fused_elev is not None:
+            info["height_fused"] = self._fused_elev
+            info["height_fusion_stub"] = True
+        if self.cfg.perception.loop_closure:
+            self._loop.update(occupancy, self._pose, self.cfg.world.resolution_m)
+            info.update(self._loop.as_info())
         return obs, info
+
+
+def _nearest_detection_signal(
+    detections: list[Detection], xy: tuple[float, float]
+) -> Optional[str]:
+    best = None
+    best_d = float("inf")
+    for det in detections:
+        if det.label != "person" or not det.hand_signal or det.world_xy is None:
+            continue
+        d = (det.world_xy[0] - xy[0]) ** 2 + (det.world_xy[1] - xy[1]) ** 2
+        if d < best_d:
+            best_d = d
+            best = det.hand_signal
+    return best
 
 
 def _weather_dict(scenario: Optional[Scenario]) -> dict[str, Any]:

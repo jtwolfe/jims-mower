@@ -7,7 +7,8 @@
 # base: default | steep_yard | path.yaml
 # weather:
 #   lighting: day | dawn | night     # or booleans night / dawn
-#   wet: false                       # surface flag (visual only in WAVE 1A)
+#   wet: false                       # surface flag; planner adds wet-slope cost
+# season: none | long_grass | leaf_clutter
 # geofence: [[x, y], ...]            # keep-in ≥3 vertices (legacy)
 # geofence:                          # or structured keep-in / keep-out
 #   keep_in: [[x, y], ...]

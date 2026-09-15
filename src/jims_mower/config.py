@@ -10,6 +10,7 @@ import yaml
 
 from jims_mower.constants import (
     MOVER_DENSITIES,
+    SEASONS,
     TOF_COUNTS,
     TRAJECTORY_MODES,
     WEATHER_PACKS,
@@ -191,6 +192,7 @@ class WorldConfig:
     layout: str = "random"
     orchard_rows: int = 3
     orchard_cols: int = 4
+    season: str = "none"
     terrain: TerrainConfig = field(default_factory=TerrainConfig)
     grass: GrassGrowthConfig = field(default_factory=GrassGrowthConfig)
     movers: MoverConfig = field(default_factory=MoverConfig)
@@ -214,6 +216,7 @@ class RewardConfig:
 class CurriculumConfig:
     hand_signals: bool = False
     signal_hold_steps: int = 40
+    hand_signal_classifier: bool = False
 
 
 @dataclass
@@ -221,6 +224,14 @@ class PerceptionConfig:
     terrain_mode: str = "heuristic"  # heuristic | oracle | blind | learned
     weights_path: str = ""  # optional .npz for LearnedTerrainObserver
     temporal: bool = False  # hysteresis on heuristic; learned defaults on in factory
+    grass_mode: str = "color"  # color | feature
+    semantic: bool = True
+    persistent_occupancy: bool = True
+    occupancy_decay: float = 0.55
+    height_fusion: bool = True
+    loop_closure: bool = True
+    detector_backend: str = "mock"  # mock | trt
+    engine_path: str = ""  # TensorRT .engine placeholder; unused in CI
 
 
 @dataclass
@@ -291,6 +302,8 @@ class PlannerConfig:
     recovery_pivot_steps: int = 5
     max_recoveries: int = 2
     safe_state: SafeStateConfig = field(default_factory=SafeStateConfig)
+    wet_slope_extra: float = 3.0
+    energy_aware_strips: bool = True
 
 
 @dataclass
@@ -320,12 +333,22 @@ class ThermalConfig:
 
 
 @dataclass
+class WatchdogConfig:
+    """Stop wheels if IMU / vision frames freeze. Off by default in gym tests."""
+
+    enabled: bool = False
+    imu_stall_s: float = 0.40
+    vision_stall_s: float = 0.40
+
+
+@dataclass
 class RuntimeConfig:
     """On-box budget stub. Off by default so short gym tests stay unchanged."""
 
     enabled: bool = False
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     thermal: ThermalConfig = field(default_factory=ThermalConfig)
+    watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
 
 
 @dataclass
@@ -374,12 +397,21 @@ def default_camera_rig(count: int = 6, fov_deg: float = 70.0) -> list[CameraSpec
     ]
 
 
+def _finish_config(cfg: EnvConfig) -> EnvConfig:
+    cfg = validate_config(cfg)
+    if cfg.world.season and cfg.world.season != "none":
+        from jims_mower.overlays import apply_season
+
+        apply_season(cfg, cfg.world.season)
+    return cfg
+
+
 def overlay_config(cfg: EnvConfig, data: dict[str, Any]) -> EnvConfig:
     """Merge a mapping onto an existing config and re-validate."""
     if not isinstance(data, dict):
         raise ConfigError("overlay must be a mapping")
     _merge_dataclass(cfg, data)
-    return validate_config(cfg)
+    return _finish_config(cfg)
 
 
 def _merge_dataclass(obj: Any, data: dict[str, Any]) -> None:
@@ -460,6 +492,10 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError(
             f"world.layout must be one of {sorted(WORLD_LAYOUTS)}; got {cfg.world.layout!r}"
         )
+    if cfg.world.season not in SEASONS:
+        raise ConfigError(
+            f"world.season must be one of {sorted(SEASONS)}; got {cfg.world.season!r}"
+        )
     if cfg.world.orchard_rows < 1 or cfg.world.orchard_cols < 1:
         raise ConfigError("orchard_rows/orchard_cols must be >= 1")
     grass = cfg.world.grass
@@ -520,6 +556,19 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError(
             f"perception.terrain_mode must be oracle|blind|heuristic|learned; got {mode!r}"
         )
+    grass_mode = str(cfg.perception.grass_mode or "color").strip().lower()
+    if grass_mode not in {"color", "feature", "learned", "net"}:
+        raise ConfigError(
+            f"perception.grass_mode must be color|feature; got {cfg.perception.grass_mode!r}"
+        )
+    if not 0.0 <= float(cfg.perception.occupancy_decay) <= 1.0:
+        raise ConfigError("perception.occupancy_decay must be in [0, 1]")
+    det_backend = str(cfg.perception.detector_backend or "mock").strip().lower()
+    if det_backend not in {"mock", "trt", "tensorrt"}:
+        raise ConfigError("perception.detector_backend must be mock|trt")
+    wd = cfg.runtime.watchdog
+    if wd.imu_stall_s <= 0 or wd.vision_stall_s <= 0:
+        raise ConfigError("runtime.watchdog stall windows must be positive")
     plan = cfg.planner
     if plan.max_climb_slope_rad <= 0:
         raise ConfigError("planner.max_climb_slope_rad must be positive")
@@ -580,6 +629,8 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner.safe_state.limp_scale must be in (0, 1]")
     if safe.recover_ok_steps < 1:
         raise ConfigError("planner.safe_state.recover_ok_steps must be >= 1")
+    if plan.wet_slope_extra < 0:
+        raise ConfigError("planner.wet_slope_extra must be >= 0")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()
@@ -604,7 +655,7 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
 def load_config(source: Optional[Union[str, Path, dict, EnvConfig]] = None) -> EnvConfig:
     """Load config from a path, mapping, or existing object (defaults if None)."""
     if isinstance(source, EnvConfig):
-        return validate_config(source)
+        return _finish_config(source)
     cfg = EnvConfig()
     if source is None:
         path = DEFAULT_CONFIG_PATH
@@ -614,10 +665,10 @@ def load_config(source: Optional[Union[str, Path, dict, EnvConfig]] = None) -> E
             if not isinstance(data, dict):
                 raise ConfigError("Config YAML must be a mapping")
             _merge_dataclass(cfg, data)
-        return validate_config(cfg)
+        return _finish_config(cfg)
     if isinstance(source, dict):
         _merge_dataclass(cfg, source)
-        return validate_config(cfg)
+        return _finish_config(cfg)
     path = Path(source)
     if not path.is_file():
         raise ConfigError(f"Config file not found: {path}")
@@ -626,4 +677,4 @@ def load_config(source: Optional[Union[str, Path, dict, EnvConfig]] = None) -> E
     if not isinstance(data, dict):
         raise ConfigError("Config YAML must be a mapping")
     _merge_dataclass(cfg, data)
-    return validate_config(cfg)
+    return _finish_config(cfg)
