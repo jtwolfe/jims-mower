@@ -24,6 +24,10 @@ world:
     n_drains: 0
     n_banks: 0
     noise_amp_m: 0.004
+    base_gradient:
+      slope_rad: 0.0
+      yaw_rad: 0.0
+      undulation_m: 0.0
 obstacles:
   - {kind: tree, x: 2.0, y: 10.0}
 perception:

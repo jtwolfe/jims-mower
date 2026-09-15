@@ -25,6 +25,10 @@
 #      trajectory?: {mode: wander|patrol|loop|line, waypoints: [[x,y],...], speed_mps?}}
 # world / robot / sensors / planner / perception / reward / env:
 #   same keys as EnvConfig (merged onto `base`)
+# world.terrain.base_gradient:
+#   slope_rad / slope_pct, yaw_rad (ascent heading), undulation_m
+#   Default yards are a mild planar grade, not a flat pad. The curriculum
+#   `flat` scenario zeros this. Drains/banks carve on top of the tilt.
 #
 # Random spawn counts still apply (world.n_trees, …) after explicit obstacles.
 # Set those counts to 0 when the authored list should be the only objects.

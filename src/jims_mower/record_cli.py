@@ -13,7 +13,12 @@ from jims_mower.latency import LatencyDelays
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Record a Jim's Mower episode (obs, actions, maps)")
     p.add_argument("--out", type=Path, required=True, help="episode directory")
-    p.add_argument("--steps", type=int, default=40)
+    p.add_argument(
+        "--steps",
+        type=int,
+        default=160,
+        help="episode length (default 160 — long enough to inspect in the viewer)",
+    )
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--config", type=str, default=None)
     p.add_argument("--cameras", type=int, default=None, help="4, 5, or 6")

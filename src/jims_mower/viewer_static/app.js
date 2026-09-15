@@ -378,7 +378,7 @@ async function boot() {
   camera.position.set(state.width * 0.15, Math.max(state.width, state.height) * 0.9, state.height * 1.15);
 
   state.meshGroup = await loadTerrain(manifest);
-  // Viewer-only lift so 10–20 cm drains/banks read on a 12 m yard.
+  // Viewer-only lift so a ~5% yard grade and 10–20 cm drains read on a 12 m pad.
   state.meshGroup.scale.y = 4;
   scene.add(state.meshGroup);
 

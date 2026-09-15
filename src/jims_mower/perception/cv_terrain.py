@@ -2,8 +2,8 @@
 
 The gym renderer paints drain channels dark brown, lips lighter brown, and
 banks olive-green, then shades them by slope. These functions recover that
-palette and back-project hits onto a flat-yard plane. They do **not** read
-the god-view height field.
+palette and back-project hits onto the robot's seated tangent plane. They
+do **not** read the god-view height field.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 
-from jims_mower.cameras import camera_world_pose, ground_hits
+from jims_mower.cameras import attitude_plane_hits, camera_world_pose
 from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_STEEP
 from jims_mower.types import CameraSpec, Pose
 
@@ -137,7 +137,8 @@ def project_labels_to_maps(
         raise ValueError("image and labels must share H×W")
     height, width = labels.shape
     world_cam = camera_world_pose(pose, cam)
-    hx, hy, valid = ground_hits(world_cam, width, height, ground_z=ground_z)
+    hx, hy, valid = attitude_plane_hits(world_cam, width, height, pose)
+    _ = ground_z
     rng = np.hypot(hx - world_cam.x, hy - world_cam.y)
     inside = (
         valid

@@ -255,7 +255,7 @@ class EpisodeReader:
 def record_episode(
     out_dir: Union[str, Path],
     *,
-    steps: int = 40,
+    steps: int = 160,
     seed: int = 7,
     config: Optional[Union[str, Path, dict, EnvConfig]] = None,
     policy: str = "terrain",

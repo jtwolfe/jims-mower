@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from jims_mower.demo import run_demo
+from jims_mower.demo import camera_dump_indices, camera_dump_stride, run_demo
 
 
 def test_demo_writes_cameras_and_summary(tmp_path: Path) -> None:
@@ -84,3 +84,25 @@ def test_demo_terrain_observer_override(tmp_path: Path) -> None:
     summary = run_demo(tmp_path, steps=2, seed=4, cameras=4, terrain_observer="oracle")
     assert summary["terrain_source"] == "oracle"
     assert summary["terrain_mode"] == "oracle"
+
+
+def test_camera_dump_stride_long_runs() -> None:
+    assert camera_dump_stride(12) == 10
+    assert camera_dump_stride(160) == 10
+    assert camera_dump_stride(160, requested=8) == 8
+    picks = camera_dump_indices(160)
+    assert 0 in picks
+    assert 159 in picks
+    assert 10 in picks
+    assert 7 not in picks
+    # Every 10 steps plus last — not 3 frames, not every step.
+    assert 15 <= len(picks) <= 20
+
+
+def test_demo_cam_stride_writes_interval_folders(tmp_path: Path) -> None:
+    run_demo(tmp_path, steps=12, seed=1, cameras=4, policy="scripted", cam_stride=5)
+    assert (tmp_path / "step_000").is_dir()
+    assert (tmp_path / "step_005").is_dir()
+    assert (tmp_path / "step_010").is_dir()
+    assert (tmp_path / "step_011").is_dir()
+    assert not (tmp_path / "step_001").is_dir()

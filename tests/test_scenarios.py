@@ -37,7 +37,7 @@ REQUIRED = (
     "night_porch",
 )
 
-DSL_EXTRAS = ("paddock", "night_dawn", "wet_slope")
+DSL_EXTRAS = ("paddock", "night_dawn", "wet_slope", "gradient_yard")
 
 
 def _shrink(cfg):
@@ -164,6 +164,20 @@ def test_load_source_1c_suburban_is_envconfig() -> None:
     cfg, scn = load_source("suburban")
     assert scn is None
     assert cfg.world.layout == "suburban"
+
+
+def test_gradient_yard_tilts_and_crosses_drain() -> None:
+    scn = load_dsl_scenario("gradient_yard")
+    assert scn.name == "gradient_yard"
+    assert scn.config.world.terrain.base_gradient.effective_slope_rad() > 0.10
+    assert len(scn.drains) == 1
+    env = MowerEnv(config=_shrink(scn.config), scenario=scn, render_mode=None)
+    _, info = env.reset(seed=3)
+    assert info["n_drains"] >= 1
+    low = env._terrain.sample(1.5, 6.0)
+    high = env._terrain.sample(10.5, 6.0)
+    assert high > low + 0.8
+    env.close()
 
 
 def test_explicit_drain_is_carved() -> None:

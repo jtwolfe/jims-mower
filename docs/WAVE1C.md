@@ -15,7 +15,8 @@ jims-mower-demo --config configs/scenarios/playground.yaml --policy scripted --o
 
 | YAML | Layout / weather |
 | --- | --- |
-| `suburban.yaml` | Backyard furniture, hose, mild drain |
+| `suburban.yaml` | Backyard furniture, hose, mild drain, mild yard grade |
+| `gradient_yard.yaml` | Whole-yard planar slope + a drain crossing it |
 | `rural_paddock.yaml` | Larger sparse paddock |
 | `playground.yaml` | Many toys |
 | `orchard.yaml` | Tree rows |

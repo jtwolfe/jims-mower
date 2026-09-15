@@ -8,7 +8,11 @@ height field, not a photogrammetry product.
 After a demo or record run:
 
 ```bash
-jims-mower-demo --steps 40 --out demo_out
+# Default --steps is 160 (not a 12-step smoke). Camera PiP folders land
+# every 10 steps (--cam-stride) so scrubbing stays dense. poses.json is every step.
+jims-mower-demo --out demo_out
+jims-mower-demo --steps 160 --cam-stride 10 --out demo_out
+jims-mower-demo --config gradient_yard --steps 160 --out demo_gradient
 jims-mower-viewer --episode demo_out
 # open http://127.0.0.1:8765/
 ```
@@ -41,8 +45,29 @@ Rebuild the mesh only:
 
 ```bash
 jims-mower-mesh --out yard.glb --config suburban --seed 7
+jims-mower-mesh --out yard_grade.glb --config gradient_yard --seed 7
 jims-mower-mesh --episode demo_out --out demo_out/yard.glb
 ```
+
+The mesh stores true metres (`z_scale=1`). The viewer applies a 4× Y
+lift so a ~5% property grade and 10–20 cm drains read on a 12 m yard.
+
+## Terrain (yard-scale gradient)
+
+Default / suburban yards are a **gentle planar slope across the property**,
+not a flat pad with a few local banks. `world.terrain.base_gradient`:
+
+| Key | Role |
+| --- | --- |
+| `slope_rad` | Planar grade (radians). Optional `slope_pct` (percent) overrides it |
+| `yaw_rad` | Direction of ascent |
+| `undulation_m` | Long-wavelength sine + weak quadratic dish |
+
+Drains and banks are carved **on top** of that tilt. `steep_yard` uses a
+stronger grade. `gradient_yard` is a showcase: ascent along +x, one drain
+running along y so it crosses the slope. The curriculum `flat` scenario
+zeros the gradient. Attitude / tip / drain checks still sample the height
+field, so pitch and roll are nonzero on a pure grade.
 
 ## Teach Boundary
 

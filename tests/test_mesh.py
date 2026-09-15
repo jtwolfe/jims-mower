@@ -82,3 +82,23 @@ def test_mesh_cli(tmp_path: Path) -> None:
     mesh_main(["--out", str(dest), "--seed", "1", "--cameras", "4", "--stride", "3"])
     assert dest.is_file()
     assert dest.with_suffix(".json").is_file()
+
+
+def test_mesh_preserves_yard_gradient() -> None:
+    elev = np.zeros((20, 20), dtype=np.float32)
+    res = 0.20
+    for col in range(20):
+        elev[:, col] = 0.12 * ((col + 0.5) * res - 2.0)
+    mesh = mesh_from_elevation(
+        elev,
+        width_m=4.0,
+        height_m=4.0,
+        resolution_m=res,
+        stride=1,
+    )
+    xs = mesh.positions[:, 0]
+    ys = mesh.positions[:, 1]
+    assert float(ys.max() - ys.min()) > 0.35
+    low = float(ys[xs < 0.6].mean())
+    high = float(ys[xs > 3.4].mean())
+    assert high > low + 0.25

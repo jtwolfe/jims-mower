@@ -1,4 +1,4 @@
-"""Yard height field: steep banks and small earth drains / swales."""
+"""Yard height field: property-scale grade, steep banks, and drains / swales."""
 
 from __future__ import annotations
 
@@ -383,6 +383,40 @@ def _place_segment(
     return None
 
 
+def _apply_base_gradient(
+    hf: HeightField,
+    *,
+    slope_rad: float,
+    yaw_rad: float,
+    undulation_m: float,
+) -> None:
+    """Tilt the whole yard, then add optional gentle undulation.
+
+    The planar grade is centered on the yard so spawn-keepout at mid-field
+    stays near grade. Drains and banks are carved *after* this so they sit
+    on the tilted surface rather than on a flat plane.
+    """
+    if slope_rad <= 0.0 and undulation_m <= 0.0:
+        return
+    yy = (np.arange(hf.rows) + 0.5) * hf.resolution_m
+    xx = (np.arange(hf.cols) + 0.5) * hf.resolution_m
+    grid_x, grid_y = np.meshgrid(xx, yy)
+    if slope_rad > 0.0:
+        tan_s = math.tan(float(slope_rad))
+        cx = 0.5 * hf.width_m
+        cy = 0.5 * hf.height_m
+        along = (grid_x - cx) * math.cos(yaw_rad) + (grid_y - cy) * math.sin(yaw_rad)
+        hf.elevation += np.float32(tan_s) * along.astype(np.float32)
+    if undulation_m > 0.0:
+        nx = (grid_x / max(hf.width_m, 1e-6)) - 0.5
+        ny = (grid_y / max(hf.height_m, 1e-6)) - 0.5
+        roll = np.sin(2.0 * math.pi * nx) * np.cos(2.0 * math.pi * ny)
+        dish = nx * nx + ny * ny
+        hf.elevation += np.float32(undulation_m) * (0.75 * roll + 0.25 * dish).astype(
+            np.float32
+        )
+
+
 def generate_terrain(
     rng: np.random.Generator,
     width_m: float,
@@ -408,15 +442,27 @@ def generate_terrain(
     puddle_depth_m: float = 0.04,
     explicit_drains: Optional[list[DrainFeature]] = None,
     explicit_banks: Optional[list[BankFeature]] = None,
+    gradient_slope_rad: float = 0.0,
+    gradient_yaw_rad: float = 0.0,
+    gradient_undulation_m: float = 0.0,
 ) -> HeightField:
     """Procedural yard elevation. Disabled → a flat field (still labeled).
 
-    ``explicit_drains`` / ``explicit_banks`` (scenario DSL) are carved first.
-    Layout features and remaining random counts apply after that.
+    When enabled, a yard-scale planar grade (plus optional undulation) is
+    applied first. ``explicit_drains`` / ``explicit_banks`` (scenario DSL)
+    are carved on top of that base. Layout features and remaining random
+    counts apply after that.
     """
     hf = HeightField.empty(width_m, height_m, resolution_m)
     if not enabled and not explicit_drains and not explicit_banks:
         return hf
+    if enabled:
+        _apply_base_gradient(
+            hf,
+            slope_rad=float(gradient_slope_rad),
+            yaw_rad=float(gradient_yaw_rad),
+            undulation_m=float(gradient_undulation_m),
+        )
     keep = list(keepout or [])
     # Cap berm height so generated bank faces stay under max_slope_rad.
     max_bank_h = math.tan(max(max_slope_rad, 1e-3)) * (0.5 * bank_width_m)
