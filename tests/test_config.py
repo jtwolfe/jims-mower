@@ -120,6 +120,12 @@ def test_rejects_bad_terrain_mode() -> None:
         load_config({"perception": {"terrain_mode": "slam"}})
 
 
+def test_accepts_learned_terrain_mode() -> None:
+    cfg = load_config({"perception": {"terrain_mode": "learned", "weights_path": "w.npz"}})
+    assert cfg.perception.terrain_mode == "learned"
+    assert cfg.perception.weights_path == "w.npz"
+
+
 def test_rejects_bad_gps_dropout() -> None:
     with pytest.raises(ConfigError):
         load_config({"sensors": {"gps": {"dropout_prob": 1.5}}})

@@ -32,9 +32,13 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
 ]
+torch = [
+    "torch>=2.1",
+]
 
 [project.scripts]
 jims-mower-demo = "jims_mower.demo:main"
+jims-mower-train-terrain = "jims_mower.perception.train:main"
 jims-mower-export = "jims_mower.export:main"
 jims-mower-farm = "jims_mower.farm:main"
 jims-mower-record = "jims_mower.record_cli:main"

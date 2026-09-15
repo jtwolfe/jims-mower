@@ -1,19 +1,19 @@
-"""Pluggable terrain observers. Oracle for training; CV heuristic / blind stubs."""
+"""Pluggable terrain observers. Oracle for training; CV / learned / blind stubs."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Protocol, runtime_checkable
+from pathlib import Path
+from typing import Optional, Protocol, Union, runtime_checkable
 
 import numpy as np
 
 from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN_EDGE, HAZARD_STEEP
-from jims_mower.perception.cv_terrain import (
-    classify_terrain_rgb,
-    project_labels_to_maps,
-    stamp_tof_corners,
-)
+from jims_mower.perception.cv_terrain import classify_terrain_rgb, stamp_tof_corners
+from jims_mower.perception.fuse import fuse_camera_labels, paint_geometry_from_hazard
+from jims_mower.perception.learn import TerrainMLP, classify_image, load_weights
+from jims_mower.perception.temporal import HazardHysteresis
 from jims_mower.terrain import HeightField
 from jims_mower.types import PerceptionContext, Pose
 
@@ -130,10 +130,13 @@ class HeuristicTerrainObserver:
         radius_m: float = 1.2,
         steep_rad: float = 0.30,
         max_range_m: float = 9.0,
+        temporal: bool = False,
     ) -> None:
         self.radius_m = radius_m
         self.steep_rad = steep_rad
         self.max_range_m = max_range_m
+        self.temporal = bool(temporal)
+        self._filter = HazardHysteresis() if self.temporal else None
         self._elevation: Optional[np.ndarray] = None
         self._slope: Optional[np.ndarray] = None
         self._hazard: Optional[np.ndarray] = None
@@ -144,6 +147,8 @@ class HeuristicTerrainObserver:
         self._slope = None
         self._hazard = None
         self._confidence = None
+        if self._filter is not None:
+            self._filter.reset()
 
     def _ensure_maps(self, shape: tuple[int, int]) -> None:
         if (
@@ -175,26 +180,31 @@ class HeuristicTerrainObserver:
         )
         pose: Pose = context.pose
         prev_hazard = self._hazard.copy()
-        cams = {c.name: c for c in context.cameras}
-        for name, frame in images.items():
-            cam = cams.get(name)
-            if cam is None or frame.ndim != 3:
-                continue
-            labels = classify_terrain_rgb(frame)
-            project_labels_to_maps(
-                frame,
-                labels,
-                cam,
-                pose,
-                elevation=self._elevation,
-                slope=self._slope,
-                hazard=self._hazard,
-                resolution_m=context.resolution_m,
-                world_size=context.world_size,
-                ground_z=0.0,
-                max_range_m=self.max_range_m,
-                steep_rad=max(self.steep_rad, context.steep_slope_rad),
+        fused, conf = fuse_camera_labels(
+            images,
+            lambda frame, _cam: classify_terrain_rgb(frame),
+            context.cameras,
+            pose,
+            resolution_m=context.resolution_m,
+            world_size=context.world_size,
+            map_shape=context.map_shape,
+            max_range_m=self.max_range_m,
+        )
+        if self._filter is not None:
+            self._hazard = self._filter.update(fused, conf)
+            self._confidence = conf
+        else:
+            self._hazard = np.maximum(self._hazard, fused)
+            self._confidence = (
+                conf if self._confidence is None else np.maximum(self._confidence, conf)
             )
+        paint_geometry_from_hazard(
+            self._hazard,
+            elevation=self._elevation,
+            slope=self._slope,
+            pose_z=pose.z,
+            steep_rad=max(self.steep_rad, context.steep_slope_rad),
+        )
         self._grow_drain_gaps(prev_hazard)
         self._raise_confidence(self._hazard > 0.0, 0.72)
         tof = _tof_from_context(context)
@@ -284,6 +294,179 @@ class HeuristicTerrainObserver:
                 self._confidence[row, col] = max(float(self._confidence[row, col]), 0.42)
 
 
+class LearnedTerrainObserver:
+    """Load exporter-trained colour+position weights. Same contract as Blind.
+
+    Ignores ``context.terrain``. Multi-camera BEV fuse + hysteresis. Not a
+    production segmentation net — sim stub, no claimed accuracy.
+    """
+
+    def __init__(
+        self,
+        weights_path: Optional[Union[str, Path]] = None,
+        *,
+        radius_m: float = 1.2,
+        steep_rad: float = 0.30,
+        max_range_m: float = 9.0,
+        temporal: bool = True,
+        stride: int = 1,
+    ) -> None:
+        self.weights_path = Path(weights_path) if weights_path else None
+        self.radius_m = radius_m
+        self.steep_rad = steep_rad
+        self.max_range_m = max_range_m
+        self.stride = max(1, int(stride))
+        self._model: Optional[TerrainMLP] = None
+        if self.weights_path is not None:
+            self._model = load_weights(self.weights_path)
+        self._filter = HazardHysteresis() if temporal else None
+        self._elevation: Optional[np.ndarray] = None
+        self._slope: Optional[np.ndarray] = None
+        self._hazard: Optional[np.ndarray] = None
+        self._confidence: Optional[np.ndarray] = None
+
+    def reset(self) -> None:
+        self._elevation = None
+        self._slope = None
+        self._hazard = None
+        self._confidence = None
+        if self._filter is not None:
+            self._filter.reset()
+
+    def _ensure_maps(self, shape: tuple[int, int]) -> None:
+        if (
+            self._elevation is None
+            or self._elevation.shape != shape
+            or self._slope is None
+            or self._hazard is None
+        ):
+            self._elevation, self._slope, self._hazard = _empty_maps(shape)
+            self._confidence = np.full(shape, 0.08, dtype=np.float32)
+
+    def estimate(
+        self,
+        images: dict[str, np.ndarray],
+        imu: np.ndarray,
+        gps: np.ndarray,
+        context: PerceptionContext,
+    ) -> TerrainEstimate:
+        _ = context.terrain
+        self._ensure_maps(context.map_shape)
+        assert (
+            self._elevation is not None
+            and self._slope is not None
+            and self._hazard is not None
+            and self._confidence is not None
+        )
+        pose: Pose = context.pose
+        prev_hazard = self._hazard.copy()
+
+        def _label(frame: np.ndarray, cam) -> tuple[np.ndarray, np.ndarray]:
+            if self._model is None:
+                h, w = frame.shape[:2]
+                return np.zeros((h, w), dtype=np.uint8), np.zeros((h, w), dtype=np.float32)
+            return classify_image(
+                frame,
+                self._model,
+                cam=cam,
+                pose=pose,
+                world_size=context.world_size,
+                stride=self.stride,
+            )
+
+        fused, conf = fuse_camera_labels(
+            images,
+            _label,
+            context.cameras,
+            pose,
+            resolution_m=context.resolution_m,
+            world_size=context.world_size,
+            map_shape=context.map_shape,
+            max_range_m=self.max_range_m,
+        )
+        if self._filter is not None:
+            self._hazard = self._filter.update(fused, conf)
+        else:
+            self._hazard = np.maximum(self._hazard, fused)
+        self._confidence = conf
+        paint_geometry_from_hazard(
+            self._hazard,
+            elevation=self._elevation,
+            slope=self._slope,
+            pose_z=pose.z,
+            steep_rad=max(self.steep_rad, context.steep_slope_rad),
+        )
+        self._grow_drain_gaps(prev_hazard)
+        tof = _tof_from_context(context)
+        if tof is not None:
+            stamp_tof_corners(
+                tof,
+                pose,
+                hazard=self._hazard,
+                elevation=self._elevation,
+                slope=self._slope,
+                resolution_m=context.resolution_m,
+                length_m=context.length_m,
+                track_m=context.track_m,
+                hover_m=context.chassis_hover_m,
+                steep_rad=max(self.steep_rad, context.steep_slope_rad),
+            )
+        self._paint_local_imu(imu, gps, context)
+        return TerrainEstimate(
+            self._elevation.copy(),
+            self._slope.copy(),
+            self._hazard.copy(),
+            source="learned",
+            confidence=self._confidence.copy(),
+        )
+
+    def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
+        assert self._hazard is not None
+        fresh = (self._hazard >= HAZARD_DRAIN_EDGE) & (prev_hazard < HAZARD_DRAIN_EDGE)
+        if not np.any(fresh):
+            return
+        grown = fresh.copy()
+        grown[1:, :] |= fresh[:-1, :]
+        grown[:-1, :] |= fresh[1:, :]
+        grown[:, 1:] |= fresh[:, :-1]
+        grown[:, :-1] |= fresh[:, 1:]
+        promote = grown & (self._hazard < HAZARD_DRAIN_EDGE)
+        self._hazard[promote] = HAZARD_DRAIN_EDGE
+
+    def _paint_local_imu(
+        self,
+        imu: np.ndarray,
+        gps: np.ndarray,
+        context: PerceptionContext,
+    ) -> None:
+        assert self._elevation is not None and self._slope is not None and self._hazard is not None
+        pose = context.pose
+        roll, pitch = _attitude_from_accel(np.asarray(imu, dtype=np.float32))
+        slope_est = math.hypot(roll, pitch)
+        rows, cols = context.map_shape
+        res = context.resolution_m
+        cx, cy = pose.x, pose.y
+        if gps.size >= 4 and float(gps[3]) > 0.5:
+            cx, cy = float(gps[0]), float(gps[1])
+        r = max(self.radius_m, res)
+        c0 = int((cx - r) / res)
+        c1 = int((cx + r) / res)
+        r0 = int((cy - r) / res)
+        r1 = int((cy + r) / res)
+        r2 = r * r
+        for row in range(max(0, r0), min(rows, r1 + 1)):
+            wy = (row + 0.5) * res
+            for col in range(max(0, c0), min(cols, c1 + 1)):
+                wx = (col + 0.5) * res
+                if (wx - cx) ** 2 + (wy - cy) ** 2 > r2:
+                    continue
+                self._slope[row, col] = max(float(self._slope[row, col]), slope_est)
+                if abs(float(self._elevation[row, col])) < 1e-6:
+                    self._elevation[row, col] = pose.z
+                if slope_est >= self.steep_rad:
+                    self._hazard[row, col] = max(float(self._hazard[row, col]), float(HAZARD_STEEP))
+
+
 def _tof_from_context(context: PerceptionContext) -> Optional[np.ndarray]:
     raw = context.tof
     if raw is None:
@@ -294,10 +477,28 @@ def _tof_from_context(context: PerceptionContext) -> Optional[np.ndarray]:
     return arr
 
 
-def terrain_observer_from_mode(mode: str) -> TerrainObserver:
+TERRAIN_MODES = frozenset({"oracle", "blind", "heuristic", "learned"})
+
+
+def default_weights_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "data" / "terrain_mlp.npz"
+
+
+def terrain_observer_from_mode(
+    mode: str,
+    *,
+    weights_path: Optional[Union[str, Path]] = None,
+    temporal: Optional[bool] = None,
+) -> TerrainObserver:
     key = (mode or "heuristic").strip().lower()
     if key == "blind":
         return BlindTerrainObserver()
     if key == "oracle":
         return OracleTerrainObserver()
-    return HeuristicTerrainObserver()
+    if key == "learned":
+        path = Path(weights_path) if weights_path else default_weights_path()
+        if not path.is_file():
+            path = None
+        use_temporal = True if temporal is None else bool(temporal)
+        return LearnedTerrainObserver(path, temporal=use_temporal)
+    return HeuristicTerrainObserver(temporal=bool(temporal) if temporal else False)

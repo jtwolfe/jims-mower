@@ -36,6 +36,7 @@ from jims_mower.maps import GrassCoverageMap, occupancy_from_detections
 from jims_mower.mission import apply_mission, load_mission, save_mission
 from jims_mower.perception import ColorGrassObserver, HandSignalCurriculum, MockDetector
 from jims_mower.perception.base import Detector, GrassObserver
+from jims_mower.perception.temporal import DetectionTracklets
 from jims_mower.perception.terrain import TerrainObserver, terrain_observer_from_mode
 from jims_mower.renderer import render_camera, render_scalar_map, render_topdown
 from jims_mower.reward import compute_reward
@@ -131,9 +132,12 @@ class MowerEnv(gym.Env):
         self.camera_index = {c.name: i for i, c in enumerate(self.cameras)}
         self.detector: Detector = detector or MockDetector()
         self.grass_observer: GrassObserver = grass_observer or ColorGrassObserver()
-        self.terrain_observer: TerrainObserver = (
-            terrain_observer or terrain_observer_from_mode(self.cfg.perception.terrain_mode)
+        self.terrain_observer: TerrainObserver = terrain_observer or terrain_observer_from_mode(
+            self.cfg.perception.terrain_mode,
+            weights_path=self.cfg.perception.weights_path or None,
+            temporal=self.cfg.perception.temporal or None,
         )
+        self._tracklets = DetectionTracklets()
         self._signals = HandSignalCurriculum(
             self.cfg.curriculum.hand_signals,
             self.cfg.curriculum.signal_hold_steps,
@@ -378,6 +382,7 @@ class MowerEnv(gym.Env):
         reset_obs = getattr(self.terrain_observer, "reset", None)
         if callable(reset_obs):
             reset_obs()
+        self._tracklets.reset()
         obs, info = self._observe()
         return obs, info
 
@@ -682,6 +687,7 @@ class MowerEnv(gym.Env):
         )
         detections = self.detector.detect(images, context)
         self._last_detections = detections
+        tracklets = self._tracklets.update(detections)
         occupancy = occupancy_from_detections(
             self._coverage.cut.shape,
             detections,
@@ -766,6 +772,7 @@ class MowerEnv(gym.Env):
             },
             "coverage_fraction": self._coverage.coverage_fraction(),
             "detections": [d.as_dict() for d in detections],
+            "tracklets": [t.as_dict() for t in tracklets],
             "grass_vision": vision,
             "camera_poses": [
                 _cam_pose_dict(self._pose, cam) for cam in self.cameras

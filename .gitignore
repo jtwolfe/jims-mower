@@ -41,5 +41,6 @@ htmlcov/
 /demo_out/
 /dataset_out/
 /farm_out/
+/terrain_mlp.npz
 *.ppm
 .DS_Store
