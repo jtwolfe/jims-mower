@@ -372,6 +372,7 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
     if not name:
         raise ScenarioError("Scenario needs a non-empty name")
     weather = _parse_weather(data.get("weather"))
+    season = str(data.get("season") or "").strip().lower()
     geofence, holes = _parse_geofence(data.get("geofence"))
     holes.extend(_parse_keepout(data.get("keepout")))
     drains = [_parse_drain(d) for d in (data.get("drains") or [])]
@@ -383,6 +384,14 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
         if overlay:
             overlay_config(cfg, overlay)
         _apply_weather_flags(cfg, weather)
+        if season:
+            from jims_mower.overlays import apply_season
+
+            apply_season(cfg, season)
+        elif cfg.world.season and cfg.world.season != "none":
+            from jims_mower.overlays import apply_season
+
+            apply_season(cfg, cfg.world.season)
         validate_config(cfg)
     except ConfigError as exc:
         if isinstance(exc, ScenarioError):

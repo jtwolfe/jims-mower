@@ -79,7 +79,9 @@ class Detector(Protocol):
   `world_xy`, `hand_signal`, `category`, `depth_m`.
 - Labels: `person`, `dog`, `cat`, `bird`, `tree`, `furniture`, `toy`
   ([`constants.LABEL_TO_ID`](src/jims_mower/constants.py)).
+- Categories: `person` / `animal` / `toy` / `static` (WAVE 4 appearance refine).
 - Gym default: `MockDetector`. Stub: `BlindDetector` (always `[]`).
+- `TrtDetector` is a load-weights placeholder (`fps_claim: null`).
 
 ## TerrainObserver
 
@@ -107,6 +109,8 @@ class GrassObserver(Protocol):
 ```
 
 Per-camera uncut-grass fraction. Default: `ColorGrassObserver`.
+`FeatureGrassObserver` (`perception.grass_mode: feature`) is a numpy stub.
+Optional `info["semantic"]` raster: grass / non-grass / drain / bank / static.
 
 ## Planner / controller
 
@@ -175,6 +179,10 @@ Not observation keys. Loaded via [`scenarios.load_source`](src/jims_mower/scenar
   `jims-mower-mission` write map + uncut + pose (`jims_mower.mission.v1`)
 - `sensors.tof.count` — `0` / `2` / `4` downward corners (unused stay 0)
 - `runtime.enabled` — Orin-class battery / thermal limp stub (off by default)
+- `runtime.watchdog.enabled` — stop wheels if IMU / vision frames freeze
+- `weather.wet` — extra steep-corridor cost (`planner.wet_slope_extra`)
+- `season` — `none` / `long_grass` / `leaf_clutter`
+- dataset export `meta.json` **requires** `schema: jims_mower.dataset.v1`
 
 ## Exporter labels
 

@@ -1,0 +1,6 @@
+schema: jims_mower.sequence.v1
+name: paddock_then_suburban
+description: Run the paddock then the suburban yard (multi-yard coverage).
+yards:
+  - paddock
+  - suburban

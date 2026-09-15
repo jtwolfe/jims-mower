@@ -1,0 +1,48 @@
+kind: scenario
+name: property_scale
+description: >
+  Coarse 48×40 m paddock (0.40 m cells) so a property-scale yard stays
+  tractable. Not a claimed coverage benchmark.
+base: default
+weather:
+  lighting: day
+  wet: false
+geofence:
+  - [1.2, 1.2]
+  - [46.8, 1.2]
+  - [46.8, 38.8]
+  - [1.2, 38.8]
+world:
+  layout: paddock
+  width_m: 48.0
+  height_m: 40.0
+  resolution_m: 0.40
+  n_people: 0
+  n_dogs: 0
+  n_cats: 0
+  n_birds: 0
+  n_trees: 3
+  n_furniture: 0
+  n_toys: 0
+  terrain:
+    enabled: true
+    n_drains: 0
+    n_banks: 0
+    noise_amp_m: 0.008
+    keepout_m: 2.0
+drains:
+  - {x0: 8.0, y0: 12.0, x1: 36.0, y1: 13.0, width_m: 0.80, depth_m: 0.20, side_slope: 1.6}
+  - {x0: 10.0, y0: 26.0, x1: 38.0, y1: 27.0, width_m: 0.70, depth_m: 0.16, side_slope: 1.4}
+banks:
+  - {x0: 16.0, y0: 6.0, x1: 28.0, y1: 7.5, width_m: 3.0, height_m: 0.35}
+obstacles:
+  - {kind: tree, x: 6.0, y: 34.0}
+  - {kind: tree, x: 40.0, y: 6.0}
+  - {kind: tree, x: 42.0, y: 32.0}
+perception:
+  terrain_mode: heuristic
+planner:
+  strip_spacing_m: 0.80
+  waypoint_stride_m: 0.80
+  cruise_speed: 0.70
+  drain_clearance_m: 0.60

@@ -1,0 +1,8 @@
+schema: jims_mower.curriculum.v1
+name: flat_to_night
+description: flat → suburban → wet_slope → night_dawn. No claimed returns.
+stages:
+  - {name: flat, scenario: flat, steps: 40}
+  - {name: suburban, scenario: suburban, steps: 40}
+  - {name: wet, scenario: wet_slope, steps: 40}
+  - {name: night, scenario: night_dawn, steps: 40}

@@ -1,0 +1,10 @@
+schema: jims_mower.overlay.v1
+kind: overlay
+name: long_grass
+season: long_grass
+description: Grow cut grass back faster; renderer uses a darker uncut palette.
+world:
+  season: long_grass
+  grass:
+    enabled: true
+    regenerate_frac: 0.22

@@ -27,7 +27,8 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image
 
-from jims_mower.constants import LABEL_TO_ID
+from jims_mower.constants import DATASET_SCHEMA, LABEL_TO_ID
+from jims_mower.dataset import validate_dataset_meta
 from jims_mower.env import MowerEnv
 from jims_mower.metrics import POLICIES, _random_action, _scripted_action
 from jims_mower.planning import TerrainPolicy
@@ -214,7 +215,7 @@ def export_dataset(
 
     categories = [{"id": i, "name": lab, "supercategory": "object"} for lab, i in LABEL_TO_ID.items()]
     meta = {
-        "schema": "jims_mower.dataset.v1",
+        "schema": DATASET_SCHEMA,
         "seed": int(seed),
         "steps_requested": int(steps),
         "frames": dumped,
@@ -263,6 +264,7 @@ def export_dataset(
             "grass": {"0": "uncut", "1": "cut", "255": "non_grass"},
         },
     }
+    validate_dataset_meta(meta)
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     (out_dir / "coco.json").write_text(json.dumps(coco, indent=2), encoding="utf-8")
     (out_dir / "LAYOUT.md").write_text(LAYOUT_MD, encoding="utf-8")

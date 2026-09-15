@@ -1,0 +1,66 @@
+# WAVE 4 — remaining ROADMAP hooks
+
+Builds on latest `main` after WAVE 3A + 3B. Breadth of working hooks, not
+one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
+
+## Perception
+
+- `MockDetector` still projects obstacles, then a numpy appearance model
+  (`perception.classify.refine_category`) labels **person / animal / toy /
+  static** from crop palette stats.
+- `HandSignalClassifier` sits behind `curriculum.hand_signals` **and**
+  `curriculum.hand_signal_classifier` (crop brightness / aspect / red bias).
+  Default curriculum still uses oracle person labels.
+- `FeatureGrassObserver` (`perception.grass_mode: feature`) is a six-stat
+  linear mix. Optional `weights_path` `.npz` (`w`, `b`). Default stays
+  `ColorGrassObserver`.
+- `info["semantic"]` — uint8 grass / non-grass / drain / bank / static
+  (`perception.semantic`, default on).
+
+## Mapping
+
+- Persistent BEV occupancy from **detections + short ToF hits**, decaying
+  (`perception.persistent_occupancy`). Not the god-view obstacle list.
+- Height-map fusion stub: RGB drain/bank back-projection + downward ToF
+  (`info["height_fused"]`).
+- Loop-closure **stub**: coarse occupancy fingerprint, `info["loop_closure"]`.
+  `not_slam: true`. No pose-graph.
+
+## Planning
+
+- `weather.wet` → extra cost on steep corridors (`planner.wet_slope_extra`).
+- Energy-aware strip order when SOC is near limp (`planner.energy_aware_strips`
+  + `OrinBudget`).
+- `jims-mower-sequence --yards paddock,suburban`.
+
+## World
+
+- Seasonal overlays: `configs/overlays/long_grass.yaml`, `leaf_clutter.yaml`
+  (`season:` on a scenario or `--` apply via `overlays.apply_overlay`).
+- [`narrow_gate`](../configs/scenarios/narrow_gate.yaml),
+  [`fence_line`](../configs/scenarios/fence_line.yaml),
+  [`property_scale`](../configs/scenarios/property_scale.yaml) (48×40 m @ 0.40 m),
+  [`flat`](../configs/scenarios/flat.yaml).
+- `jims-mower-import-yard` — survey JSON → geofence + drain polylines.
+
+## Orin
+
+- `SensorWatchdog` zeros wheels if IMU / vision frames freeze
+  (`runtime.watchdog.enabled`, off by default).
+- [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml)
+  — same `CameraSpec` as the gym.
+- `GstNvmmAdapter` documented stub; CI uses `FakeGstAdapter`. GStreamer is
+  **not** a dependency.
+- `TrtDetector` / `TrtTerrainObserver` load-weights placeholders
+  (`perception.detector_backend: trt`). No engine shipped; `fps_claim: null`.
+
+## Ops / learning
+
+- Farm `--flake-budget` / `--quarantine` records skips instead of swallowing
+  exceptions.
+- Exporter `meta.json` **must** have `schema: jims_mower.dataset.v1`
+  (`jims_mower.dataset.validate_dataset_meta`); train refuses other values.
+- `jims-mower-study --kind pitch|clearance|trimmer|observer` (plus existing
+  cameras). Reports leftover % = `100 - coverage`, not mAP.
+- Curriculum: `jims-mower-curriculum` → flat → suburban → wet → night.
+- Sim-to-real protocol: [`SIM_TO_REAL.md`](SIM_TO_REAL.md).

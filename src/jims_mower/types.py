@@ -137,3 +137,4 @@ class PerceptionContext:
     length_m: float = 0.50
     track_m: float = 0.40
     chassis_hover_m: float = 0.06
+    hand_signal_classifier: bool = False

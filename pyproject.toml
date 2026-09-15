@@ -58,6 +58,9 @@ jims-mower-owner = "jims_mower.owner_cli:main"
 jims-mower-bridge = "jims_mower.runtime.bridge:main"
 jims-mower-study = "jims_mower.studies:main"
 jims-mower-export-trt = "jims_mower.runtime.export_trt:main"
+jims-mower-sequence = "jims_mower.sequence:main"
+jims-mower-curriculum = "jims_mower.curriculum_sched:main"
+jims-mower-import-yard = "jims_mower.survey:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"
@@ -67,7 +70,16 @@ Repository = "https://github.com/jtwolfe/jims-mower"
 where = ["src"]
 
 [tool.setuptools.package-data]
-jims_mower = ["py.typed", "data/default.yaml", "data/scenarios/*.yaml"]
+jims_mower = [
+    "py.typed",
+    "data/default.yaml",
+    "data/scenarios/*.yaml",
+    "data/overlays/*.yaml",
+    "data/curriculum/*.yaml",
+    "data/sequences/*.yaml",
+    "data/orin/*.yaml",
+    "data/surveys/*.json",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -72,7 +72,9 @@ def samples_from_export(
     meta_path = root / "meta.json"
     if not meta_path.is_file():
         raise FileNotFoundError(f"export meta.json missing: {meta_path}")
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    from jims_mower.dataset import load_dataset_meta
+
+    meta = load_dataset_meta(root)
     cameras = {c.name: c for c in _cameras_from_meta(meta)}
     if not cameras:
         raise ValueError(

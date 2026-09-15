@@ -56,6 +56,7 @@ DET_FEATURES = 8  # label, camera, u, v, w, h, conf, signal
 
 # Synthetic palette used by the renderer (and the color-heuristic grass hook).
 UNCUT_GRASS_RGB = (46, 140, 58)
+LONG_GRASS_RGB = (28, 108, 42)
 CUT_GRASS_RGB = (168, 148, 72)
 DIRT_RGB = (90, 70, 50)
 SKY_RGB = (135, 186, 230)
@@ -85,6 +86,29 @@ SAFE_MODES = ("run", "limp", "estop", "safe")
 BC_SCHEMA = "jims_mower.bc.v1"
 TELEMETRY_SCHEMA = "jims_mower.telemetry.v1"
 OWNER_OVERLAY_SCHEMA = "jims_mower.owner.v1"
+DATASET_SCHEMA = "jims_mower.dataset.v1"
+SURVEY_SCHEMA = "jims_mower.survey.v1"
+CURRICULUM_SCHEMA = "jims_mower.curriculum.v1"
+SEQUENCE_SCHEMA = "jims_mower.sequence.v1"
+OVERLAY_SCHEMA = "jims_mower.overlay.v1"
+SEASONS = frozenset({"none", "long_grass", "leaf_clutter"})
+DETECTION_CATEGORIES = ("person", "animal", "toy", "static")
+
+# Optional semantic layer (info["semantic"], not a published score).
+SEMANTIC_FREE = 0
+SEMANTIC_GRASS = 1
+SEMANTIC_NON_GRASS = 2
+SEMANTIC_DRAIN = 3
+SEMANTIC_BANK = 4
+SEMANTIC_STATIC = 5
+SEMANTIC_NAMES = (
+    "free",
+    "grass",
+    "non_grass",
+    "drain",
+    "bank",
+    "static",
+)
 NEAR_MISS_LIVING_M = 1.5
 BC_FEATURE_DIM = 40
 DEFAULT_BC_WEIGHTS = "bc_weights.npz"

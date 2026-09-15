@@ -1,0 +1,47 @@
+kind: scenario
+name: narrow_gate
+description: >
+  Keep-in yard with two keep-out beds that leave a ~1.0 m gate. The planner
+  must thread the opening; costmap inflates the keep-outs.
+base: default
+weather:
+  lighting: day
+  wet: false
+geofence:
+  keep_in:
+    - [0.5, 0.5]
+    - [11.5, 0.5]
+    - [11.5, 11.5]
+    - [0.5, 11.5]
+  keep_out:
+    - - [4.8, 0.5]
+      - [5.6, 0.5]
+      - [5.6, 5.4]
+      - [4.8, 5.4]
+    - - [4.8, 6.4]
+      - [5.6, 6.4]
+      - [5.6, 11.5]
+      - [4.8, 11.5]
+world:
+  width_m: 12.0
+  height_m: 12.0
+  resolution_m: 0.10
+  n_people: 0
+  n_dogs: 0
+  n_cats: 0
+  n_birds: 0
+  n_trees: 1
+  n_furniture: 0
+  n_toys: 0
+  terrain:
+    enabled: true
+    n_drains: 0
+    n_banks: 0
+    noise_amp_m: 0.008
+obstacles:
+  - {kind: tree, x: 2.2, y: 9.5}
+perception:
+  terrain_mode: heuristic
+planner:
+  geofence_inflate_m: 0.20
+  cruise_speed: 0.45
