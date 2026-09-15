@@ -53,6 +53,8 @@ from jims_mower.safety import (
     terrain_hazards,
     trimmer_interlock,
 )
+from jims_mower.faults import FaultBus
+from jims_mower.radio import RadioSim
 from jims_mower.runtime.budget import OrinBudget, budget_from_config
 from jims_mower.runtime.watchdog import SensorWatchdog
 from jims_mower.sensors import (
@@ -279,6 +281,8 @@ class MowerEnv(gym.Env):
         self._episode_seed: Optional[int] = None
         self.budget: OrinBudget = budget_from_config(self.cfg)
         self.watchdog = SensorWatchdog.from_config(self.cfg, dt=self.cfg.dt)
+        self.fault_bus = FaultBus.from_config(self.cfg)
+        self.radio = RadioSim.from_config(self.cfg)
         self._occ_persist: Optional[PersistentOccupancy] = None
         self._loop = LoopClosureStub()
         self._fused_elev: Optional[np.ndarray] = None
@@ -425,6 +429,13 @@ class MowerEnv(gym.Env):
         self.budget = budget_from_config(self.cfg)
         self.watchdog = SensorWatchdog.from_config(self.cfg, dt=self.cfg.dt)
         self.watchdog.reset()
+        self.fault_bus = FaultBus.from_config(self.cfg)
+        if options.get("inject_fault"):
+            self.fault_bus.inject(**_inject_kwargs(options["inject_fault"]))
+        for extra in options.get("inject_faults") or []:
+            self.fault_bus.inject(**_inject_kwargs(extra))
+        self.radio = RadioSim.from_config(self.cfg, seed=int(seed or 0))
+        self.radio.reset(seed=int(seed or 0))
         shape = self._coverage.cut.shape
         self._occ_persist = PersistentOccupancy(
             shape[0],
@@ -448,9 +459,21 @@ class MowerEnv(gym.Env):
             raise ValueError("action must have shape (3,)")
         self.watchdog.observe(self._last_imu, self._last_images, dt=self.cfg.dt)
         action = self.watchdog.filter_action(action)
+        self.fault_bus.tick(self._steps)
+        self.radio.tick(self.cfg.dt, rng=self.np_random)
+        if self.radio.enabled and self.radio.lost:
+            self.fault_bus.note_radio_loss(self.radio.on_loss)
         left_n = float(np.clip(action[0], -1.0, 1.0))
         right_n = float(np.clip(action[1], -1.0, 1.0))
         requested = bool(action[2] > 0.5)
+        left_n, right_n, requested = self.fault_bus.apply_drive(left_n, right_n, requested)
+        if self.radio.enabled and self.radio.lost and self.radio.on_loss == "stop_beacon":
+            left_n, right_n, requested = 0.0, 0.0, False
+        elif self.radio.enabled and self.radio.lost and self.radio.on_loss == "limp_home":
+            scale = float(self.cfg.planner.safe_state.limp_scale)
+            left_n *= scale
+            right_n *= scale
+            requested = False
         vmax = self.cfg.robot.max_wheel_speed_mps
         self._prev_pose = self._pose
         self._prev_v = self._last_v
@@ -570,12 +593,28 @@ class MowerEnv(gym.Env):
                 "nearest_person_m": self._nearest_person_m(),
                 "scenario": self.scenario.name if self.scenario else "",
                 "weather": _weather_dict(self.scenario),
+                "fault": self.fault_bus.as_info(
+                    self._pose,
+                    gnss_dropped=float(np.asarray(obs.get("gps", [0, 0, 0, 1])).reshape(-1)[-1])
+                    < 0.5,
+                ),
             }
         )
         if terminated or truncated:
             self._persist_grass()
             self._persist_mission()
         return obs, float(breakdown.total), terminated, truncated, info
+
+    def inject_fault(
+        self,
+        kind: str,
+        *,
+        mode: str = "open_circuit",
+        cameras: Optional[list[str]] = None,
+        at_step: Optional[int] = None,
+    ) -> None:
+        """Kill a motor / sensor mid-episode. See ``FaultBus.inject``."""
+        self.fault_bus.inject(kind, mode=mode, cameras=cameras, at_step=at_step)
 
     def close(self) -> None:
         self._persist_grass()
@@ -688,7 +727,7 @@ class MowerEnv(gym.Env):
         }
 
     def _observe(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        images = self._render_cameras()
+        images = self.fault_bus.apply_cameras(self._render_cameras())
         self._last_images = images
         imu_sample = simulate_imu(
             self._pose,
@@ -703,7 +742,7 @@ class MowerEnv(gym.Env):
             accel_bias=self._accel_bias,
             enabled=self.cfg.sensors.imu.enabled,
         )
-        imu = imu_to_array(imu_sample)
+        imu = self.fault_bus.apply_imu(imu_to_array(imu_sample))
         gps_sample = simulate_gps(
             self._pose,
             self.np_random,
@@ -713,7 +752,7 @@ class MowerEnv(gym.Env):
             include_altitude=self.cfg.sensors.gps.include_altitude,
             enabled=self.cfg.sensors.gps.enabled,
         )
-        gps = gps_sample.as_array()
+        gps = self.fault_bus.apply_gps(gps_sample.as_array())
         tof = simulate_tof(
             wheel_clearances(
                 self._pose,
@@ -904,7 +943,11 @@ class MowerEnv(gym.Env):
             "living_reason": living.reason,
             **self.budget.as_info(),
             **self.watchdog.as_info(),
+            **self.radio.as_info(),
         }
+        info["fault"] = self.fault_bus.as_info(
+            self._pose, gnss_dropped=float(gps[3]) < 0.5
+        )
         if self.cfg.perception.semantic:
             sem = semantic_raster(self._coverage.as_float(), terrain_est.hazard, occupancy)
             self._last_semantic = sem
@@ -924,6 +967,22 @@ class MowerEnv(gym.Env):
             self._loop.update(occupancy, self._pose, self.cfg.world.resolution_m)
             info.update(self._loop.as_info())
         return obs, info
+
+
+def _inject_kwargs(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError("inject_fault must be a mapping")
+    kind = item.get("kind") or item.get("component")
+    if not kind:
+        raise ValueError("inject_fault needs kind or component")
+    kwargs: dict[str, Any] = {"kind": kind}
+    if "mode" in item:
+        kwargs["mode"] = item["mode"]
+    if "cameras" in item:
+        kwargs["cameras"] = item["cameras"]
+    if "at_step" in item:
+        kwargs["at_step"] = item["at_step"]
+    return kwargs
 
 
 def _nearest_detection_signal(

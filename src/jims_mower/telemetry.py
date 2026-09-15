@@ -29,6 +29,8 @@ def summarize_telemetry(
     advice = {k: 0 for k in TERRAIN_ADVICE}
     living = {k: 0 for k in TERRAIN_ADVICE}
     coverage = 0.0
+    sos: Optional[dict[str, Any]] = None
+    sos_steps = 0
     for rec in steps:
         info = rec.get("info") if isinstance(rec.get("info"), dict) else rec
         if info.get("tipover"):
@@ -53,6 +55,18 @@ def summarize_telemetry(
             coverage = float(info["coverage_fraction"])
         elif rec.get("coverage_fraction") is not None:
             coverage = float(rec["coverage_fraction"])
+        fault = info.get("fault") if isinstance(info.get("fault"), dict) else None
+        if fault and (fault.get("retrieve") or str(fault.get("code") or "") == "FAULT_IMMOBILISED"):
+            sos_steps += 1
+            sos = {
+                "active": True,
+                "retrieve": True,
+                "code": fault.get("code"),
+                "component": fault.get("component"),
+                "pose": fault.get("pose"),
+                "mode": fault.get("mode"),
+                "reason": fault.get("reason"),
+            }
     return {
         "schema": TELEMETRY_SCHEMA,
         "seed": seed,
@@ -68,6 +82,10 @@ def summarize_telemetry(
         "near_miss_threshold_m": float(near_miss_m),
         "terrain_advice": advice,
         "living_advice": living,
+        "sos": sos
+        if sos is not None
+        else {"active": False, "retrieve": False, "code": None, "component": None, "pose": None},
+        "sos_steps": sos_steps,
         "not_a_benchmark": True,
     }
 
@@ -109,6 +127,8 @@ def telemetry_from_scorecard(card: EpisodeScorecard) -> dict[str, Any]:
         "living_near_miss_min_m": card.near_miss_person_m,
         "near_miss_threshold_m": NEAR_MISS_LIVING_M,
         "terrain_advice": dict(card.terrain_advice),
+        "sos": {"active": False, "retrieve": False, "code": None, "component": None, "pose": None},
+        "sos_steps": 0,
         "not_a_benchmark": True,
     }
 

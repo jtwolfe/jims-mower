@@ -9,7 +9,10 @@ from typing import Any, Optional, Union
 import yaml
 
 from jims_mower.constants import (
+    MOTOR_KILL_MODES,
     MOVER_DENSITIES,
+    RADIO_CHANNELS,
+    RADIO_LOSS_ACTIONS,
     SEASONS,
     TOF_COUNTS,
     TRAJECTORY_MODES,
@@ -352,6 +355,41 @@ class RuntimeConfig:
 
 
 @dataclass
+class FaultsConfig:
+    """Gym / runtime fault injection. Off by default so existing tests stay still."""
+
+    enabled: bool = False
+    inject: list = field(default_factory=list)
+
+
+@dataclass
+class RadioLinkConfig:
+    bandwidth_bps: float = 1_000_000.0
+    range_m: float = 20.0
+    drop_prob: float = 0.05
+
+
+@dataclass
+class RadioConfig:
+    """Simulated Wi-Fi / BT / LoRa. No real RF hardware."""
+
+    enabled: bool = False
+    distance_m: float = 10.0
+    heartbeat_timeout_s: float = 2.0
+    on_loss: str = "stop_beacon"  # limp_home | stop_beacon
+    payload_bytes: int = 48
+    wifi: RadioLinkConfig = field(
+        default_factory=lambda: RadioLinkConfig(20_000_000.0, 40.0, 0.02)
+    )
+    bt: RadioLinkConfig = field(
+        default_factory=lambda: RadioLinkConfig(1_000_000.0, 12.0, 0.08)
+    )
+    lora: RadioLinkConfig = field(
+        default_factory=lambda: RadioLinkConfig(5_000.0, 2_000.0, 0.15)
+    )
+
+
+@dataclass
 class EnvConfig:
     dt: float = 0.10
     max_steps: int = 500
@@ -367,6 +405,8 @@ class EnvConfig:
         default_factory=DomainRandomizationConfig
     )
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    faults: FaultsConfig = field(default_factory=FaultsConfig)
+    radio: RadioConfig = field(default_factory=RadioConfig)
 
     def resolved_cameras(self) -> list[CameraSpec]:
         """Return the 4–6 camera rig, applying the default FOV when needed."""
@@ -569,6 +609,45 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     wd = cfg.runtime.watchdog
     if wd.imu_stall_s <= 0 or wd.vision_stall_s <= 0:
         raise ConfigError("runtime.watchdog stall windows must be positive")
+    radio = cfg.radio
+    if radio.distance_m < 0:
+        raise ConfigError("radio.distance_m must be >= 0")
+    if radio.heartbeat_timeout_s <= 0:
+        raise ConfigError("radio.heartbeat_timeout_s must be positive")
+    if radio.payload_bytes < 1:
+        raise ConfigError("radio.payload_bytes must be >= 1")
+    on_loss = str(radio.on_loss or "").strip().lower()
+    if on_loss not in RADIO_LOSS_ACTIONS:
+        raise ConfigError(
+            f"radio.on_loss must be one of {sorted(RADIO_LOSS_ACTIONS)}; got {radio.on_loss!r}"
+        )
+    radio.on_loss = on_loss
+    for name in RADIO_CHANNELS:
+        link = getattr(radio, name)
+        if float(link.bandwidth_bps) <= 0 or float(link.range_m) <= 0:
+            raise ConfigError(f"radio.{name} bandwidth_bps and range_m must be positive")
+        if not 0.0 <= float(link.drop_prob) <= 1.0:
+            raise ConfigError(f"radio.{name}.drop_prob must be in [0, 1]")
+    if not isinstance(cfg.faults.inject, list):
+        raise ConfigError("faults.inject must be a list")
+    for item in cfg.faults.inject:
+        if not isinstance(item, dict):
+            raise ConfigError("each faults.inject entry must be a mapping")
+        kind = item.get("kind") or item.get("component")
+        if not kind:
+            raise ConfigError("faults.inject entry needs kind or component")
+        if "mode" in item:
+            mode = str(item["mode"]).strip().lower()
+            if mode not in MOTOR_KILL_MODES and mode not in RADIO_LOSS_ACTIONS and mode not in {
+                "stuck",
+                "jam",
+                "blind",
+                "freeze",
+                "dropout",
+            }:
+                raise ConfigError(f"faults.inject mode {item['mode']!r} is not recognised")
+        if int(item.get("at_step", 0)) < 0:
+            raise ConfigError("faults.inject at_step must be >= 0")
     plan = cfg.planner
     if plan.max_climb_slope_rad <= 0:
         raise ConfigError("planner.max_climb_slope_rad must be positive")

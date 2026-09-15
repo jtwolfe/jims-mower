@@ -203,6 +203,10 @@ def _info_slim(info: dict[str, Any]) -> dict[str, Any]:
         "thermal_c",
         "budget_advice",
         "budget_reason",
+        "fault",
+        "radio_lost",
+        "radio_channel",
+        "radio_on_loss",
     )
     return {k: info[k] for k in keep if k in info}
 

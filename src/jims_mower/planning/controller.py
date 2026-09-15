@@ -20,6 +20,7 @@ from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wr
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
 from jims_mower.planning.fusion import attitude_from_accel, make_pose_filter
+from jims_mower.faults import fault_is_immobilised, fault_is_retrieve
 from jims_mower.runtime.budget import budget_advice
 from jims_mower.safe_state import SafeStateMachine, estop_requested
 from jims_mower.types import Pose
@@ -256,6 +257,20 @@ class TerrainPolicy:
         if info.get("watchdog_stalled"):
             self.last_advice = "stop"
             return self._hold()
+
+        fault = info.get("fault") if isinstance(info.get("fault"), dict) else None
+        if fault_is_immobilised(fault) or fault_is_retrieve(fault):
+            self.help_requested = True
+            self.last_recovery = "help"
+            self.last_advice = "stop"
+            self.safe.enter_safe("FAULT_IMMOBILISED — retrieve")
+            return self._finish_action(self._hold(), "stop", info)
+        if info.get("radio_lost") and str(info.get("radio_on_loss") or "") == "stop_beacon":
+            self.help_requested = True
+            self.last_recovery = "help"
+            self.last_advice = "stop"
+            self.safe.enter_safe("radio heartbeat lost — stop + beacon")
+            return self._finish_action(self._hold(), "stop", info)
 
         signal = observed_hand_signal(obs, self.cfg.curriculum.hand_signals)
         self.last_signal = signal
