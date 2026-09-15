@@ -11,11 +11,27 @@ perception: exporter → numpy terrain stub, BEV fuse, temporal filters),
 and WAVE **3A** (behaviour cloning, RL scaffold, incident / telemetry /
 ESTOP, owner overlay) are on `main`. WAVE **3B** (runtime / Orin packaging /
 design studies) is on `main`. WAVE **4** closes remaining perception /
-mapping / planning / world / Orin / ops hooks. WAVE **UX-A** (this PR)
-adds the World Viewer + Teach Boundary flow. Later items stay unchecked
-until they land. No claimed mAP / FPS.
+mapping / planning / world / Orin / ops hooks. WAVE **UX-A** (World Viewer
++ Teach Boundary) and WAVE **UX-B** (FaultBus, radio sim, self-test) are
+on `main`. WAVE **UX-C** (this PR) is the thin owner app + YardProfile API;
+it reuses the UX-A mesh + three.js viewer and UX-B fault / radio status.
+Later items stay unchecked until they land. No claimed mAP / FPS.
 
-## WAVE UX-A — World Viewer + Teach Boundary (this PR)
+## WAVE UX-C — owner app shell + YardProfile API (this PR)
+
+- [x] YardProfile JSON (`jims_mower.yard.v1`) — home, keep-in/out, mesh, radio prefs, schedule stub
+- [x] Load / save / validate on the UX-A `YardProfile` (radio / schedule extras)
+- [x] Local HTTP JSON API: `/status`, `/yard`, `/command`, `/map/mesh`, `/map/coverage`
+- [x] SSE `/events` for live status
+- [x] Thin phone shell: unbox → pair → place home → teach → first mow; map; health; SOS
+- [x] Buy→mow checklist (BT required, Wi-Fi optional, LoRa long-range)
+- [x] `jims-mower-app` serves API+UI against sim env or recorded episode
+- [x] Reuse UX-A `viewer_static` + `mesh_to_payload` (no second three.js stack)
+- [x] Surface UX-B FaultBus / RadioSim on `/status` (no second radio stack)
+- [x] YardProfile + API smoke tests
+- [x] ROADMAP checkboxes for the items above
+
+## WAVE UX-A — World Viewer + Teach Boundary (done, on main)
 
 - [x] World Viewer local web UI (`jims-mower-viewer`) — three.js CDN,
       low-poly mesh, coverage / hazard / occupancy toggles, plan overlay,
@@ -31,7 +47,7 @@ until they land. No claimed mAP / FPS.
 
 See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
 
-## WAVE 4 — remaining ROADMAP hooks (done)
+## WAVE 4 — remaining ROADMAP hooks (done, on main)
 
 - [x] Person / animal / toy categories + appearance model on `MockDetector`
 - [x] Hand-signal classifier stub behind `curriculum.hand_signal_classifier`
@@ -277,6 +293,10 @@ jims-mower-mesh --out /tmp/yard.glb --seed 7 --cameras 4
 jims-mower-teach --steps 8 --out teach_out --cameras 4
 jims-mower-demo --policy teach --steps 8 --out demo_teach
 jims-mower-demo --profile teach_out/profile.json --steps 4 --out demo_taught
+
+# WAVE UX-C
+jims-mower-app --help
+jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
 ```
 
 ## WAVE UX-B — faults + radio sim (append)

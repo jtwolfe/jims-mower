@@ -83,6 +83,8 @@ editable fence. Use more steps (or a smaller yard) to record a full loop.
 
 ## What this is not
 
-- Not an owner phone app (that remains `jims-mower-owner`).
+- Not an owner phone app. WAVE UX-C (`jims-mower-app`, [`UX_C.md`](UX_C.md))
+  is the local phone shell; it **reuses** this viewer at `/viewer` and the
+  same `YardProfile` / `mesh_to_payload` — no second three.js stack.
 - Not SLAM, not a measured mesh quality score.
 - Not a live radio / BMS dashboard — those chips stay empty until hardware.

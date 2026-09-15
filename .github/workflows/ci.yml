@@ -59,6 +59,8 @@ jobs:
           jims-mower-telemetry /tmp/jims-mower-ci-ep --out /tmp/jims-mower-ci-telemetry.json
       - name: Owner overlay smoke
         run: jims-mower-owner --config geofence_movers --cameras 4 --out /tmp/jims-mower-ci-owner.html
+      - name: Owner app CLI smoke
+        run: jims-mower-app --help
       - name: WAVE 4 hooks smoke
         run: |
           jims-mower-sequence --yards paddock,suburban --dry-run --out /tmp/jims-mower-ci-seq

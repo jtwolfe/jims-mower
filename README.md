@@ -78,9 +78,13 @@ jims-mower-demo --profile teach_out/profile.json --out demo_taught
 
 # WAVE UX-B — software self-test (no RF hardware)
 jims-mower-selftest
+
+# WAVE UX-C — local owner app (API + phone UI; reuses UX-A viewer/mesh)
+jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
+# open http://127.0.0.1:8765/  (sim: omit --backend memory; episode: --episode DIR)
 ```
 
-Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md).
+Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md).
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
 

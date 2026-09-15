@@ -1,0 +1,18 @@
+{
+  "schema": "jims_mower.mesh.v1",
+  "name": "example_yard",
+  "note": "Placeholder occupancy mesh. UX-A may replace this with a three.js-ready file.",
+  "not_slam": true,
+  "vertices": [
+    [1.0, 1.0],
+    [15.0, 1.0],
+    [15.0, 11.0],
+    [1.0, 11.0]
+  ],
+  "edges": [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 0]
+  ]
+}

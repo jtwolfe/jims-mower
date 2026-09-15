@@ -65,6 +65,7 @@ jims-mower-viewer = "jims_mower.viewer:main"
 jims-mower-mesh = "jims_mower.mesh:main"
 jims-mower-teach = "jims_mower.teach:main"
 jims-mower-selftest = "jims_mower.selftest:main"
+jims-mower-app = "jims_mower.app.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"
@@ -83,7 +84,9 @@ jims_mower = [
     "data/sequences/*.yaml",
     "data/orin/*.yaml",
     "data/surveys/*.json",
+    "data/yards/*.json",
     "viewer_static/*",
+    "app/static/*",
 ]
 
 [tool.pytest.ini_options]

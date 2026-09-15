@@ -8,13 +8,132 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional, Union
 
-from jims_mower.constants import YARD_PROFILE_SCHEMA
+import re
+
+from jims_mower.constants import RADIO_LINKS, SCHEDULE_DAYS, SURVEY_SCHEMA, YARD_PROFILE_SCHEMA
 from jims_mower.geofence import GeofenceSpec
 from jims_mower.types import Pose
+
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 class ProfileError(ValueError):
     """Invalid YardProfile JSON."""
+
+
+YardProfileError = ProfileError
+
+
+@dataclass(frozen=True)
+class RadioPrefs:
+    """BT pair required, Wi-Fi optional, LoRa long-range default (UX-C)."""
+
+    bluetooth: bool = True
+    wifi_enabled: bool = False
+    wifi_ssid: str = ""
+    lora_enabled: bool = True
+    lora_channel: int = 1
+    primary: str = "lora"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "bluetooth": bool(self.bluetooth),
+            "wifi": {"enabled": bool(self.wifi_enabled), "ssid": str(self.wifi_ssid)},
+            "lora": {"enabled": bool(self.lora_enabled), "channel": int(self.lora_channel)},
+            "primary": str(self.primary),
+        }
+
+
+@dataclass(frozen=True)
+class ScheduleStub:
+    """Placeholder weekly window — not a running scheduler."""
+
+    enabled: bool = False
+    days: tuple[str, ...] = ()
+    start_local: str = "09:00"
+    duration_min: int = 60
+    note: str = "stub — not a scheduler"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "days": list(self.days),
+            "start_local": str(self.start_local),
+            "duration_min": int(self.duration_min),
+            "note": str(self.note),
+        }
+
+
+def _safe_relpath(raw: Any, *, field: str, default: str = "yard.glb") -> str:
+    path = str(raw or default).strip() or default
+    if Path(path).is_absolute() or path.startswith("~"):
+        raise ProfileError(f"{field} must be a relative path")
+    if ".." in Path(path).parts:
+        raise ProfileError(f"{field} must not traverse parent directories")
+    return path.replace("\\", "/")
+
+
+def _parse_radio(raw: Any) -> dict[str, Any]:
+    prefs = RadioPrefs() if raw is None else None
+    if prefs is not None:
+        return prefs.as_dict()
+    if not isinstance(raw, dict):
+        raise ProfileError("radio must be a mapping")
+    wifi = raw.get("wifi") if isinstance(raw.get("wifi"), dict) else {}
+    lora = raw.get("lora") if isinstance(raw.get("lora"), dict) else {}
+    primary = str(raw.get("primary") or "lora").strip().lower()
+    if primary not in RADIO_LINKS:
+        raise ProfileError(f"radio.primary must be one of {tuple(RADIO_LINKS)}")
+    bluetooth = raw.get("bluetooth", True)
+    if isinstance(bluetooth, dict):
+        bluetooth = bluetooth.get("enabled", bluetooth.get("paired", True))
+    try:
+        channel_i = int(lora.get("channel", raw.get("lora_channel", 1)))
+    except (TypeError, ValueError) as exc:
+        raise ProfileError("radio.lora.channel must be an integer") from exc
+    if channel_i < 0 or channel_i > 64:
+        raise ProfileError("radio.lora.channel must be in 0..64")
+    return RadioPrefs(
+        bluetooth=bool(bluetooth),
+        wifi_enabled=bool(wifi.get("enabled", raw.get("wifi_enabled", False))),
+        wifi_ssid=str(wifi.get("ssid") or raw.get("wifi_ssid") or ""),
+        lora_enabled=bool(lora.get("enabled", raw.get("lora_enabled", True))),
+        lora_channel=channel_i,
+        primary=primary,
+    ).as_dict()
+
+
+def _parse_schedule(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return ScheduleStub().as_dict()
+    if not isinstance(raw, dict):
+        raise ProfileError("schedule must be a mapping")
+    days_raw = raw.get("days") or []
+    if not isinstance(days_raw, list):
+        raise ProfileError("schedule.days must be a list")
+    days: list[str] = []
+    for i, day in enumerate(days_raw):
+        key = str(day).strip().lower()[:3]
+        if key not in SCHEDULE_DAYS:
+            raise ProfileError(f"schedule.days[{i}] must be one of {tuple(SCHEDULE_DAYS)}")
+        if key not in days:
+            days.append(key)
+    start = str(raw.get("start_local") or "09:00").strip()
+    if not _TIME_RE.match(start):
+        raise ProfileError("schedule.start_local must be HH:MM (24h)")
+    try:
+        duration = int(raw.get("duration_min", 60))
+    except (TypeError, ValueError) as exc:
+        raise ProfileError("schedule.duration_min must be an integer") from exc
+    if duration < 0 or duration > 24 * 60:
+        raise ProfileError("schedule.duration_min must be in 0..1440")
+    return ScheduleStub(
+        enabled=bool(raw.get("enabled", False)),
+        days=tuple(days),
+        start_local=start,
+        duration_min=duration,
+        note=str(raw.get("note") or "stub — not a scheduler"),
+    ).as_dict()
 
 
 def _xy(item: Any, *, field: str) -> tuple[float, float]:
@@ -167,7 +286,17 @@ class YardProfile:
     mesh: str = "yard.glb"
     trail: list[tuple[float, float]] = field(default_factory=list)
     inflate_m: float = 0.30
+    radio: dict[str, Any] = field(default_factory=lambda: RadioPrefs().as_dict())
+    schedule: dict[str, Any] = field(default_factory=lambda: ScheduleStub().as_dict())
+    description: str = ""
     not_a_benchmark: bool = True
+
+    def to_geofence_spec(self, inflate_m: Optional[float] = None) -> GeofenceSpec:
+        return self.geofence_spec() if inflate_m is None else GeofenceSpec(
+            keep_in=list(self.keep_in),
+            keep_out=[list(p) for p in self.keep_out],
+            inflate_m=float(inflate_m),
+        )
 
     def geofence_spec(self) -> GeofenceSpec:
         return GeofenceSpec(
@@ -199,8 +328,12 @@ class YardProfile:
                 "theta": float(self.home.get("theta", 0.0)),
             },
             "mesh": self.mesh,
+            "mesh_path": self.mesh,
             "trail": [list(p) for p in self.trail],
             "inflate_m": float(self.inflate_m),
+            "radio": dict(self.radio or RadioPrefs().as_dict()),
+            "schedule": dict(self.schedule or ScheduleStub().as_dict()),
+            "description": self.description,
             "not_a_benchmark": True,
         }
 
@@ -221,6 +354,8 @@ def parse_yard_profile(data: dict[str, Any]) -> YardProfile:
     if schema and schema != YARD_PROFILE_SCHEMA:
         raise ProfileError(f"unsupported yard schema {schema!r}; expected {YARD_PROFILE_SCHEMA}")
     keep_in = _polygon(data.get("keep_in") or data.get("geofence"), field="keep_in")
+    if keep_in and len(keep_in) < 3:
+        raise ProfileError("keep_in needs at least 3 vertices")
     raw_out = data.get("keep_out") or data.get("keepout") or []
     keep_out: list[list[tuple[float, float]]] = []
     if raw_out:
@@ -230,7 +365,10 @@ def parse_yard_profile(data: dict[str, Any]) -> YardProfile:
             keep_out.append(_polygon(raw_out, field="keep_out"))
         else:
             for i, item in enumerate(raw_out):
-                keep_out.append(_polygon(item, field=f"keep_out[{i}]"))
+                poly = _polygon(item, field=f"keep_out[{i}]")
+                if poly and len(poly) < 3:
+                    raise ProfileError(f"keep_out[{i}] needs at least 3 vertices")
+                keep_out.append(poly)
     home_raw = data.get("home") or {}
     if not isinstance(home_raw, dict):
         raise ProfileError("home must be {x, y, theta}")
@@ -248,9 +386,12 @@ def parse_yard_profile(data: dict[str, Any]) -> YardProfile:
             "y": float(home_raw.get("y", 1.0)),
             "theta": float(home_raw.get("theta", 0.0)),
         },
-        mesh=str(data.get("mesh") or "yard.glb"),
+        mesh=_safe_relpath(data.get("mesh") or data.get("mesh_path"), field="mesh"),
         trail=trail,
         inflate_m=float(data.get("inflate_m") or 0.30),
+        radio=_parse_radio(data.get("radio")),
+        schedule=_parse_schedule(data.get("schedule")),
+        description=str(data.get("description") or ""),
         not_a_benchmark=True,
     )
 
