@@ -7,20 +7,53 @@ from typing import Optional
 
 import numpy as np
 
-from jims_mower.cameras import camera_world_pose, ground_hits, project_point
+from jims_mower.cameras import camera_world_pose, ground_hits, heightfield_hits, project_point
 from jims_mower.constants import (
+    BANK_RGB,
     CUT_GRASS_RGB,
     DIRT_RGB,
+    DRAIN_EDGE_RGB,
+    DRAIN_RGB,
     KIND_RGB,
     SKY_RGB,
+    TERRAIN_BANK,
+    TERRAIN_DRAIN,
+    TERRAIN_DRAIN_EDGE,
     UNCUT_GRASS_RGB,
 )
 from jims_mower.maps import GrassCoverageMap
+from jims_mower.terrain import HeightField
 from jims_mower.types import CameraSpec, Obstacle, Pose
 
 
 def _rgb(color: tuple[int, int, int]) -> np.ndarray:
     return np.asarray(color, dtype=np.uint8)
+
+
+def _shade_rgb(color: tuple[int, int, int], shade: float) -> np.ndarray:
+    return np.clip(np.asarray(color, dtype=np.float32) * shade, 0, 255).astype(np.uint8)
+
+
+def _terrain_base_color(
+    coverage: GrassCoverageMap,
+    terrain: Optional[HeightField],
+    x: float,
+    y: float,
+) -> tuple[int, int, int]:
+    if terrain is not None:
+        label = terrain.sample_label(x, y)
+        if label == TERRAIN_DRAIN:
+            return DRAIN_RGB
+        if label == TERRAIN_DRAIN_EDGE:
+            return DRAIN_EDGE_RGB
+    sample = coverage.sample_world(x, y)
+    if sample < 0.0:
+        return DIRT_RGB
+    if sample > 0.5:
+        return CUT_GRASS_RGB
+    if terrain is not None and terrain.sample_label(x, y) == TERRAIN_BANK:
+        return BANK_RGB
+    return UNCUT_GRASS_RGB
 
 
 def render_camera(
@@ -31,13 +64,22 @@ def render_camera(
     width: int,
     height: int,
     yard_size: tuple[float, float],
+    terrain: Optional[HeightField] = None,
 ) -> np.ndarray:
-    """Synthesize one RGB view: ray-traced ground plus projected blobs."""
+    """Synthesize one RGB view: ray-traced ground plus projected blobs.
+
+    When a height field is present, rays iterate against elevation and
+    ground pixels are shaded by slope (Lambert) and drain/bank labels so
+    a CV hook can tell a ditch from flat grass.
+    """
     world_cam = camera_world_pose(pose, cam)
     image = np.zeros((height, width, 3), dtype=np.uint8)
     image[:] = SKY_RGB
 
-    hx, hy, valid = ground_hits(world_cam, width, height)
+    if terrain is not None:
+        hx, hy, _hz, valid = heightfield_hits(world_cam, width, height, terrain.sample_many)
+    else:
+        hx, hy, valid = ground_hits(world_cam, width, height)
     inside = (
         valid
         & (hx >= 0.0)
@@ -48,13 +90,22 @@ def render_camera(
     dirt = valid & ~inside
     image[dirt] = DIRT_RGB
 
-    # Sample coverage at hit cells. Looping 80x60 is fine; keep it explicit.
-    uncut = _rgb(UNCUT_GRASS_RGB)
-    cut = _rgb(CUT_GRASS_RGB)
+    light = np.array([-0.35, 0.25, 0.90], dtype=np.float64)
+    light = light / np.linalg.norm(light)
     rows, cols = np.where(inside)
     for r, c in zip(rows.tolist(), cols.tolist()):
-        sample = coverage.sample_world(float(hx[r, c]), float(hy[r, c]))
-        image[r, c] = cut if sample > 0.5 else uncut
+        x = float(hx[r, c])
+        y = float(hy[r, c])
+        color = _terrain_base_color(coverage, terrain, x, y)
+        shade = 1.0
+        if terrain is not None:
+            nx, ny, nz = terrain.normal_at(x, y)
+            shade = float(np.clip(0.50 + 0.50 * (nx * light[0] + ny * light[1] + nz * light[2]), 0.28, 1.15))
+            # Extra darkening by depth so drain bottoms read as holes.
+            if terrain.sample_label(x, y) == TERRAIN_DRAIN:
+                depth = max(0.0, -terrain.sample(x, y))
+                shade *= float(np.clip(1.0 - 1.6 * depth, 0.35, 1.0))
+        image[r, c] = _shade_rgb(color, shade)
 
     # Painter's algorithm: far objects first.
     drawn: list[tuple[float, Obstacle]] = []
@@ -107,6 +158,7 @@ def render_topdown(
     trimmer_xy: Optional[tuple[float, float]] = None,
     trimmer_on: bool = False,
     image_size: int = 240,
+    terrain: Optional[HeightField] = None,
 ) -> np.ndarray:
     """Orthographic yard map for ``render_mode='rgb_array'``."""
     w_m = coverage.width_m
@@ -138,6 +190,19 @@ def render_topdown(
     image[sampled >= 0.0] = UNCUT_GRASS_RGB
     image[sampled > 0.5] = CUT_GRASS_RGB
 
+    if terrain is not None:
+        trows, tcols = terrain.labels.shape
+        src_tr = np.clip((yy / terrain.resolution_m).astype(int), 0, trows - 1)
+        src_tc = np.clip((xx / terrain.resolution_m).astype(int), 0, tcols - 1)
+        src_tr = src_tr[::-1]
+        labels = terrain.labels[src_tr[:, None], src_tc[None, :]]
+        image[labels == TERRAIN_BANK] = BANK_RGB
+        image[labels == TERRAIN_DRAIN_EDGE] = DRAIN_EDGE_RGB
+        image[labels == TERRAIN_DRAIN] = DRAIN_RGB
+        # Recolor cut grass on banks so coverage is still visible.
+        bank_cut = (labels == TERRAIN_BANK) & (sampled > 0.5)
+        image[bank_cut] = CUT_GRASS_RGB
+
     def to_px(x: float, y: float) -> tuple[float, float]:
         return x * scale_x, (h_m - y) * scale_y
 
@@ -158,4 +223,48 @@ def render_topdown(
         tu, tv = to_px(*trimmer_xy)
         color = (80, 220, 80) if trimmer_on else (200, 200, 200)
         _stamp_disk(image, tu, tv, max(2.0, 0.12 * scale_x), color)
+    return image
+
+
+def render_scalar_map(
+    grid: np.ndarray,
+    *,
+    vmin: Optional[float] = None,
+    vmax: Optional[float] = None,
+    image_size: int = 240,
+    cmap: str = "elev",
+) -> np.ndarray:
+    """False-color raster for demo / tests (elevation, slope, or hazard)."""
+    rows, cols = grid.shape
+    if cols >= rows:
+        width = image_size
+        height = max(8, int(round(image_size * rows / cols)))
+    else:
+        height = image_size
+        width = max(8, int(round(image_size * cols / rows)))
+    yy = (np.linspace(0, rows - 1, height)).astype(int)
+    xx = (np.linspace(0, cols - 1, width)).astype(int)
+    sampled = grid[yy[:, None], xx[None, :]]
+    # Flip Y so +world-y is up, matching render_topdown.
+    sampled = sampled[::-1]
+    lo = float(np.min(sampled)) if vmin is None else float(vmin)
+    hi = float(np.max(sampled)) if vmax is None else float(vmax)
+    span = max(hi - lo, 1e-6)
+    t = np.clip((sampled.astype(np.float32) - lo) / span, 0.0, 1.0)
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    if cmap == "hazard":
+        image[sampled == 0] = (40, 90, 50)
+        image[sampled == 1] = (210, 160, 40)
+        image[sampled == 2] = (200, 90, 30)
+        image[sampled >= 3] = (90, 40, 20)
+        return image
+    if cmap == "slope":
+        image[:, :, 0] = (40 + 200 * t).astype(np.uint8)
+        image[:, :, 1] = (180 - 120 * t).astype(np.uint8)
+        image[:, :, 2] = (50 + 20 * t).astype(np.uint8)
+        return image
+    # elevation: blue (low / drains) → green → yellow (banks)
+    image[:, :, 0] = (30 + 200 * t).astype(np.uint8)
+    image[:, :, 1] = (80 + 140 * t).astype(np.uint8)
+    image[:, :, 2] = (160 - 120 * t).astype(np.uint8)
     return image

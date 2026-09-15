@@ -8,9 +8,19 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class Pose:
+    """Planar yaw plus contact attitude on the height field.
+
+    ``z`` is the mean wheel-contact elevation. ``pitch`` is nose-up about
+    body +y; ``roll`` is left-side-up about body +x. On flat ground both
+    are zero and this reduces to ``(x, y, theta)``.
+    """
+
     x: float
     y: float
     theta: float
+    z: float = 0.0
+    pitch: float = 0.0
+    roll: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -80,3 +90,10 @@ class PerceptionContext:
     obstacles: list[Obstacle] = field(default_factory=list)
     image_size: tuple[int, int] = (80, 60)
     hand_signals_enabled: bool = False
+    imu: Optional[object] = None
+    gps: Optional[object] = None
+    terrain: Optional[object] = None
+    map_shape: tuple[int, int] = (1, 1)
+    resolution_m: float = 0.10
+    world_size: tuple[float, float] = (12.0, 12.0)
+    steep_slope_rad: float = 0.30

@@ -10,8 +10,13 @@ robot:
   width_m: 0.50
   height_m: 0.50
   wheelbase_m: 0.40
+  track_m: 0.40
   max_wheel_speed_mps: 1.2
   collision_radius_m: 0.28
+  tip_roll_rad: 0.40
+  tip_pitch_rad: 0.45
+  wheel_drop_m: 0.08
+  steep_slope_rad: 0.30
   trimmer:
     # Front-mounted whipper-snipper, not an under-deck blade.
     offset_m: 0.32
@@ -26,6 +31,21 @@ sensors:
   camera_count: 6
   fov_deg: 70.0
   cameras: []
+  imu:
+    enabled: true
+    accel_noise_std: 0.05
+    gyro_noise_std: 0.015
+    accel_bias_std: 0.02
+  gps:
+    enabled: true
+    horiz_noise_std_m: 1.2
+    vert_noise_std_m: 2.0
+    dropout_prob: 0.02
+    include_altitude: true
+  tof:
+    enabled: true
+    noise_std_m: 0.012
+    max_range_m: 1.2
 
 world:
   width_m: 12.0
@@ -38,6 +58,20 @@ world:
   n_trees: 3
   n_furniture: 1
   n_toys: 2
+  terrain:
+    enabled: true
+    n_drains: 2
+    n_banks: 2
+    drain_width_m: 0.40
+    drain_depth_m: 0.16
+    drain_length_m: 4.0
+    drain_side_slope: 1.5
+    bank_height_m: 0.40
+    bank_width_m: 1.8
+    bank_length_m: 3.5
+    max_slope_rad: 0.45
+    noise_amp_m: 0.015
+    keepout_m: 1.6
 
 reward:
   coverage_scale: 1.0
@@ -47,7 +81,14 @@ reward:
   out_of_bounds: 10.0
   completion_bonus: 15.0
   completion_threshold: 0.95
+  tipover: 40.0
+  drain_drop: 30.0
+  steep: 2.0
 
 curriculum:
   hand_signals: false
   signal_hold_steps: 40
+
+perception:
+  # oracle: god-view maps for training. blind / heuristic are onboard stubs.
+  terrain_mode: oracle

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from jims_mower.cameras import (
@@ -11,6 +12,7 @@ from jims_mower.cameras import (
     camera_world_pose,
     focal_length_px,
     ground_hits,
+    heightfield_hits,
     project_point,
     world_to_body,
     world_to_optical,
@@ -48,6 +50,13 @@ def test_front_camera_sits_on_nose() -> None:
     assert wp.x == pytest.approx(5.25)
     assert wp.y == pytest.approx(5.0)
     assert wp.z == pytest.approx(0.38)
+
+
+def test_camera_rides_robot_elevation() -> None:
+    pose = Pose(5.0, 5.0, 0.0, z=0.20)
+    cam = CameraSpec("front", 0.25, 0.0, 0.38, 0.0, -18.0)
+    wp = camera_world_pose(pose, cam)
+    assert wp.z == pytest.approx(0.58)
 
 
 def test_point_ahead_is_in_front_optical() -> None:
@@ -113,6 +122,20 @@ def np_isfinite_some(arr) -> bool:
     import numpy as np
 
     return bool(np.isfinite(arr).any())
+
+
+def test_heightfield_hits_match_flat_ground() -> None:
+    pose = Pose(2.0, 2.0, 0.0)
+    cam = CameraSpec("front", 0.25, 0.0, 0.38, 0.0, -25.0)
+    wp = camera_world_pose(pose, cam)
+    hx0, hy0, valid0 = ground_hits(wp, 16, 12)
+    hx1, hy1, _hz, valid1 = heightfield_hits(
+        wp, 16, 12, lambda xs, ys: np.zeros_like(xs, dtype=np.float32)
+    )
+    both = valid0 & valid1
+    assert bool(both.any())
+    assert np.allclose(hx0[both], hx1[both], atol=0.15)
+    assert np.allclose(hy0[both], hy1[both], atol=0.15)
 
 
 def test_left_camera_yaw() -> None:

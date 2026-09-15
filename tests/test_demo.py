@@ -22,6 +22,13 @@ def test_demo_writes_cameras_and_summary(tmp_path: Path) -> None:
     assert isinstance(dets, list)
     montage = step0 / "montage.png"
     assert montage.is_file()
+    assert (step0 / "elevation.png").is_file()
+    assert (step0 / "slope.png").is_file()
+    assert (step0 / "hazard.png").is_file()
+    assert (step0 / "sensors.json").is_file()
+    sensors = json.loads((step0 / "sensors.json").read_text(encoding="utf-8"))
+    assert len(sensors["imu"]) == 6
+    assert len(sensors["gps"]) == 4
 
 
 def test_demo_six_cameras(tmp_path: Path) -> None:

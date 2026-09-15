@@ -53,20 +53,40 @@ def run_demo(
     records: list[dict] = []
     dump_steps = {0, max(0, steps // 2), max(0, steps - 1)}
 
+    def _dump_step(step_dir: Path, obs: dict, info: dict) -> None:
+        step_dir.mkdir(parents=True, exist_ok=True)
+        for name, frame in obs["cameras"].items():
+            _save_rgb(step_dir / f"cam_{name}.png", frame)
+        _save_rgb(step_dir / "montage.png", _montage(obs["cameras"], names))
+        topdown = env.render()
+        if topdown is not None:
+            _save_rgb(step_dir / "topdown.png", topdown)
+        for layer, img in env.terrain_layer_images().items():
+            _save_rgb(step_dir / f"{layer}.png", img)
+        (step_dir / "detections.json").write_text(
+            json.dumps(info["detections"], indent=2),
+            encoding="utf-8",
+        )
+        (step_dir / "sensors.json").write_text(
+            json.dumps(
+                {
+                    "imu": info.get("imu"),
+                    "gps": info.get("gps"),
+                    "tof": info.get("tof"),
+                    "pose": info.get("pose"),
+                    "n_drains": info.get("n_drains"),
+                    "n_banks": info.get("n_banks"),
+                    "terrain_source": info.get("terrain_source"),
+                    "terrain_advice": info.get("terrain_advice"),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
     for t in range(steps):
         if t in dump_steps:
-            step_dir = out_dir / f"step_{t:03d}"
-            step_dir.mkdir(parents=True, exist_ok=True)
-            for name, frame in obs["cameras"].items():
-                _save_rgb(step_dir / f"cam_{name}.png", frame)
-            _save_rgb(step_dir / "montage.png", _montage(obs["cameras"], names))
-            topdown = env.render()
-            if topdown is not None:
-                _save_rgb(step_dir / "topdown.png", topdown)
-            (step_dir / "detections.json").write_text(
-                json.dumps(info["detections"], indent=2),
-                encoding="utf-8",
-            )
+            _dump_step(out_dir / f"step_{t:03d}", obs, info)
 
         # Slow forward creep with the trimmer requested.
         action = np.array([0.55, 0.50, 1.0], dtype=np.float32)
@@ -81,6 +101,12 @@ def run_demo(
                 "trimmer_enabled": info["trimmer_enabled"],
                 "n_detections": len(info["detections"]),
                 "collision": info.get("collision"),
+                "tipover": info.get("tipover"),
+                "drain_drop": info.get("drain_drop"),
+                "steep": info.get("steep"),
+                "terrain_advice": info.get("terrain_advice"),
+                "imu": info.get("imu"),
+                "gps": info.get("gps"),
             }
         )
         if terminated or truncated:
@@ -89,12 +115,20 @@ def run_demo(
     topdown = env.render()
     if topdown is not None:
         _save_rgb(out_dir / "coverage_final.png", topdown)
+    layers = env.terrain_layer_images()
+    for layer, img in layers.items():
+        _save_rgb(out_dir / f"{layer}_final.png", img)
     summary = {
         "steps_run": len(records),
         "cameras": names,
         "final_coverage_fraction": records[-1]["coverage_fraction"] if records else 0.0,
         "final_detections": info["detections"],
         "hand_signals_enabled": hand_signals,
+        "n_drains": info.get("n_drains"),
+        "n_banks": info.get("n_banks"),
+        "final_pose": info.get("pose"),
+        "final_imu": info.get("imu"),
+        "final_gps": info.get("gps"),
         "log": records,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

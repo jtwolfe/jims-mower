@@ -31,6 +31,25 @@ UNCUT_GRASS_RGB = (46, 140, 58)
 CUT_GRASS_RGB = (168, 148, 72)
 DIRT_RGB = (90, 70, 50)
 SKY_RGB = (135, 186, 230)
+DRAIN_RGB = (58, 42, 28)
+DRAIN_EDGE_RGB = (86, 62, 40)
+BANK_RGB = (72, 118, 52)
+
+# Height-field labels (first-class yard features).
+TERRAIN_FLAT = 0
+TERRAIN_BANK = 1
+TERRAIN_DRAIN = 2
+TERRAIN_DRAIN_EDGE = 3
+
+# Observation / safety hazard raster: 0 free, 1 steep, 2 drain lip, 3 channel.
+HAZARD_NONE = 0
+HAZARD_STEEP = 1
+HAZARD_DRAIN_EDGE = 2
+HAZARD_DRAIN = 3
+
+GRAVITY_MPS2 = 9.80665
+
+TERRAIN_ADVICE = ("ok", "slow", "stop", "reroute")
 
 KIND_RGB = {
     "person": (220, 80, 80),

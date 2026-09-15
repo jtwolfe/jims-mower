@@ -90,6 +90,15 @@ def test_occupancy_from_detections_skips_missing_xy() -> None:
     assert float(grid.sum()) > 0.0
 
 
+def test_exclude_mask_drops_drain_cells() -> None:
+    m = GrassCoverageMap(2.0, 2.0, 0.5)
+    keep = np.ones((4, 4), dtype=bool)
+    keep[0, 0] = False
+    m.exclude_mask(keep)
+    assert m.grass_cell_count() == 15
+    assert m.as_float()[0, 0] == pytest.approx(-1.0)
+
+
 def test_as_float_dtype() -> None:
     m = GrassCoverageMap(2.0, 2.0, 0.5)
     arr = m.as_float()

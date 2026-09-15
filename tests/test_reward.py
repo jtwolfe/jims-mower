@@ -108,6 +108,47 @@ def test_completion_bonus() -> None:
     assert b.completion == pytest.approx(15.0)
 
 
+def test_tipover_penalty() -> None:
+    b = compute_reward(
+        _cfg(),
+        newly_cut=0,
+        grass_cells=100,
+        coverage_fraction=0.2,
+        collision_kind=None,
+        out_of_bounds=False,
+        tipover=True,
+    )
+    assert b.terrain == pytest.approx(-40.0)
+    assert b.done_success is False
+
+
+def test_drain_drop_penalty() -> None:
+    b = compute_reward(
+        _cfg(),
+        newly_cut=0,
+        grass_cells=100,
+        coverage_fraction=0.2,
+        collision_kind=None,
+        out_of_bounds=False,
+        drain_drop=True,
+    )
+    assert b.terrain == pytest.approx(-30.0)
+
+
+def test_steep_penalty_does_not_block_completion() -> None:
+    b = compute_reward(
+        _cfg(),
+        newly_cut=1,
+        grass_cells=100,
+        coverage_fraction=0.96,
+        collision_kind=None,
+        out_of_bounds=False,
+        steep=True,
+    )
+    assert b.terrain == pytest.approx(-2.0)
+    assert b.done_success is True
+
+
 def test_no_completion_on_collision() -> None:
     b = compute_reward(
         _cfg(),

@@ -6,8 +6,8 @@ from gymnasium.envs.registration import register, registry
 
 from jims_mower.config import EnvConfig, load_config
 from jims_mower.env import MowerEnv
-from jims_mower.kinematics import integrate_pose
-from jims_mower.safety import trimmer_interlock
+from jims_mower.kinematics import integrate_pose, sit_on_terrain
+from jims_mower.safety import terrain_hazards, trimmer_interlock
 
 __version__ = "0.1.0"
 
@@ -30,6 +30,8 @@ __all__ = [
     "MowerEnv",
     "integrate_pose",
     "load_config",
+    "sit_on_terrain",
+    "terrain_hazards",
     "trimmer_interlock",
     "__version__",
 ]

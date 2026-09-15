@@ -23,6 +23,7 @@ def tiny_config_dict() -> dict:
             "n_trees": 1,
             "n_furniture": 0,
             "n_toys": 1,
+            "terrain": {"enabled": False},
         },
         "robot": {
             "trimmer": {"safety_radius_m": 1.2, "offset_m": 0.32, "radius_m": 0.16}

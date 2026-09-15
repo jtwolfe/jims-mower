@@ -88,9 +88,12 @@ def spawn_yard(
     height_m: float,
     counts: dict[str, int],
     robot_keepout: tuple[float, float, float],
+    extra_keepout: Optional[list[tuple[float, float, float]]] = None,
 ) -> Yard:
     yard = Yard(width_m=width_m, height_m=height_m)
     keepout = [robot_keepout]
+    if extra_keepout:
+        keepout.extend(extra_keepout)
     order = ("tree", "furniture", "toy", "person", "dog", "cat", "bird")
     for kind in order:
         n = int(counts.get(kind, 0))

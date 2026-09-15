@@ -17,6 +17,9 @@ def _tiny_config() -> dict:
         "dt": 0.1,
         "max_steps": 40,
         "sensors": {"width": 32, "height": 24, "camera_count": 4, "fov_deg": 70.0},
+        "robot": {
+            "trimmer": {"safety_radius_m": 1.2, "offset_m": 0.32, "radius_m": 0.16}
+        },
         "world": {
             "width_m": 8.0,
             "height_m": 8.0,
@@ -28,9 +31,7 @@ def _tiny_config() -> dict:
             "n_trees": 1,
             "n_furniture": 0,
             "n_toys": 1,
-        },
-        "robot": {
-            "trimmer": {"safety_radius_m": 1.2, "offset_m": 0.32, "radius_m": 0.16}
+            "terrain": {"enabled": False},
         },
     }
 
@@ -48,6 +49,12 @@ def test_reset_returns_obs_and_info() -> None:
         "occupancy",
         "detections",
         "pose",
+        "imu",
+        "gps",
+        "tof",
+        "elevation",
+        "slope",
+        "hazard",
         "trimmer_enabled",
         "hand_signal",
     }
@@ -60,7 +67,10 @@ def test_step_five_tuple() -> None:
     env = _env()
     env.reset(seed=1)
     obs, reward, terminated, truncated, info = env.step(np.array([0.2, 0.2, 0.0]))
-    assert obs["pose"].shape == (3,)
+    assert obs["pose"].shape == (6,)
+    assert obs["imu"].shape == (6,)
+    assert obs["gps"].shape == (4,)
+    assert obs["tof"].shape == (4,)
     assert isinstance(reward, float)
     assert isinstance(terminated, bool)
     assert isinstance(truncated, bool)
@@ -285,6 +295,7 @@ def test_out_of_bounds_terminates() -> None:
                 "n_trees": 0,
                 "n_furniture": 0,
                 "n_toys": 0,
+                "terrain": {"enabled": False},
             },
             "robot": {"max_wheel_speed_mps": 2.0},
         }
@@ -299,6 +310,40 @@ def test_out_of_bounds_terminates() -> None:
             assert info["out_of_bounds"] is True
             break
     assert terminated
+    env.close()
+
+
+def test_terrain_yard_in_env() -> None:
+    env = MowerEnv(
+        config={
+            "sensors": {"width": 16, "height": 12, "camera_count": 4},
+            "world": {
+                "width_m": 10.0,
+                "height_m": 10.0,
+                "resolution_m": 0.20,
+                "n_people": 0,
+                "n_dogs": 0,
+                "n_cats": 0,
+                "n_birds": 0,
+                "n_trees": 0,
+                "n_furniture": 0,
+                "n_toys": 0,
+                "terrain": {
+                    "enabled": True,
+                    "n_drains": 2,
+                    "n_banks": 2,
+                    "noise_amp_m": 0.0,
+                    "keepout_m": 1.8,
+                },
+            },
+        }
+    )
+    obs, info = env.reset(seed=30)
+    assert info["n_drains"] >= 1
+    assert info["n_banks"] >= 1
+    assert float(np.abs(obs["elevation"]).max()) > 0.05
+    assert int((obs["hazard"] >= 2).sum()) > 0
+    env.step(np.array([0.3, 0.3, 0.0], dtype=np.float32))
     env.close()
 
 
