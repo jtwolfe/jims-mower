@@ -96,6 +96,14 @@ class GrassCoverageMap:
         out[self.grass & self.cut] = 1.0
         return out
 
+    def exclude_mask(self, mask: np.ndarray) -> None:
+        """Mark cells False in ``mask`` as non-grass (drain channels, etc.)."""
+        if mask.shape != self.grass.shape:
+            raise ValueError("exclude mask shape must match the grass grid")
+        drop = ~np.asarray(mask, dtype=bool)
+        self.grass[drop] = False
+        self.cut[drop] = False
+
     def sample_world(self, x: float, y: float) -> float:
         """Return 1 (cut), 0 (uncut), or -1 (non-grass / OOB) at a world point."""
         cell = self.world_to_cell(x, y)

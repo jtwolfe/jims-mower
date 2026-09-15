@@ -22,10 +22,11 @@ DEFAULT_CONFIG_PATH = _discover_default_config()
 
 # Built-in rig (body frame: x forward, y left, z up). Used when YAML
 # leaves `sensors.cameras` empty.
+# Front pair pitched a bit more down so drain lips sit in the lower image third.
 _DEFAULT_RIG = (
-    CameraSpec("front", 0.25, 0.00, 0.38, 0.0, -18.0),
-    CameraSpec("front_left", 0.20, 0.20, 0.38, 40.0, -15.0),
-    CameraSpec("front_right", 0.20, -0.20, 0.38, -40.0, -15.0),
+    CameraSpec("front", 0.25, 0.00, 0.38, 0.0, -22.0),
+    CameraSpec("front_left", 0.20, 0.20, 0.38, 40.0, -18.0),
+    CameraSpec("front_right", 0.20, -0.20, 0.38, -40.0, -18.0),
     CameraSpec("rear", -0.25, 0.00, 0.38, 180.0, -12.0),
     CameraSpec("left", 0.00, 0.25, 0.38, 90.0, -12.0),
     CameraSpec("right", 0.00, -0.25, 0.38, -90.0, -12.0),
@@ -57,9 +58,38 @@ class RobotConfig:
     width_m: float = 0.50
     height_m: float = 0.50
     wheelbase_m: float = 0.40
+    track_m: float = 0.40
     max_wheel_speed_mps: float = 1.2
     collision_radius_m: float = 0.28
+    tip_roll_rad: float = 0.40
+    tip_pitch_rad: float = 0.45
+    wheel_drop_m: float = 0.08
+    steep_slope_rad: float = 0.30
     trimmer: TrimmerConfig = field(default_factory=TrimmerConfig)
+
+
+@dataclass
+class IMUConfig:
+    enabled: bool = True
+    accel_noise_std: float = 0.05
+    gyro_noise_std: float = 0.015
+    accel_bias_std: float = 0.02
+
+
+@dataclass
+class GPSConfig:
+    enabled: bool = True
+    horiz_noise_std_m: float = 1.2
+    vert_noise_std_m: float = 2.0
+    dropout_prob: float = 0.02
+    include_altitude: bool = True
+
+
+@dataclass
+class ToFConfig:
+    enabled: bool = True
+    noise_std_m: float = 0.012
+    max_range_m: float = 1.2
 
 
 @dataclass
@@ -69,6 +99,26 @@ class SensorsConfig:
     camera_count: int = 6
     fov_deg: float = 70.0
     cameras: list[CameraSpec] = field(default_factory=list)
+    imu: IMUConfig = field(default_factory=IMUConfig)
+    gps: GPSConfig = field(default_factory=GPSConfig)
+    tof: ToFConfig = field(default_factory=ToFConfig)
+
+
+@dataclass
+class TerrainConfig:
+    enabled: bool = True
+    n_drains: int = 2
+    n_banks: int = 2
+    drain_width_m: float = 0.40
+    drain_depth_m: float = 0.16
+    drain_length_m: float = 4.0
+    drain_side_slope: float = 1.5
+    bank_height_m: float = 0.40
+    bank_width_m: float = 1.8
+    bank_length_m: float = 3.5
+    max_slope_rad: float = 0.45
+    noise_amp_m: float = 0.015
+    keepout_m: float = 1.6
 
 
 @dataclass
@@ -83,6 +133,7 @@ class WorldConfig:
     n_trees: int = 3
     n_furniture: int = 1
     n_toys: int = 2
+    terrain: TerrainConfig = field(default_factory=TerrainConfig)
 
 
 @dataclass
@@ -94,12 +145,20 @@ class RewardConfig:
     out_of_bounds: float = 10.0
     completion_bonus: float = 15.0
     completion_threshold: float = 0.95
+    tipover: float = 40.0
+    drain_drop: float = 30.0
+    steep: float = 2.0
 
 
 @dataclass
 class CurriculumConfig:
     hand_signals: bool = False
     signal_hold_steps: int = 40
+
+
+@dataclass
+class PerceptionConfig:
+    terrain_mode: str = "oracle"  # oracle | blind | heuristic
 
 
 @dataclass
@@ -111,6 +170,7 @@ class EnvConfig:
     world: WorldConfig = field(default_factory=WorldConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
+    perception: PerceptionConfig = field(default_factory=PerceptionConfig)
 
     def resolved_cameras(self) -> list[CameraSpec]:
         """Return the 4–6 camera rig, applying the default FOV when needed."""
@@ -180,6 +240,14 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("max_steps must be >= 1")
     if cfg.robot.wheelbase_m <= 0:
         raise ConfigError("wheelbase_m must be positive")
+    if cfg.robot.track_m <= 0:
+        raise ConfigError("track_m must be positive")
+    if cfg.robot.tip_roll_rad <= 0 or cfg.robot.tip_pitch_rad <= 0:
+        raise ConfigError("tip roll/pitch thresholds must be positive")
+    if cfg.robot.wheel_drop_m <= 0:
+        raise ConfigError("wheel_drop_m must be positive")
+    if cfg.robot.steep_slope_rad <= 0:
+        raise ConfigError("steep_slope_rad must be positive")
     if cfg.robot.max_wheel_speed_mps <= 0:
         raise ConfigError("max_wheel_speed_mps must be positive")
     if cfg.robot.length_m <= 0 or cfg.robot.width_m <= 0 or cfg.robot.height_m <= 0:
@@ -190,6 +258,33 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("world extents must be positive")
     if cfg.world.resolution_m <= 0:
         raise ConfigError("resolution_m must be positive")
+    terr = cfg.world.terrain
+    if terr.n_drains < 0 or terr.n_banks < 0:
+        raise ConfigError("terrain feature counts must be >= 0")
+    if terr.drain_width_m <= 0 or terr.drain_depth_m <= 0 or terr.drain_length_m <= 0:
+        raise ConfigError("drain width/depth/length must be positive")
+    if terr.drain_side_slope <= 0:
+        raise ConfigError("drain_side_slope must be positive")
+    if terr.bank_height_m < 0 or terr.bank_width_m <= 0 or terr.bank_length_m <= 0:
+        raise ConfigError("bank extents must be positive (height may be 0)")
+    if terr.max_slope_rad <= 0:
+        raise ConfigError("max_slope_rad must be positive")
+    if terr.noise_amp_m < 0:
+        raise ConfigError("noise_amp_m must be >= 0")
+    imu = cfg.sensors.imu
+    gps = cfg.sensors.gps
+    tof = cfg.sensors.tof
+    if imu.accel_noise_std < 0 or imu.gyro_noise_std < 0 or imu.accel_bias_std < 0:
+        raise ConfigError("IMU noise/bias std must be >= 0")
+    if gps.horiz_noise_std_m < 0 or gps.vert_noise_std_m < 0:
+        raise ConfigError("GPS noise std must be >= 0")
+    if not 0.0 <= gps.dropout_prob <= 1.0:
+        raise ConfigError("gps.dropout_prob must be in [0, 1]")
+    if tof.noise_std_m < 0 or tof.max_range_m <= 0:
+        raise ConfigError("ToF noise must be >= 0 and max_range_m positive")
+    mode = cfg.perception.terrain_mode
+    if mode not in {"oracle", "blind", "heuristic"}:
+        raise ConfigError(f"perception.terrain_mode must be oracle|blind|heuristic; got {mode!r}")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

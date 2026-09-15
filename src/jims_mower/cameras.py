@@ -20,19 +20,50 @@ class CameraWorldPose:
     pitch: float
     fov_deg: float
     name: str
+    roll: float = 0.0
+
+
+def _body_to_world_matrix(yaw: float, pitch: float, roll: float) -> np.ndarray:
+    """Body (x forward, y left, z up) to world. R = Rz(yaw) Ry(pitch) Rx(roll)."""
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cr, sr = math.cos(roll), math.sin(roll)
+    return np.array(
+        [
+            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+            [-sp, cp * sr, cp * cr],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _matrix_to_ypr(rm: np.ndarray) -> tuple[float, float, float]:
+    """Extract (yaw, pitch, roll) from a body-to-world matrix."""
+    pitch = math.asin(float(np.clip(-rm[2, 0], -1.0, 1.0)))
+    if abs(math.cos(pitch)) < 1e-8:
+        yaw = math.atan2(-rm[0, 1], rm[1, 1])
+        roll = 0.0
+    else:
+        yaw = math.atan2(rm[1, 0], rm[0, 0])
+        roll = math.atan2(rm[2, 1], rm[2, 2])
+    return wrap_angle(yaw), float(pitch), float(roll)
 
 
 def camera_world_pose(robot: Pose, cam: CameraSpec) -> CameraWorldPose:
-    c = math.cos(robot.theta)
-    s = math.sin(robot.theta)
+    r_robot = _body_to_world_matrix(robot.theta, robot.pitch, robot.roll)
+    offset = r_robot @ np.array([cam.x, cam.y, cam.z], dtype=np.float64)
+    r_cam_body = _body_to_world_matrix(math.radians(cam.yaw_deg), math.radians(cam.pitch_deg), 0.0)
+    yaw, pitch, roll = _matrix_to_ypr(r_robot @ r_cam_body)
     return CameraWorldPose(
-        x=robot.x + cam.x * c - cam.y * s,
-        y=robot.y + cam.x * s + cam.y * c,
-        z=cam.z,
-        yaw=wrap_angle(robot.theta + math.radians(cam.yaw_deg)),
-        pitch=math.radians(cam.pitch_deg),
+        x=robot.x + float(offset[0]),
+        y=robot.y + float(offset[1]),
+        z=robot.z + float(offset[2]),
+        yaw=yaw,
+        pitch=pitch,
         fov_deg=cam.fov_deg,
         name=cam.name,
+        roll=roll,
     )
 
 
@@ -43,19 +74,16 @@ def focal_length_px(width: int, fov_deg: float) -> float:
 
 
 def world_to_body(wx: float, wy: float, wz: float, robot: Pose) -> tuple[float, float, float]:
-    dx = wx - robot.x
-    dy = wy - robot.y
-    c = math.cos(robot.theta)
-    s = math.sin(robot.theta)
-    bx = dx * c + dy * s
-    by = -dx * s + dy * c
-    return bx, by, wz
+    r = _body_to_world_matrix(robot.theta, robot.pitch, robot.roll)
+    d = np.array([wx - robot.x, wy - robot.y, wz - robot.z], dtype=np.float64)
+    b = r.T @ d
+    return float(b[0]), float(b[1]), float(b[2])
 
 
 def body_to_world(bx: float, by: float, bz: float, robot: Pose) -> tuple[float, float, float]:
-    c = math.cos(robot.theta)
-    s = math.sin(robot.theta)
-    return robot.x + bx * c - by * s, robot.y + bx * s + by * c, bz
+    r = _body_to_world_matrix(robot.theta, robot.pitch, robot.roll)
+    w = r @ np.array([bx, by, bz], dtype=np.float64)
+    return robot.x + float(w[0]), robot.y + float(w[1]), robot.z + float(w[2])
 
 
 def world_to_optical(
@@ -79,7 +107,12 @@ def world_to_optical(
     fwd = lx * cp + lz * sp
     up = -lx * sp + lz * cp
     right = -ly
-    return right, -up, fwd
+    cr = math.cos(cam.roll)
+    sr = math.sin(cam.roll)
+    left = -right
+    left2 = cr * left + sr * up
+    up2 = -sr * left + cr * up
+    return -left2, -up2, fwd
 
 
 def project_point(
@@ -127,11 +160,15 @@ def pixel_rays_world(
     fwd = Z
     left = -X
     up = -Y
+    cr = math.cos(cam.roll)
+    sr = math.sin(cam.roll)
+    left_r = cr * left - sr * up
+    up_r = sr * left + cr * up
     cp = math.cos(cam.pitch)
     sp = math.sin(cam.pitch)
-    lx = fwd * cp - up * sp
-    lz = fwd * sp + up * cp
-    ly = left
+    lx = fwd * cp - up_r * sp
+    lz = fwd * sp + up_r * cp
+    ly = left_r
     c = math.cos(cam.yaw)
     s = math.sin(cam.yaw)
     dx = lx * c - ly * s
@@ -161,3 +198,49 @@ def ground_hits(
     hx = np.where(valid, ox + t * dirs[:, :, 0], np.nan)
     hy = np.where(valid, oy + t * dirs[:, :, 1], np.nan)
     return hx, hy, valid
+
+
+def heightfield_hits(
+    cam: CameraWorldPose,
+    width: int,
+    height: int,
+    sample_z,
+    iterations: int = 4,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Intersect rays with a height field via a few Newton-style updates.
+
+    ``sample_z`` maps arrays of world ``(x, y)`` to elevations. Returns
+    ``(hx, hy, hz, valid)``. When the field is flat this matches
+    :func:`ground_hits` at ``z=0``.
+    """
+    ox, oy, oz, dirs = pixel_rays_world(cam, width, height)
+    dz = dirs[:, :, 2]
+    safe_dz = np.where(np.abs(dz) < 1e-8, -1e-8, dz)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = (0.0 - oz) / safe_dz
+    t = np.clip(np.where(np.isfinite(t), t, 2.0), 0.02, 80.0)
+    hz = np.zeros_like(t)
+    for _ in range(max(1, int(iterations))):
+        hx = ox + t * dirs[:, :, 0]
+        hy = oy + t * dirs[:, :, 1]
+        hz = np.asarray(sample_z(hx, hy), dtype=np.float32)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = (hz - oz) / safe_dz
+        t = np.clip(np.where(np.isfinite(t), t, t), 0.02, 80.0)
+    hx = ox + t * dirs[:, :, 0]
+    hy = oy + t * dirs[:, :, 1]
+    hz = np.asarray(sample_z(hx, hy), dtype=np.float32)
+    hit_z = oz + t * dz
+    resid = np.abs(hit_z - hz)
+    # Allow slightly upward rays so a bank face above the camera still renders.
+    valid = (
+        (t > 0.02)
+        & np.isfinite(hx)
+        & np.isfinite(hy)
+        & (resid < 0.25)
+        & (dz < 0.20)
+    )
+    hx = np.where(valid, hx, np.nan)
+    hy = np.where(valid, hy, np.nan)
+    hz = np.where(valid, hz, np.nan)
+    return hx, hy, hz, valid

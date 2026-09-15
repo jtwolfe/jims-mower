@@ -10,7 +10,9 @@ from jims_mower.kinematics import (
     clip_wheel_speeds,
     heading_vector,
     integrate_pose,
+    sit_on_terrain,
     trimmer_xy,
+    trimmer_xyz,
     unicycle_from_wheels,
     wheels_from_unicycle,
     wrap_angle,
@@ -159,3 +161,18 @@ def test_heading_vector() -> None:
     hx, hy = heading_vector(0.0)
     assert hx == pytest.approx(1.0)
     assert hy == pytest.approx(0.0)
+
+
+def test_sit_on_none_is_flat() -> None:
+    pose = Pose(1.0, 2.0, 0.3)
+    sat = sit_on_terrain(pose, None, 0.5, 0.4)
+    assert sat.z == pytest.approx(0.0)
+    assert sat.pitch == pytest.approx(0.0)
+    assert sat.roll == pytest.approx(0.0)
+
+
+def test_trimmer_xyz_follows_hover() -> None:
+    x, y, z = trimmer_xyz(Pose(0.0, 0.0, 0.0), 0.32, None, hover_m=0.12)
+    assert x == pytest.approx(0.32)
+    assert y == pytest.approx(0.0)
+    assert z == pytest.approx(0.12)

@@ -104,3 +104,27 @@ def test_validate_body_positive() -> None:
 def test_tiny_resolution_rejected() -> None:
     with pytest.raises(ConfigError):
         load_config({"sensors": {"width": 4, "height": 4}})
+
+
+def test_default_has_terrain_and_imu() -> None:
+    cfg = load_config()
+    assert cfg.world.terrain.enabled is True
+    assert cfg.world.terrain.n_drains >= 1
+    assert cfg.sensors.imu.enabled is True
+    assert cfg.sensors.gps.enabled is True
+    assert cfg.perception.terrain_mode == "oracle"
+
+
+def test_rejects_bad_terrain_mode() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"perception": {"terrain_mode": "slam"}})
+
+
+def test_rejects_bad_gps_dropout() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"sensors": {"gps": {"dropout_prob": 1.5}}})
+
+
+def test_rejects_bad_drain_width() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"world": {"terrain": {"drain_width_m": 0.0}}})

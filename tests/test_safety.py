@@ -12,6 +12,7 @@ from jims_mower.safety import (
     is_body_collision,
     is_living,
     nearest_living,
+    terrain_hazards,
     trimmer_interlock,
 )
 from jims_mower.types import Obstacle, Pose
@@ -135,6 +136,22 @@ def test_first_collision_returns_first_hit() -> None:
     pose = Pose(0.0, 0.0, 0.0)
     hit = first_collision(pose, [_tree(4.0, 0.0), _person(0.2, 0.0)], 0.28)
     assert hit is not None and hit.kind == "person"
+
+
+def test_terrain_hazards_without_field() -> None:
+    ev = terrain_hazards(
+        Pose(1.0, 1.0, 0.0),
+        None,
+        length_m=0.5,
+        track_m=0.4,
+        tip_roll_rad=0.4,
+        tip_pitch_rad=0.45,
+        wheel_drop_m=0.08,
+        steep_slope_rad=0.3,
+    )
+    assert ev.advice == "ok"
+    assert ev.tipover is False
+    assert ev.drain_drop is False
 
 
 def test_in_yard_and_out() -> None:

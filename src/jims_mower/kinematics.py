@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 
 from jims_mower.types import Pose
+
+if TYPE_CHECKING:
+    from jims_mower.terrain import HeightField
 
 
 def wrap_angle(theta: float) -> float:
@@ -93,5 +97,92 @@ def trimmer_xy(pose: Pose, offset_m: float) -> tuple[float, float]:
     )
 
 
+def trimmer_xyz(
+    pose: Pose,
+    offset_m: float,
+    height_field: Optional["HeightField"] = None,
+    hover_m: float = 0.12,
+) -> tuple[float, float, float]:
+    """Trimmer hub XY plus a height that follows the local ground."""
+    x, y = trimmer_xy(pose, offset_m)
+    ground = height_field.sample(x, y) if height_field is not None else pose.z
+    return x, y, float(ground + hover_m)
+
+
 def heading_vector(theta: float) -> tuple[float, float]:
     return (math.cos(theta), math.sin(theta))
+
+
+def wheel_positions(
+    pose: Pose, length_m: float, track_m: float
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """FL, FR, RL, RR wheel contact XY (body +y is left)."""
+    c = math.cos(pose.theta)
+    s = math.sin(pose.theta)
+    hl = 0.5 * length_m
+    ht = 0.5 * track_m
+    # body (x_fwd, y_left) → world
+    corners = ((hl, ht), (hl, -ht), (-hl, ht), (-hl, -ht))
+    out = []
+    for bx, by in corners:
+        out.append((pose.x + bx * c - by * s, pose.y + bx * s + by * c))
+    fl, fr, rl, rr = out
+    return fl, fr, rl, rr
+
+
+def contact_midpoints(
+    pose: Pose, length_m: float, track_m: float
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float], tuple[float, float]]:
+    """Front, rear, left, right mid-axle points used for pitch / roll."""
+    c = math.cos(pose.theta)
+    s = math.sin(pose.theta)
+    hl = 0.5 * length_m
+    ht = 0.5 * track_m
+    front = (pose.x + hl * c, pose.y + hl * s)
+    rear = (pose.x - hl * c, pose.y - hl * s)
+    left = (pose.x - ht * s, pose.y + ht * c)
+    right = (pose.x + ht * s, pose.y - ht * c)
+    return front, rear, left, right
+
+
+def sit_on_terrain(
+    pose: Pose,
+    height_field: Optional["HeightField"],
+    length_m: float,
+    track_m: float,
+) -> Pose:
+    """Lift the planar pose onto the height field and set pitch / roll.
+
+    Four-wheel samples drive tip / drop checks; pitch and roll come from
+    the front–rear and left–right height differences.
+    """
+    if height_field is None:
+        return Pose(pose.x, pose.y, pose.theta, 0.0, 0.0, 0.0)
+    front, rear, left, right = contact_midpoints(pose, length_m, track_m)
+    z_f = height_field.sample(*front)
+    z_r = height_field.sample(*rear)
+    z_l = height_field.sample(*left)
+    z_ri = height_field.sample(*right)
+    z = 0.25 * (z_f + z_r + z_l + z_ri)
+    pitch = math.atan2(z_f - z_r, max(length_m, 1e-6))
+    roll = math.atan2(z_l - z_ri, max(track_m, 1e-6))
+    return Pose(pose.x, pose.y, pose.theta, float(z), float(pitch), float(roll))
+
+
+def wheel_clearances(
+    pose: Pose,
+    height_field: Optional["HeightField"],
+    length_m: float,
+    track_m: float,
+    chassis_hover_m: float = 0.06,
+) -> np.ndarray:
+    """Downward gap from chassis plane to ground at each wheel (FL FR RL RR)."""
+    wheels = wheel_positions(pose, length_m, track_m)
+    out = np.zeros(4, dtype=np.float32)
+    if height_field is None:
+        out.fill(chassis_hover_m)
+        return out
+    for i, (wx, wy) in enumerate(wheels):
+        ground = height_field.sample(wx, wy)
+        out[i] = float(pose.z + chassis_hover_m - ground)
+    return out

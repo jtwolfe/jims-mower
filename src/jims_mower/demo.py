@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -12,10 +13,38 @@ from PIL import Image
 
 from jims_mower.config import load_config
 from jims_mower.env import MowerEnv
+from jims_mower.kinematics import sit_on_terrain
+from jims_mower.renderer import render_camera
+from jims_mower.types import Pose
 
 
 def _save_rgb(path: Path, image: np.ndarray) -> None:
     Image.fromarray(image, mode="RGB").save(path)
+
+
+def _drain_camera_view(env: MowerEnv) -> Optional[np.ndarray]:
+    """Front-camera view aimed at a drain so the ditch is visible in the dump."""
+    if not env._terrain.drains:
+        return None
+    drain = env._terrain.drains[0]
+    mx = 0.5 * (drain.x0 + drain.x1)
+    my = 0.5 * (drain.y0 + drain.y1)
+    heading = drain.heading
+    # Stand off along the perpendicular so the channel crosses the image.
+    nx, ny = -math.sin(heading), math.cos(heading)
+    pose = Pose(mx - 1.6 * nx, my - 1.6 * ny, math.atan2(ny, nx))
+    pose = sit_on_terrain(pose, env._terrain, env.cfg.robot.length_m, env.cfg.robot.track_m)
+    cam = next((c for c in env.cameras if c.name == "front"), env.cameras[0])
+    return render_camera(
+        pose,
+        cam,
+        env._coverage,
+        env._yard.obstacles,
+        env.cfg.sensors.width,
+        env.cfg.sensors.height,
+        (env.cfg.world.width_m, env.cfg.world.height_m),
+        terrain=env._terrain,
+    )
 
 
 def _montage(images: dict[str, np.ndarray], order: list[str]) -> np.ndarray:
@@ -53,20 +82,43 @@ def run_demo(
     records: list[dict] = []
     dump_steps = {0, max(0, steps // 2), max(0, steps - 1)}
 
+    def _dump_step(step_dir: Path, obs: dict, info: dict) -> None:
+        step_dir.mkdir(parents=True, exist_ok=True)
+        for name, frame in obs["cameras"].items():
+            _save_rgb(step_dir / f"cam_{name}.png", frame)
+        _save_rgb(step_dir / "montage.png", _montage(obs["cameras"], names))
+        topdown = env.render()
+        if topdown is not None:
+            _save_rgb(step_dir / "topdown.png", topdown)
+        for layer, img in env.terrain_layer_images().items():
+            _save_rgb(step_dir / f"{layer}.png", img)
+        drain_view = _drain_camera_view(env)
+        if drain_view is not None:
+            _save_rgb(step_dir / "drain_view.png", drain_view)
+        (step_dir / "detections.json").write_text(
+            json.dumps(info["detections"], indent=2),
+            encoding="utf-8",
+        )
+        (step_dir / "sensors.json").write_text(
+            json.dumps(
+                {
+                    "imu": info.get("imu"),
+                    "gps": info.get("gps"),
+                    "tof": info.get("tof"),
+                    "pose": info.get("pose"),
+                    "n_drains": info.get("n_drains"),
+                    "n_banks": info.get("n_banks"),
+                    "terrain_source": info.get("terrain_source"),
+                    "terrain_advice": info.get("terrain_advice"),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
     for t in range(steps):
         if t in dump_steps:
-            step_dir = out_dir / f"step_{t:03d}"
-            step_dir.mkdir(parents=True, exist_ok=True)
-            for name, frame in obs["cameras"].items():
-                _save_rgb(step_dir / f"cam_{name}.png", frame)
-            _save_rgb(step_dir / "montage.png", _montage(obs["cameras"], names))
-            topdown = env.render()
-            if topdown is not None:
-                _save_rgb(step_dir / "topdown.png", topdown)
-            (step_dir / "detections.json").write_text(
-                json.dumps(info["detections"], indent=2),
-                encoding="utf-8",
-            )
+            _dump_step(out_dir / f"step_{t:03d}", obs, info)
 
         # Slow forward creep with the trimmer requested.
         action = np.array([0.55, 0.50, 1.0], dtype=np.float32)
@@ -81,6 +133,12 @@ def run_demo(
                 "trimmer_enabled": info["trimmer_enabled"],
                 "n_detections": len(info["detections"]),
                 "collision": info.get("collision"),
+                "tipover": info.get("tipover"),
+                "drain_drop": info.get("drain_drop"),
+                "steep": info.get("steep"),
+                "terrain_advice": info.get("terrain_advice"),
+                "imu": info.get("imu"),
+                "gps": info.get("gps"),
             }
         )
         if terminated or truncated:
@@ -89,12 +147,20 @@ def run_demo(
     topdown = env.render()
     if topdown is not None:
         _save_rgb(out_dir / "coverage_final.png", topdown)
+    layers = env.terrain_layer_images()
+    for layer, img in layers.items():
+        _save_rgb(out_dir / f"{layer}_final.png", img)
     summary = {
         "steps_run": len(records),
         "cameras": names,
         "final_coverage_fraction": records[-1]["coverage_fraction"] if records else 0.0,
         "final_detections": info["detections"],
         "hand_signals_enabled": hand_signals,
+        "n_drains": info.get("n_drains"),
+        "n_banks": info.get("n_banks"),
+        "final_pose": info.get("pose"),
+        "final_imu": info.get("imu"),
+        "final_gps": info.get("gps"),
         "log": records,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
