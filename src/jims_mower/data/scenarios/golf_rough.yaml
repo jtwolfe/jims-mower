@@ -21,7 +21,7 @@ world:
   n_dogs: 0
   n_cats: 0
   n_birds: 0
-  n_trees: 2
+  n_trees: 0
   n_furniture: 0
   n_toys: 0
   n_hoses: 0
@@ -43,30 +43,40 @@ paths:
   - width_m: 1.15
     kind: path_paved
     vertices:
-      - [1.2, 2.4]
-      - [5.0, 3.1]
-      - [8.6, 5.8]
-      - [12.6, 7.4]
+      - [2.8, 3.4]
+      - [5.2, 4.0]
+      - [7.8, 5.6]
+      - [10.2, 6.6]
 buildings:
   - kind: building
     height_m: 0.18
     vertices:
-      - [11.6, 9.6]
-      - [13.1, 9.6]
-      - [13.1, 11.0]
-      - [11.6, 11.0]
+      - [8.8, 6.6]
+      - [10.4, 6.6]
+      - [10.4, 8.0]
+      - [8.8, 8.0]
 bunkers:
-  - {x: 6.8, y: 8.4, radius_m: 1.55, depth_m: 0.24}
+  - {x: 5.0, y: 7.4, radius_m: 1.20, depth_m: 0.22}
 garden_beds:
   - kind: garden_bed
     vertices:
-      - [1.0, 9.6]
-      - [2.6, 9.6]
-      - [2.6, 11.1]
-      - [1.0, 11.1]
+      - [3.2, 5.2]
+      - [4.6, 5.2]
+      - [4.6, 6.6]
+      - [3.2, 6.6]
+greens:
+  - kind: green
+    vertices:
+      - [7.0, 3.6]
+      - [8.6, 3.6]
+      - [8.6, 5.0]
+      - [7.0, 5.0]
 obstacles:
-  - {kind: tree, x: 3.4, y: 10.4}
-  - {kind: tree, x: 10.2, y: 2.2}
+  - {kind: tree, x: 4.4, y: 4.6}
+  - {kind: tree, x: 9.6, y: 5.2}
+keepout:
+  - [[3.7, 3.9], [5.1, 3.9], [5.1, 5.3], [3.7, 5.3]]
+  - [[8.9, 4.5], [10.3, 4.5], [10.3, 5.9], [8.9, 5.9]]
 perception:
   terrain_mode: heuristic
 planner:

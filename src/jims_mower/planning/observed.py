@@ -48,6 +48,7 @@ class ObservedMap:
     structure: np.ndarray
     elevation: np.ndarray
     confidence: np.ndarray
+    occupancy: np.ndarray
     width_m: float
     height_m: float
     resolution_m: float
@@ -74,6 +75,7 @@ class ObservedMap:
             structure=np.zeros((rows, cols), dtype=np.uint8),
             elevation=np.zeros((rows, cols), dtype=np.float32),
             confidence=np.zeros((rows, cols), dtype=np.float32),
+            occupancy=np.zeros((rows, cols), dtype=np.float32),
             width_m=float(width_m),
             height_m=float(height_m),
             resolution_m=res,
@@ -167,7 +169,8 @@ class ObservedMap:
             self.observed[rr, cc] = True
             self.confidence[rr, cc] = np.maximum(self.confidence[rr, cc], 0.55)
             added += int(fresh.sum())
-            self._stamp_structure_pixels(pix, inside, ok, rr, cc)
+            # Semantics come from the gated observer on these newly seen
+            # cells. RGB colour heuristics flood path/bunker across grass.
         return added
 
     def ingest_observer(
@@ -175,6 +178,7 @@ class ObservedMap:
         obs: dict[str, Any],
         *,
         only_observed: bool = True,
+        authored_structure: Optional[np.ndarray] = None,
     ) -> None:
         """Copy heuristic elevation/hazard onto seen cells. Not a god-view merge."""
         mask = self.observed if only_observed else np.ones_like(self.observed, dtype=bool)
@@ -195,15 +199,20 @@ class ObservedMap:
             cv = np.asarray(conf, dtype=np.float32)
             if cv.shape == self.confidence.shape:
                 self.confidence[mask] = np.maximum(self.confidence[mask], cv[mask])
-        struct = obs.get("structure")
+        struct = authored_structure if authored_structure is not None else obs.get("structure")
         if struct is not None:
             st = np.asarray(struct)
             if st.shape == self.structure.shape:
-                # Only on cells we have seen — do not copy authored god-view
-                # structure into unknown space.
+                # Authored polygons on cells we have seen. Live RGB stamps
+                # flood path/bunker across grass and are not used here.
                 self.structure[mask] = np.maximum(
                     self.structure[mask], st[mask].astype(np.uint8)
                 )
+        occ = obs.get("occupancy")
+        if occ is not None:
+            ov = np.asarray(occ, dtype=np.float32)
+            if ov.shape == self.occupancy.shape:
+                self.occupancy[mask] = np.maximum(self.occupancy[mask], ov[mask])
         self.refresh_free()
 
     def refresh_free(self) -> None:
@@ -284,6 +293,7 @@ class ObservedMap:
             structure=self.structure.copy(),
             elevation=self.elevation.copy(),
             confidence=self.confidence.copy(),
+            occupancy=self.occupancy.copy(),
             width_m=self.width_m,
             height_m=self.height_m,
             resolution_m=self.resolution_m,

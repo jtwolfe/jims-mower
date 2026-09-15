@@ -163,6 +163,8 @@ class MissionPolicy:
         self._skipped_global: list[tuple[float, float]] = []
         self._frontier_xy: list[tuple[float, float]] = []
         self._replan_cool = 0
+        self._calibrate_stall = 0
+        self._authored_structure: Optional[np.ndarray] = None
 
     @property
     def waypoints(self) -> list[tuple[float, float]]:
@@ -203,7 +205,8 @@ class MissionPolicy:
         self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
         self.teach.spec = self._geofence
         self.teach.reset(obs, info)
-        self._inset_teach_ring(0.55)
+        self._inset_teach_ring(self._teach_inset_m())
+        self._start_teach_nearest(pose)
         self._home = pose
         self.phase = MissionPhase.CALIBRATE_BOUNDARY
         self.events = []
@@ -225,9 +228,12 @@ class MissionPolicy:
         self._skipped_global = []
         self._frontier_xy = []
         self._replan_cool = 0
+        self._calibrate_stall = 0
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self._wet = bool((info.get("weather") or {}).get("wet", False))
+        if obs.get("structure") is not None:
+            self._authored_structure = np.asarray(obs["structure"]).copy()
         self._stamp(obs, info, pose, explored=True)
         self._enter(MissionPhase.CALIBRATE_BOUNDARY, "phase_enter", {"guided": True})
 
@@ -331,7 +337,11 @@ class MissionPolicy:
                 max_range_m=float(self.settings.camera_range_m),
                 pixel_stride=3 if images and next(iter(images.values())).shape[0] > 40 else 1,
             )
-        self.observed.ingest_observer(obs, only_observed=True)
+        self.observed.ingest_observer(
+            obs,
+            only_observed=True,
+            authored_structure=self._authored_structure,
+        )
         if self.keep_in_mask is None or self.keep_in_mask.shape != self.observed.observed.shape:
             self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
 
@@ -384,13 +394,27 @@ class MissionPolicy:
         pose: Pose,
         advice: str,
     ) -> np.ndarray:
+        if advice == "stop":
+            self._calibrate_stall += 1
+            if self._calibrate_stall >= 8 and self.teach.waypoints:
+                self.teach.index = min(self.teach.index + 1, max(0, len(self.teach.waypoints) - 1))
+                self._calibrate_stall = 0
+            return self._nudge_inward(pose)
+        self._calibrate_stall = 0
         action = self.teach.act(obs, info)
+        if advice == "slow":
+            wheels = np.asarray(action, dtype=np.float32).reshape(-1)
+            action = np.array([0.45 * float(wheels[0]), 0.45 * float(wheels[1]), 0.0], dtype=np.float32)
         self.index = self.teach.index
         timed_out = self.phase_step + 1 >= int(self.settings.max_calibrate_steps)
         if self.teach.done or timed_out:
-            keep_out = []
+            keep_out = [list(poly) for poly in (self._geofence.keep_out or [])]
             self.profile = self.teach.to_profile(name="mission", keep_out=keep_out)
             self.profile.home = {"x": self._home.x, "y": self._home.y, "theta": self._home.theta}
+            # Drop the spawn-to-ring spoke so keep-in is the closed lap, not a slice.
+            planned = self.teach.planned_ring()
+            if self.teach.done and len(planned) >= 3:
+                self.profile.keep_in = planned
             self._geofence = self.profile.geofence_spec()
             if self.observed is not None:
                 self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
@@ -637,8 +661,8 @@ class MissionPolicy:
             height_m=self.cfg.world.height_m,
             max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
             drain_clearance_m=self.cfg.planner.drain_clearance_m,
-            occupancy=None,
-            occupancy_inflate_m=self.cfg.planner.occupancy_inflate_m,
+            occupancy=self.observed.occupancy,
+            occupancy_inflate_m=max(0.20, self.cfg.planner.occupancy_inflate_m),
             margin_m=self.cfg.robot.collision_radius_m,
             extra_blocked=extra,
             confidence=conf,
@@ -910,14 +934,58 @@ class MissionPolicy:
             MissionEvent(step=self.step, phase=self.phase.value, event=event, detail=detail or {})
         )
 
+    def _teach_inset_m(self) -> float:
+        short = min(float(self.cfg.world.width_m), float(self.cfg.world.height_m))
+        return max(0.75, min(2.10, 0.18 * short))
+
     def _inset_teach_ring(self, margin_m: float) -> None:
         ring = list(self.teach.waypoints)
         if len(ring) >= 2 and math.hypot(ring[0][0] - ring[-1][0], ring[0][1] - ring[-1][1]) < 1e-6:
             ring = ring[:-1]
         inset = _inset_polygon(ring, margin_m)
         if len(inset) >= 3:
-            self.teach.waypoints = inset + [inset[0]]
+            dense = _densify_ring(inset, stride_m=0.70)
+            self.teach.waypoints = dense + [dense[0]]
             self.teach.index = 0
+
+    def _start_teach_nearest(self, pose: Pose) -> None:
+        wps = list(self.teach.waypoints)
+        if len(wps) < 2:
+            return
+        if math.hypot(wps[0][0] - wps[-1][0], wps[0][1] - wps[-1][1]) < 1e-6:
+            core = wps[:-1]
+        else:
+            core = wps
+        if not core:
+            return
+        i = min(range(len(core)), key=lambda k: math.hypot(core[k][0] - pose.x, core[k][1] - pose.y))
+        rotated = core[i:] + core[:i]
+        self.teach.waypoints = rotated + [rotated[0]]
+        self.teach.index = 0
+
+    def _nudge_inward(self, pose: Pose) -> np.ndarray:
+        """IMU / terrain stop: ease toward the keep-in centroid instead of tipping."""
+        ring = list(self.teach.waypoints)
+        if len(ring) < 2:
+            return self._hold()
+        cx = sum(p[0] for p in ring) / len(ring)
+        cy = sum(p[1] for p in ring) / len(ring)
+        ix, iy = cx - pose.x, cy - pose.y
+        inward = math.hypot(ix, iy)
+        tx, ty = ring[min(self.teach.index, len(ring) - 1)]
+        if inward > 1e-6:
+            ix, iy = ix / inward, iy / inward
+        else:
+            ix, iy = 0.0, 0.0
+        goal = (pose.x + 0.55 * ix + 0.20 * (tx - pose.x), pose.y + 0.55 * iy + 0.20 * (ty - pose.y))
+        wheels, _dist, _err = tracking_action(
+            pose,
+            goal,
+            cruise=0.32,
+            wheelbase_m=self.cfg.robot.wheelbase_m,
+            turn_in_place_rad=0.80,
+        )
+        return self._drive(float(wheels[0]), float(wheels[1]), 0.0, pose)
 
     def close_phase_ranges(self) -> list[dict[str, Any]]:
         if self.phase_ranges and self.phase_ranges[-1].get("end") is None:
@@ -962,12 +1030,19 @@ def _ring_closed(
 
 
 def _control_hazard(hazard: np.ndarray, confidence: np.ndarray) -> np.ndarray:
-    """Keep real channels; drop low-confidence colour-heuristic lips."""
+    """Keep real channels; drop colour-heuristic lips that are not a ditch."""
     from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE
 
     hz = np.asarray(hazard, dtype=np.float32).copy()
     conf = np.asarray(confidence, dtype=np.float32)
     lips = (hz >= HAZARD_DRAIN_EDGE) & (hz < HAZARD_DRAIN)
+    channel = hz >= HAZARD_DRAIN
+    near_channel = channel.copy()
+    near_channel[1:, :] |= channel[:-1, :]
+    near_channel[:-1, :] |= channel[1:, :]
+    near_channel[:, 1:] |= channel[:, :-1]
+    near_channel[:, :-1] |= channel[:, 1:]
+    hz[lips & ~near_channel] = 0.0
     if conf.shape == hz.shape:
         hz[lips & (conf < 0.85)] = 0.0
     return hz
@@ -979,12 +1054,48 @@ def _slope_from_elevation(elevation: np.ndarray, resolution_m: float) -> np.ndar
     return np.arctan(np.hypot(gx, gy)).astype(np.float32)
 
 
+def _densify_ring(ring: list[tuple[float, float]], stride_m: float) -> list[tuple[float, float]]:
+    """Interpolate a closed polygon so the teach lap does not cut long diagonals."""
+    if len(ring) < 2:
+        return list(ring)
+    stride = max(float(stride_m), 0.25)
+    pts: list[tuple[float, float]] = []
+    n = len(ring)
+    for i in range(n):
+        x0, y0 = ring[i]
+        x1, y1 = ring[(i + 1) % n]
+        dist = math.hypot(x1 - x0, y1 - y0)
+        steps = max(1, int(round(dist / stride)))
+        for k in range(steps):
+            t = k / steps
+            pts.append((x0 + t * (x1 - x0), y0 + t * (y1 - y0)))
+    return pts
+
+
 def _inset_polygon(ring: list[tuple[float, float]], margin_m: float) -> list[tuple[float, float]]:
-    """Move vertices toward the centroid so the teach lap stays inside keep-in."""
+    """Shrink an axis-aligned keep-in; fall back to centroid inset."""
     if len(ring) < 3 or margin_m <= 0.0:
         return list(ring)
-    cx = sum(p[0] for p in ring) / len(ring)
-    cy = sum(p[1] for p in ring) / len(ring)
+    xs = [p[0] for p in ring]
+    ys = [p[1] for p in ring]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    aa = all(
+        (abs(x - x0) < 1e-6 or abs(x - x1) < 1e-6) and (abs(y - y0) < 1e-6 or abs(y - y1) < 1e-6)
+        for x, y in ring
+    )
+    if aa and (x1 - x0) > 2.0 * margin_m + 1.2 and (y1 - y0) > 2.0 * margin_m + 1.2:
+        nx0, nx1 = x0 + margin_m, x1 - margin_m
+        ny0, ny1 = y0 + margin_m, y1 - margin_m
+        corners = {
+            (x0, y0): (nx0, ny0),
+            (x1, y0): (nx1, ny0),
+            (x1, y1): (nx1, ny1),
+            (x0, y1): (nx0, ny1),
+        }
+        return [corners.get((x, y), (x, y)) for x, y in ring]
+    cx = sum(xs) / len(ring)
+    cy = sum(ys) / len(ring)
     out: list[tuple[float, float]] = []
     for x, y in ring:
         dx, dy = cx - x, cy - y
