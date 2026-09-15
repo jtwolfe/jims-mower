@@ -1,4 +1,4 @@
-"""First-class path / building / bunker / garden layers (not a geofence).
+"""First-class path / building / bunker / garden / pond layers (not a geofence).
 
 Scenario YAML authors paved ribbons as polylines and buildings / beds as
 polygons. The rasters feed coverage (no-mow) and the costmap (block or
@@ -20,12 +20,14 @@ from jims_mower.constants import (
     STRUCTURE_GREEN,
     STRUCTURE_NONE,
     STRUCTURE_PATH,
+    STRUCTURE_POND,
     TERRAIN_BUILDING,
     TERRAIN_BUNKER,
     TERRAIN_DRAIN,
     TERRAIN_GARDEN,
     TERRAIN_GREEN,
     TERRAIN_PATH,
+    TERRAIN_POND,
 )
 from jims_mower.safety import point_in_polygon
 
@@ -86,7 +88,13 @@ class StructureLayer:
     def blocked_mask(self) -> np.ndarray:
         return np.isin(
             self.grid,
-            (STRUCTURE_BUILDING, STRUCTURE_BUNKER, STRUCTURE_GARDEN, STRUCTURE_GREEN),
+            (
+                STRUCTURE_BUILDING,
+                STRUCTURE_BUNKER,
+                STRUCTURE_GARDEN,
+                STRUCTURE_GREEN,
+                STRUCTURE_POND,
+            ),
         )
 
     def path_mask(self) -> np.ndarray:
@@ -184,6 +192,7 @@ STRUCTURE_FROM_TERRAIN = {
     TERRAIN_BUNKER: STRUCTURE_BUNKER,
     TERRAIN_GARDEN: STRUCTURE_GARDEN,
     TERRAIN_GREEN: STRUCTURE_GREEN,
+    TERRAIN_POND: STRUCTURE_POND,
 }
 
 
@@ -259,6 +268,23 @@ def apply_bunkers(
         labels[writable] = TERRAIN_BUNKER
 
 
+def apply_ponds(
+    labels: np.ndarray,
+    elevation: np.ndarray,
+    resolution_m: float,
+    ponds: Iterable[PolygonFeature],
+) -> None:
+    """Stamp a water keep-out bowl. Not a hydro / water-level simulator."""
+    for pond in ponds:
+        mask = rasterize_polygon(labels.shape, resolution_m, pond.vertices)
+        writable = mask & (labels != TERRAIN_DRAIN)
+        if not np.any(writable):
+            continue
+        depth_m = float(pond.height_m) if pond.height_m > 0.0 else 0.28
+        elevation[writable] -= np.float32(depth_m)
+        labels[writable] = TERRAIN_POND
+
+
 def no_mow_from_labels(labels: np.ndarray) -> np.ndarray:
     """True where coverage must ignore the cell (drain + human structures)."""
     return np.isin(
@@ -270,5 +296,6 @@ def no_mow_from_labels(labels: np.ndarray) -> np.ndarray:
             TERRAIN_BUNKER,
             TERRAIN_GARDEN,
             TERRAIN_GREEN,
+            TERRAIN_POND,
         ),
     )

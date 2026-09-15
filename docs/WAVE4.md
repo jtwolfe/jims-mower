@@ -40,6 +40,7 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
 - [`narrow_gate`](../configs/scenarios/narrow_gate.yaml),
   [`fence_line`](../configs/scenarios/fence_line.yaml),
   [`property_scale`](../configs/scenarios/property_scale.yaml) (48×40 m @ 0.40 m),
+  [`acre_yard`](../configs/scenarios/acre_yard.yaml) (70×58 m @ 0.50 m ≈ 1 acre),
   [`flat`](../configs/scenarios/flat.yaml).
 - `jims-mower-import-yard` — survey JSON → geofence + drain polylines.
 

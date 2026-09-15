@@ -37,8 +37,10 @@ def test_golf_scenarios_registered() -> None:
     names = list_scenarios()
     assert "golf_rough" in names
     assert "golf_fairway_snip" in names
+    assert "acre_yard" in names
     assert "golf_rough" in WORLD_LAYOUTS
     assert "golf_fairway" in WORLD_LAYOUTS
+    assert "acre_yard" in WORLD_LAYOUTS
 
 
 def test_golf_rough_has_uneven_mesh_and_path() -> None:
@@ -88,6 +90,7 @@ def test_path_polyline_yaml() -> None:
             "paths": [{"vertices": [[1, 1], [4, 1], [4, 3]], "width_m": 0.8}],
             "buildings": [{"vertices": [[0.5, 3.5], [1.5, 3.5], [1.5, 4.5], [0.5, 4.5]]}],
             "bunkers": [{"x": 2.5, "y": 2.5, "radius_m": 0.6}],
+            "ponds": [{"vertices": [[0.4, 0.4], [1.2, 0.4], [1.2, 1.2], [0.4, 1.2]], "depth_m": 0.2}],
             "world": {"width_m": 6.0, "height_m": 6.0, "layout": "random"},
         }
     )
@@ -95,6 +98,9 @@ def test_path_polyline_yaml() -> None:
     assert scn.paths[0].width_m == pytest.approx(0.8)
     assert len(scn.buildings) == 1
     assert scn.bunkers[0].radius_m == pytest.approx(0.6)
+    assert len(scn.ponds) == 1
+    assert scn.ponds[0].height_m == pytest.approx(0.2)
+    assert list(scn.ponds[0].vertices) in [list(p) for p in scn.keepout]
 
 
 def test_costmap_blocks_building_and_costs_path() -> None:

@@ -18,6 +18,7 @@ from jims_mower.constants import (
     TERRAIN_DRAIN,
     TERRAIN_DRAIN_EDGE,
     TERRAIN_FLAT,
+    TERRAIN_POND,
     TERRAIN_PUDDLE,
 )
 from jims_mower.structures import (
@@ -27,6 +28,7 @@ from jims_mower.structures import (
     apply_bunkers,
     apply_paths,
     apply_polygons,
+    apply_ponds,
 )
 
 
@@ -235,8 +237,10 @@ class HeightField:
         out[self.slope >= steep_slope_rad] = HAZARD_STEEP
         out[self.labels == TERRAIN_DRAIN_EDGE] = HAZARD_DRAIN_EDGE
         out[self.labels == TERRAIN_DRAIN] = HAZARD_DRAIN
-        # Puddles are caution (steep slot) — not a terminating channel.
+        # Puddles / ponds are caution (steep slot) — not a terminating channel.
+        # Authored ponds are also geofence keep-outs (planner blocked).
         out[self.labels == TERRAIN_PUDDLE] = HAZARD_STEEP
+        out[self.labels == TERRAIN_POND] = HAZARD_STEEP
         return out
 
     def feature_keepouts(self, extra_radius_m: float = 0.25) -> list[tuple[float, float, float]]:
@@ -461,6 +465,7 @@ def generate_terrain(
     buildings: Optional[list[PolygonFeature]] = None,
     bunkers: Optional[list[BunkerFeature]] = None,
     garden_beds: Optional[list[PolygonFeature]] = None,
+    ponds: Optional[list[PolygonFeature]] = None,
 ) -> HeightField:
     """Procedural yard elevation. Disabled → a flat field (still labeled).
 
@@ -531,7 +536,7 @@ def generate_terrain(
 
     remaining_drains = max(0, int(n_drains) - len(hf.drains))
     remaining_banks = max(0, int(n_banks) - len(hf.banks))
-    if layout in {"terrace", "kerb_gutter", "swale", "golf_rough", "golf_fairway"}:
+    if layout in {"terrace", "kerb_gutter", "swale", "golf_rough", "golf_fairway", "acre_yard"}:
         remaining_drains = 0
         remaining_banks = 0
 
@@ -594,6 +599,7 @@ def generate_terrain(
         buildings=buildings or [],
         bunkers=bunkers or [],
         garden_beds=garden_beds or [],
+        ponds=ponds or [],
         swale_amp_m=float(swale_amp_m) if enabled else 0.0,
         rng=rng,
         layout=layout,
@@ -667,7 +673,7 @@ def _apply_layout_features(
         hf.banks.append(kerb)
         keep.extend(hf.feature_keepouts())
         return
-    if layout in {"golf_rough", "golf_fairway"}:
+    if layout in {"golf_rough", "golf_fairway", "acre_yard"}:
         # Multi-scale rumble + optional swale already applied; no extra walls.
         _ = (rng, drain_length_m, bank_length_m)
         return
@@ -795,16 +801,19 @@ def _apply_authored_structures(
     buildings: list[PolygonFeature],
     bunkers: list[BunkerFeature],
     garden_beds: list[PolygonFeature],
+    ponds: list[PolygonFeature],
     swale_amp_m: float,
     rng: np.random.Generator,
     layout: str,
 ) -> None:
-    if swale_amp_m > 0.0 and layout in {"golf_rough", "golf_fairway", "random", "swale"}:
-        _carve_gentle_swales(hf, rng, amp_m=swale_amp_m, count=2 if layout == "golf_rough" else 1)
+    if swale_amp_m > 0.0 and layout in {"golf_rough", "golf_fairway", "random", "swale", "acre_yard"}:
+        count = 2 if layout in {"golf_rough", "acre_yard"} else 1
+        _carve_gentle_swales(hf, rng, amp_m=swale_amp_m, count=count)
     apply_paths(hf.labels, hf.elevation, hf.resolution_m, paths)
     apply_polygons(hf.labels, hf.elevation, hf.resolution_m, buildings)
     apply_polygons(hf.labels, hf.elevation, hf.resolution_m, garden_beds)
     apply_bunkers(hf.labels, hf.elevation, hf.resolution_m, bunkers)
+    apply_ponds(hf.labels, hf.elevation, hf.resolution_m, ponds)
 
 
 def _carve_gentle_swales(

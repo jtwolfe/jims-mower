@@ -19,6 +19,7 @@ from jims_mower.constants import (
     STRUCTURE_GARDEN,
     STRUCTURE_GREEN,
     STRUCTURE_PATH,
+    STRUCTURE_POND,
 )
 from jims_mower.geofence import GeofenceSpec, rasterize_geofence
 
@@ -162,11 +163,11 @@ def build_costmap(
     ``uncertain_hazard_boost`` on steep/lip/channel hints. Uncertain free
     cells stay traversable so a blind map does not lock the planner.
 
-    ``structure`` (uint8 path/building/bunker/garden/green) blocks buildings
-    / beds / greens, heavy-costs paved ribbons and bunkers. ``elevation_prior``
-    is a low-frequency grade; when ``prior_blend > 0`` the climb check uses
-    ``max(observer_slope, blend * prior_slope)`` so a flattened CV map does
-    not fight physics.
+    ``structure`` (uint8 path/building/bunker/garden/green/pond) blocks
+    buildings / beds / greens / ponds, heavy-costs paved ribbons and bunkers.
+    ``elevation_prior`` is a low-frequency grade; when ``prior_blend > 0``
+    the climb check uses ``max(observer_slope, blend * prior_slope)`` so a
+    flattened CV map does not fight physics.
     """
     hazard = np.asarray(hazard, dtype=np.float32)
     slope = np.asarray(slope, dtype=np.float32)
@@ -223,7 +224,10 @@ def build_costmap(
             raise ValueError("structure shape must match hazard")
         path = struct == STRUCTURE_PATH
         bunker = struct == STRUCTURE_BUNKER
-        hard = np.isin(struct, (STRUCTURE_BUILDING, STRUCTURE_GARDEN, STRUCTURE_GREEN))
+        hard = np.isin(
+            struct,
+            (STRUCTURE_BUILDING, STRUCTURE_GARDEN, STRUCTURE_GREEN, STRUCTURE_POND),
+        )
         finite = np.isfinite(cost) & ~blocked
         cost[finite & path] = np.maximum(cost[finite & path], float(path_cost))
         cost[finite & bunker] = np.maximum(cost[finite & bunker], float(bunker_cost))

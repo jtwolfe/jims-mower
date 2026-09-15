@@ -389,6 +389,7 @@ class MowerEnv(gym.Env):
             ),
             bunkers=list(self.scenario.bunkers) if self.scenario else None,
             garden_beds=list(self.scenario.garden_beds) if self.scenario else None,
+            ponds=list(self.scenario.ponds) if self.scenario else None,
         )
         self._structure = layer_from_terrain_labels(
             self._terrain.labels,

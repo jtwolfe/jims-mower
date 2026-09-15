@@ -52,6 +52,7 @@ First-class layers, not a second geofence:
 | `bunker` | `bunkers:` `x,y,radius_m,depth_m` | no-mow | blocked (sand bowl) |
 | `garden_bed` | `garden_beds:` polygon | no-mow | blocked |
 | `green` | `greens:` polygon | no-mow / no-trimmer | blocked |
+| `pond` | `ponds:` polygon + `depth_m` | no-mow | blocked + geofence keep-out |
 
 Rasters: `obs["structure"]` / `info["structure"]` (see `STRUCTURE_NAMES`).
 Semantic extras: `path_paved`, `building`, `bunker`, `garden_bed`.
@@ -62,6 +63,12 @@ for planning; the stub is the onboard stand-in.
 
 Fence / keep-out polygons stay on `geofence`. Use that for a property
 line; use `paths` / `buildings` for hard surfaces inside the yard.
+
+`ponds:` is a **water keep-out**, not a hydro simulator. The polygon is
+painted as standing water (`TERRAIN_POND`), merged into geofence
+keep-out, and excluded from coverage. Pair it with `n_puddles` and
+authored drains for leftover wet spots. There is no flow or water-level
+physics.
 
 ## Golf scenarios
 
@@ -78,8 +85,37 @@ sand bunker bowl, a shed polygon, and a garden bed. `golf_fairway_snip`
 is a smaller clip with a gentler roll, a path, a bunker, and a no-mow
 green.
 
-Layouts `golf_rough` / `golf_fairway` turn off random drains/banks so the
-authored hard areas stay readable.
+Layouts `golf_rough` / `golf_fairway` / `acre_yard` turn off random
+drains/banks so the authored hard areas stay readable.
+
+## Acre yard
+
+Suburban/rural **~1-acre** block for explore/mow. Footprint **70×58 m**
+(4060 m² ≈ **1.003 acre**). Cells are **0.50 m** → 140×116 = **16,240**
+cells (same “stay tractable” idea as `property_scale` at 48×40 m @
+0.40 m). Not a coverage benchmark.
+
+| Layer | What is authored |
+| --- | --- |
+| Trees | Naturalistic clusters (NW / east / south) plus lone trees |
+| Bushes | `garden_beds` along the west fence, back fence, front edge, and one island |
+| Sand | Three `bunkers` (play bowl + two smaller traps) |
+| Rough | `layout: acre_yard` — multi-scale undulation, swales, mild grade, plus drains and a bank |
+| Paths | Paved ribbons: gate → lawn → shed, plus west and outbuilding spurs |
+| Sheds | Main shed (NE) and a small outbuilding (SE) |
+| Water | `ponds:` keep-out (NW) + two drains + `n_puddles: 3` leftover wet spots |
+
+```bash
+jims-mower-demo --config acre_yard --steps 80 --out demo_acre
+jims-mower-mission-demo --config acre_yard --out mission_acre
+jims-mower-viewer --episode mission_acre
+jims-mower-mesh --out acre.glb --config acre_yard --seed 3 --stride 4
+```
+
+Do **not** expect CI or a short demo to mow the whole acre. Strip
+spacing is 1.20 m and mission step caps are raised so explore/mow can
+move, not so the job finishes. Mesh export should use `--stride 3` or
+`4` (default stride 2 is still loadable, just heavier).
 
 ### DEM hook (optional, not used in CI)
 
