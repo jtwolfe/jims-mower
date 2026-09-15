@@ -8,7 +8,7 @@ from typing import Optional, Protocol, runtime_checkable
 
 import numpy as np
 
-from jims_mower.constants import GRAVITY_MPS2, HAZARD_STEEP
+from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN_EDGE, HAZARD_STEEP
 from jims_mower.perception.cv_terrain import (
     classify_terrain_rgb,
     project_labels_to_maps,
@@ -154,6 +154,7 @@ class HeuristicTerrainObserver:
         self._ensure_maps(context.map_shape)
         assert self._elevation is not None and self._slope is not None and self._hazard is not None
         pose: Pose = context.pose
+        prev_hazard = self._hazard.copy()
         cams = {c.name: c for c in context.cameras}
         for name, frame in images.items():
             cam = cams.get(name)
@@ -174,6 +175,7 @@ class HeuristicTerrainObserver:
                 max_range_m=self.max_range_m,
                 steep_rad=max(self.steep_rad, context.steep_slope_rad),
             )
+        self._grow_drain_gaps(prev_hazard)
         tof = _tof_from_context(context)
         if tof is not None:
             stamp_tof_corners(
@@ -195,6 +197,20 @@ class HeuristicTerrainObserver:
             self._hazard.copy(),
             source="heuristic",
         )
+
+    def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
+        """One-cell grow on *new* lip/channel stamps so a broken stripe blocks."""
+        assert self._hazard is not None
+        fresh = (self._hazard >= HAZARD_DRAIN_EDGE) & (prev_hazard < HAZARD_DRAIN_EDGE)
+        if not np.any(fresh):
+            return
+        grown = fresh.copy()
+        grown[1:, :] |= fresh[:-1, :]
+        grown[:-1, :] |= fresh[1:, :]
+        grown[:, 1:] |= fresh[:, :-1]
+        grown[:, :-1] |= fresh[:, 1:]
+        promote = grown & (self._hazard < HAZARD_DRAIN_EDGE)
+        self._hazard[promote] = HAZARD_DRAIN_EDGE
 
     def _paint_local_imu(
         self,
