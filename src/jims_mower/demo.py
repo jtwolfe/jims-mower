@@ -19,9 +19,11 @@ from jims_mower.kinematics import sit_on_terrain, trimmer_xy
 from jims_mower.planning import TerrainPolicy
 from jims_mower.renderer import render_camera, render_topdown
 from jims_mower.scenarios import load_source
+from jims_mower.teach import TeachPolicy, keepouts_from_env
 from jims_mower.types import Pose
+from jims_mower.viewer import write_viewer_bundle
 
-POLICIES = ("terrain", "scripted", "random", "bc")
+POLICIES = ("terrain", "scripted", "random", "bc", "teach")
 
 
 def _save_rgb(path: Path, image: np.ndarray) -> None:
@@ -68,7 +70,7 @@ def _montage(images: dict[str, np.ndarray], order: list[str]) -> np.ndarray:
     return canvas
 
 
-def _plan_overlay(env: MowerEnv, policy: Optional[TerrainPolicy]) -> np.ndarray:
+def _plan_overlay(env: MowerEnv, policy: Optional[Any]) -> np.ndarray:
     waypoints = policy.waypoints if policy is not None else []
     index = policy.index if policy is not None else 0
     return render_topdown(
@@ -110,6 +112,7 @@ def run_demo(
     save_mission: Optional[str] = None,
     bc_weights: Optional[str] = None,
     log_bc: Optional[str] = None,
+    yard_profile: Optional[str] = None,
 ) -> dict:
     name = (policy or "terrain").strip().lower()
     if name not in POLICIES:
@@ -136,10 +139,13 @@ def run_demo(
         reset_opts["load_mission"] = load_mission
     if save_mission:
         reset_opts["save_mission"] = save_mission
+    if yard_profile:
+        reset_opts["yard_profile"] = yard_profile
     obs, info = env.reset(seed=seed, options=reset_opts or None)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     terrain_policy: Optional[TerrainPolicy] = None
+    teach_policy: Optional[TeachPolicy] = None
     bc_policy: Optional[BcPolicy] = None
     bc_loaded = False
     rng = np.random.default_rng(seed)
@@ -150,7 +156,10 @@ def run_demo(
             bc_loaded = True
         else:
             name = "terrain"
-    if name == "terrain":
+    if name == "teach":
+        teach_policy = TeachPolicy(env.cfg, spec=env.geofence_spec())
+        teach_policy.reset(obs, info)
+    elif name == "terrain":
         terrain_policy = TerrainPolicy(env.cfg)
         terrain_policy.reset(obs, info)
     bc_log_feats: list[np.ndarray] = []
@@ -158,7 +167,9 @@ def run_demo(
 
     names = list(obs["cameras"].keys())
     records: list[dict] = []
+    poses: list[dict] = [info.get("pose") or {}]
     dump_steps = {0, max(0, steps // 2), max(0, steps - 1)}
+    overlay_policy = teach_policy or terrain_policy
 
     def _dump_step(step_dir: Path, obs: dict, info: dict) -> None:
         step_dir.mkdir(parents=True, exist_ok=True)
@@ -168,14 +179,14 @@ def run_demo(
         topdown = env.render()
         if topdown is not None:
             _save_rgb(step_dir / "topdown.png", topdown)
-        _save_rgb(step_dir / "plan_overlay.png", _plan_overlay(env, terrain_policy))
+        _save_rgb(step_dir / "plan_overlay.png", _plan_overlay(env, overlay_policy))
         _save_rgb(
             step_dir / "bev.png",
             render_bev(
                 env,
                 obs,
-                waypoints=terrain_policy.waypoints if terrain_policy else [],
-                waypoint_index=terrain_policy.index if terrain_policy else 0,
+                waypoints=overlay_policy.waypoints if overlay_policy else [],
+                waypoint_index=overlay_policy.index if overlay_policy else 0,
                 costmap=terrain_policy.plan.costmap if terrain_policy and terrain_policy.plan else None,
                 cameras=obs["cameras"],
             ),
@@ -218,8 +229,8 @@ def run_demo(
                     "safe_mode": getattr(terrain_policy, "last_safe_mode", None)
                     if terrain_policy
                     else None,
-                    "waypoint_index": terrain_policy.index if terrain_policy else None,
-                    "n_waypoints": len(terrain_policy.waypoints) if terrain_policy else 0,
+                    "waypoint_index": overlay_policy.index if overlay_policy else None,
+                    "n_waypoints": len(overlay_policy.waypoints) if overlay_policy else 0,
                 },
                 indent=2,
             ),
@@ -237,6 +248,9 @@ def run_demo(
         elif name == "bc":
             assert bc_policy is not None
             action = bc_policy.act(obs, info)
+        elif name == "teach":
+            assert teach_policy is not None
+            action = teach_policy.act(obs, info)
         else:
             assert terrain_policy is not None
             action = terrain_policy.act(obs, info)
@@ -265,22 +279,24 @@ def run_demo(
                 "policy_advice": terrain_policy.last_advice if terrain_policy else None,
                 "imu": info.get("imu"),
                 "gps": info.get("gps"),
+                "pose": info.get("pose"),
             }
         )
-        if terminated or truncated:
+        poses.append(info.get("pose") or {})
+        if terminated or truncated or (teach_policy is not None and teach_policy.done):
             break
 
     topdown = env.render()
     if topdown is not None:
         _save_rgb(out_dir / "coverage_final.png", topdown)
-    _save_rgb(out_dir / "plan_overlay_final.png", _plan_overlay(env, terrain_policy))
+    _save_rgb(out_dir / "plan_overlay_final.png", _plan_overlay(env, overlay_policy))
     _save_rgb(
         out_dir / "bev_final.png",
         render_bev(
             env,
             obs,
-            waypoints=terrain_policy.waypoints if terrain_policy else [],
-            waypoint_index=terrain_policy.index if terrain_policy else 0,
+            waypoints=overlay_policy.waypoints if overlay_policy else [],
+            waypoint_index=overlay_policy.index if overlay_policy else 0,
             costmap=terrain_policy.plan.costmap if terrain_policy and terrain_policy.plan else None,
             cameras=obs.get("cameras"),
         ),
@@ -291,9 +307,9 @@ def run_demo(
     plan_payload = {
         "policy": name,
         "waypoints": [
-            {"x": x, "y": y} for x, y in (terrain_policy.waypoints if terrain_policy else [])
+            {"x": x, "y": y} for x, y in (overlay_policy.waypoints if overlay_policy else [])
         ],
-        "index": terrain_policy.index if terrain_policy else 0,
+        "index": overlay_policy.index if overlay_policy else 0,
         "n_segments": terrain_policy.plan.n_segments if terrain_policy and terrain_policy.plan else 0,
         "replans": terrain_policy.replans if terrain_policy else 0,
     }
@@ -321,9 +337,31 @@ def run_demo(
         "mission_loaded": bool(info.get("mission_loaded")),
         "geofence_advice": info.get("geofence_advice"),
         "living_advice": info.get("living_advice"),
+        "world": {
+            "width_m": env.cfg.world.width_m,
+            "height_m": env.cfg.world.height_m,
+            "resolution_m": env.cfg.world.resolution_m,
+        },
         "log": records,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    profile_payload = None
+    if teach_policy is not None:
+        taught = teach_policy.to_profile(keep_out=keepouts_from_env(env))
+        profile_payload = taught.as_dict()
+        (out_dir / "profile.json").write_text(json.dumps(profile_payload, indent=2), encoding="utf-8")
+        summary["profile"] = str(out_dir / "profile.json")
+        summary["keep_in_vertices"] = len(taught.keep_in)
+        (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    write_viewer_bundle(
+        out_dir,
+        env=env,
+        poses=poses,
+        plan=plan_payload,
+        profile=profile_payload,
+        cameras=names,
+        policy=name,
+    )
     if log_bc:
         dest = Path(log_bc)
         dest.mkdir(parents=True, exist_ok=True)
@@ -374,7 +412,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy",
         choices=POLICIES,
         default="terrain",
-        help="terrain (default coverage planner), scripted, random, or bc (loads weights if present)",
+        help="terrain (default), scripted, random, bc, or teach (perimeter → YardProfile)",
+    )
+    p.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        help="load a YardProfile JSON (geofence + home) into the env",
     )
     p.add_argument(
         "--bc-weights",
@@ -424,6 +468,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         save_mission=str(args.save_mission) if args.save_mission else None,
         bc_weights=str(args.bc_weights) if args.bc_weights else None,
         log_bc=str(args.log_bc) if args.log_bc else None,
+        yard_profile=str(args.profile) if args.profile else None,
     )
     print(
         f"Wrote {summary['steps_run']} steps, policy={summary['policy']}, "

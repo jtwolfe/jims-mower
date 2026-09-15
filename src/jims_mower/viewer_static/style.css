@@ -1,0 +1,52 @@
+:root {
+  --bg: #0c0d10;
+  --panel: #16181d;
+  --ink: #e8ead4;
+  --muted: #8b9078;
+  --line: #2a2e26;
+  --accent: #c6d36a;
+  --warn: #e0b44c;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 "IBM Plex Sans", system-ui, sans-serif; }
+.top {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); background: #101217;
+}
+.brand { display: flex; gap: 12px; align-items: baseline; }
+.brand strong { letter-spacing: 0.02em; }
+#subtitle { color: var(--muted); font-size: 12px; }
+.strip { display: flex; gap: 8px; }
+.chip {
+  background: #22262c; border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 10px; font-size: 12px;
+}
+.chip.muted { color: var(--muted); }
+main { display: flex; height: calc(100vh - 52px); }
+#stage { flex: 1; position: relative; min-width: 0; }
+#view { width: 100%; height: 100%; display: block; }
+#pip {
+  position: absolute; right: 14px; bottom: 14px; width: 220px;
+  background: rgba(12, 13, 16, 0.88); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px;
+}
+.pip-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+#pip-img { width: 100%; height: 120px; object-fit: contain; background: #0a0b0d; border-radius: 6px; }
+.pip-meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+#panel {
+  width: 280px; padding: 14px 16px 24px; background: var(--panel);
+  border-left: 1px solid var(--line); overflow: auto;
+}
+#panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin: 16px 0 8px; }
+#panel h2:first-child { margin-top: 0; }
+#panel label { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+#scrub { width: 100%; }
+.row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+button {
+  background: #2a3320; color: var(--ink); border: 1px solid #3d4a2c;
+  border-radius: 8px; padding: 6px 10px; cursor: pointer;
+}
+button:hover { background: #354026; }
+.hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+#save-status { font-size: 11px; color: var(--muted); white-space: pre-wrap; }
+#scrub-label { color: var(--muted); font-size: 12px; }

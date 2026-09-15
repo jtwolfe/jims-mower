@@ -67,3 +67,14 @@ jobs:
           jims-mower-farm --dry-run --scenarios suburban --quarantine playground --out /tmp/jims-mower-ci-farm-q
           jims-mower-demo --config configs/scenarios/narrow_gate.yaml --steps 3 --out /tmp/jims-mower-ci-gate --cameras 4 --policy scripted
           jims-mower-demo --config configs/orin/extrinsics_6cam.yaml --steps 2 --out /tmp/jims-mower-ci-ext --policy scripted
+      - name: World Viewer + Teach Boundary smoke
+        run: |
+          jims-mower-mesh --out /tmp/jims-mower-ci-yard.glb --cameras 4 --seed 1 --stride 3
+          test -s /tmp/jims-mower-ci-yard.glb
+          jims-mower-viewer --episode /tmp/jims-mower-ci-demo --prepare-only
+          test -s /tmp/jims-mower-ci-demo/yard.glb
+          test -f /tmp/jims-mower-ci-demo/viewer.json
+          jims-mower-teach --steps 6 --cameras 4 --out /tmp/jims-mower-ci-teach
+          test -f /tmp/jims-mower-ci-teach/profile.json
+          jims-mower-demo --policy teach --steps 4 --cameras 4 --out /tmp/jims-mower-ci-teach-demo
+          jims-mower-demo --profile /tmp/jims-mower-ci-teach/profile.json --steps 3 --cameras 4 --out /tmp/jims-mower-ci-taught

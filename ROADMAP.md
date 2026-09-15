@@ -10,11 +10,28 @@ recovery, hand-signal hooks, mission resume), WAVE **2B** (sim-only
 perception: exporter → numpy terrain stub, BEV fuse, temporal filters),
 and WAVE **3A** (behaviour cloning, RL scaffold, incident / telemetry /
 ESTOP, owner overlay) are on `main`. WAVE **3B** (runtime / Orin packaging /
-design studies) is on `main`. WAVE **4** (this PR) closes remaining
-perception / mapping / planning / world / Orin / ops hooks. Later items
-stay unchecked until they land. No claimed mAP / FPS.
+design studies) is on `main`. WAVE **4** closes remaining perception /
+mapping / planning / world / Orin / ops hooks. WAVE **UX-A** (this PR)
+adds the World Viewer + Teach Boundary flow. Later items stay unchecked
+until they land. No claimed mAP / FPS.
 
-## WAVE 4 — remaining ROADMAP hooks (this PR)
+## WAVE UX-A — World Viewer + Teach Boundary (this PR)
+
+- [x] World Viewer local web UI (`jims-mower-viewer`) — three.js CDN,
+      low-poly mesh, coverage / hazard / occupancy toggles, plan overlay,
+      live/scrub pose, camera PiP, health/radio placeholders
+- [x] Low-poly mesh export (`jims-mower-mesh`) — elevation → decimated
+      GLB + OBJ + JSON (no extra mesh deps)
+- [x] Teach Boundary (`--policy teach` / `jims-mower-teach`) — perimeter
+      trail → smoothed polygon → viewer vertex edit → `YardProfile` JSON
+- [x] Load `YardProfile` into env / scenario (`--profile` or `--config`)
+- [x] Demo / record write a viewer bundle (`viewer.json`, `yard.glb`, maps)
+- [x] [`docs/UX.md`](docs/UX.md)
+- [x] Tests: mesh non-empty, trail → polygon, viewer static assets, CI
+
+See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
+
+## WAVE 4 — remaining ROADMAP hooks (done)
 
 - [x] Person / animal / toy categories + appearance model on `MockDetector`
 - [x] Hand-signal classifier stub behind `curriculum.hand_signal_classifier`
@@ -252,4 +269,12 @@ jims-mower-import-yard configs/surveys/example_yard.json
 jims-mower-study --kind pitch --dry-run --out study_pitch
 jims-mower-farm --dry-run --scenarios suburban --quarantine playground --out farm_q
 python -m jims_mower.demo --config narrow_gate --steps 8 --out demo_gate
+
+# WAVE UX-A
+jims-mower-demo --steps 12 --out demo_out
+jims-mower-viewer --episode demo_out --prepare-only
+jims-mower-mesh --out /tmp/yard.glb --seed 7 --cameras 4
+jims-mower-teach --steps 8 --out teach_out --cameras 4
+jims-mower-demo --policy teach --steps 8 --out demo_teach
+jims-mower-demo --profile teach_out/profile.json --steps 4 --out demo_taught
 ```

@@ -295,6 +295,8 @@ def record_episode(
     }
     recorder = EpisodeRecorder(out_dir, manifest)
     recorder.write_reset(obs, info)
+    poses: list[Any] = [info.get("pose") or {}]
+    dump_at = {0, max(0, int(steps) // 2), max(0, int(steps) - 1)}
     try:
         for t in range(int(steps)):
             harness.start_cycle()
@@ -329,6 +331,11 @@ def record_episode(
                 if callable(cov):
                     extra["fused_variance"] = [float(v) for v in cov()]
             next_obs, reward, terminated, truncated, next_info = env.step(action)
+            poses.append(next_info.get("pose") or {})
+            if t in dump_at and obs.get("cameras"):
+                from jims_mower.viewer import dump_step_frames
+
+                dump_step_frames(Path(out_dir) / f"step_{t:03d}", obs)
             recorder.write_step(
                 t,
                 obs,
@@ -352,6 +359,15 @@ def record_episode(
         )
         recorder.write_scorecard(scorecard)
         recorder.close()
+        from jims_mower.viewer import write_viewer_bundle
+
+        write_viewer_bundle(
+            out_dir,
+            env=env,
+            poses=poses,
+            policy=name,
+            cameras=list((obs.get("cameras") or {}).keys()),
+        )
         env.close()
     return {
         "out_dir": str(Path(out_dir)),

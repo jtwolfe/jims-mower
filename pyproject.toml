@@ -61,6 +61,9 @@ jims-mower-export-trt = "jims_mower.runtime.export_trt:main"
 jims-mower-sequence = "jims_mower.sequence:main"
 jims-mower-curriculum = "jims_mower.curriculum_sched:main"
 jims-mower-import-yard = "jims_mower.survey:main"
+jims-mower-viewer = "jims_mower.viewer:main"
+jims-mower-mesh = "jims_mower.mesh:main"
+jims-mower-teach = "jims_mower.teach:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"
@@ -79,6 +82,7 @@ jims_mower = [
     "data/sequences/*.yaml",
     "data/orin/*.yaml",
     "data/surveys/*.json",
+    "viewer_static/*",
 ]
 
 [tool.pytest.ini_options]

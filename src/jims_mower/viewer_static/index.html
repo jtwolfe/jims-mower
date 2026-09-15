@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>jims-mower World Viewer</title>
+  <link rel="stylesheet" href="/style.css"/>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <strong>World Viewer</strong>
+      <span id="subtitle">low-poly yard · no mAP / FPS</span>
+    </div>
+    <div class="strip" id="health-radio">
+      <div class="chip muted" title="placeholder">health —</div>
+      <div class="chip muted" title="placeholder">radio —</div>
+      <div class="chip" id="mesh-chip">mesh —</div>
+    </div>
+  </header>
+
+  <main>
+    <section id="stage">
+      <canvas id="view"></canvas>
+      <aside id="pip">
+        <div class="pip-head">
+          <label for="cam-select">camera</label>
+          <select id="cam-select"></select>
+        </div>
+        <img id="pip-img" alt="camera frame" />
+        <div class="pip-meta" id="pip-meta">no frames</div>
+      </aside>
+    </section>
+
+    <aside id="panel">
+      <h2>Layers</h2>
+      <label><input type="checkbox" id="tog-coverage" checked/> coverage paint</label>
+      <label><input type="checkbox" id="tog-hazard"/> hazard</label>
+      <label><input type="checkbox" id="tog-occupancy"/> occupancy</label>
+      <label><input type="checkbox" id="tog-plan" checked/> plan overlay</label>
+      <label><input type="checkbox" id="tog-pose" checked/> live / scrub pose</label>
+      <label><input type="checkbox" id="tog-fence" checked/> geofence</label>
+      <label><input type="checkbox" id="tog-trail"/> teach trail</label>
+
+      <h2>Scrub</h2>
+      <input type="range" id="scrub" min="0" max="0" value="0"/>
+      <div class="row">
+        <button type="button" id="btn-play">Play</button>
+        <span id="scrub-label">step 0 / 0</span>
+      </div>
+
+      <h2>Teach boundary</h2>
+      <p class="hint">Drag keep-in vertices. Add a keep-out, then save a YardProfile.</p>
+      <div class="row">
+        <button type="button" id="btn-add-keepout">Add keep-out</button>
+        <button type="button" id="btn-save">Save profile</button>
+      </div>
+      <pre id="save-status"></pre>
+    </aside>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
