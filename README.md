@@ -69,7 +69,15 @@ jims-mower-curriculum
 jims-mower-import-yard configs/surveys/example_yard.json
 jims-mower-study --kind pitch --dry-run --out study_pitch
 python -m jims_mower.demo --config narrow_gate --steps 12 --out demo_gate
+
+# WAVE UX-A — World Viewer + teach a geofence (no mAP / FPS)
+jims-mower-demo --steps 40 --out demo_out
+jims-mower-viewer --episode demo_out
+jims-mower-teach --steps 80 --out teach_out
+jims-mower-demo --profile teach_out/profile.json --out demo_taught
 ```
+
+Docs: [`docs/UX.md`](docs/UX.md).
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
 

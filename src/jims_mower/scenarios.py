@@ -11,6 +11,7 @@ explicit drains/banks/obstacles). Those keep distinct filenames
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -485,6 +486,18 @@ def load_source(
         return load_config(source), None
     path = Path(source)
     if path.is_file():
+        if path.suffix.lower() == ".json":
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                data = None
+            if isinstance(data, dict):
+                from jims_mower.profile import is_yard_profile, load_yard_profile, profile_to_scenario
+
+                if is_yard_profile(data):
+                    scn = profile_to_scenario(load_yard_profile(data))
+                    scn.path = path
+                    return scn.config, scn
         with path.open("r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
         if looks_like_scenario(data):

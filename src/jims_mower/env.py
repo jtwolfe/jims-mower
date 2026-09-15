@@ -283,6 +283,7 @@ class MowerEnv(gym.Env):
         self._loop = LoopClosureStub()
         self._fused_elev: Optional[np.ndarray] = None
         self._last_semantic: Optional[np.ndarray] = None
+        self._yard_profile = None
 
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None
@@ -300,10 +301,25 @@ class MowerEnv(gym.Env):
         self._mission_save_path = str(mission_save) if mission_save else None
         self._mission_loaded = False
         self._episode_seed = seed
+        self._yard_profile = None
+        raw_profile = options.get("yard_profile") or options.get("profile")
+        if raw_profile:
+            from jims_mower.profile import YardProfile, apply_profile_to_scenario, load_yard_profile
+            from jims_mower.scenarios import empty_scenario
+
+            if isinstance(raw_profile, YardProfile):
+                self._yard_profile = raw_profile
+            else:
+                self._yard_profile = load_yard_profile(raw_profile)
+            if self.scenario is None:
+                self.scenario = empty_scenario(self.cfg)
+            apply_profile_to_scenario(self.scenario, self._yard_profile)
         previous_cut = None
         if grow_cfg.enabled and self._had_episode:
             previous_cut = self._coverage.cut.copy()
         self._pose = robot_start_pose(self.cfg.world.width_m, self.cfg.world.height_m)
+        if self._yard_profile is not None:
+            self._pose = self._yard_profile.home_pose()
         counts = {
             "person": self.cfg.world.n_people,
             "dog": self.cfg.world.n_dogs,
