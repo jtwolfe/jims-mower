@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -12,6 +13,8 @@ from gymnasium import spaces
 from jims_mower.appearance import Appearance, appearance_rng, sample_appearance
 from jims_mower.cameras import camera_world_pose
 from jims_mower.config import EnvConfig, load_config
+from jims_mower.renderer import apply_weather_rgb
+from jims_mower.scenarios import Scenario, load_source
 from jims_mower.constants import (
     DET_FEATURES,
     HAND_SIGNALS,
@@ -104,9 +107,17 @@ class MowerEnv(gym.Env):
         grass_observer: Optional[GrassObserver] = None,
         terrain_observer: Optional[TerrainObserver] = None,
         hand_signals: Optional[bool] = None,
+        scenario: Optional[Scenario] = None,
     ) -> None:
         super().__init__()
-        self.cfg = load_config(config)
+        if isinstance(config, Scenario):
+            self.cfg = config.config
+            self.scenario: Optional[Scenario] = config
+        elif scenario is not None:
+            self.cfg = load_config(config) if config is not None else scenario.config
+            self.scenario = scenario
+        else:
+            self.cfg, self.scenario = load_source(config)
         if hand_signals is not None:
             self.cfg.curriculum.hand_signals = bool(hand_signals)
         if render_mode is not None and render_mode not in self.metadata["render_modes"]:
@@ -286,6 +297,8 @@ class MowerEnv(gym.Env):
             n_puddles=self.cfg.world.n_puddles,
             puddle_radius_m=terr_cfg.puddle_radius_m,
             puddle_depth_m=terr_cfg.puddle_depth_m,
+            explicit_drains=list(self.scenario.drains) if self.scenario else None,
+            explicit_banks=list(self.scenario.banks) if self.scenario else None,
         )
         self._yard = spawn_yard(
             self.np_random,
@@ -297,6 +310,7 @@ class MowerEnv(gym.Env):
             layout=self.cfg.world.layout,
             orchard_rows=self.cfg.world.orchard_rows,
             orchard_cols=self.cfg.world.orchard_cols,
+            explicit=list(self.scenario.obstacles) if self.scenario else None,
         )
         self._coverage.reset()
         for obst in self._yard.static():
@@ -402,6 +416,7 @@ class MowerEnv(gym.Env):
             self.cfg.world.width_m,
             self.cfg.world.height_m,
             self.cfg.robot.collision_radius_m,
+            geofence=self.scenario.geofence if self.scenario else None,
         )
         terrain_ev = terrain_hazards(
             self._pose,
@@ -456,6 +471,9 @@ class MowerEnv(gym.Env):
                 "wheels_in_drain": list(terrain_ev.wheels_in_drain),
                 "cutter_risk": cord_hit is not None,
                 "cutter_risk_kind": cord_hit.kind if cord_hit is not None else None,
+                "nearest_person_m": self._nearest_person_m(),
+                "scenario": self.scenario.name if self.scenario else "",
+                "weather": _weather_dict(self.scenario),
             }
         )
         if terminated or truncated:
@@ -490,8 +508,9 @@ class MowerEnv(gym.Env):
     def _render_cameras(self) -> dict[str, np.ndarray]:
         yard = (self.cfg.world.width_m, self.cfg.world.height_m)
         images = {}
+        weather = self.scenario.weather if self.scenario is not None else None
         for cam in self.cameras:
-            images[cam.name] = render_camera(
+            frame = render_camera(
                 self._pose,
                 cam,
                 self._coverage,
@@ -502,7 +521,37 @@ class MowerEnv(gym.Env):
                 terrain=self._terrain,
                 appearance=self._appearance,
             )
+            if weather is not None and (weather.night or weather.dawn or weather.wet):
+                frame = apply_weather_rgb(
+                    frame,
+                    night=weather.night,
+                    dawn=weather.dawn,
+                    wet=weather.wet,
+                )
+            images[cam.name] = frame
         return images
+
+    def _nearest_person_m(self) -> float:
+        best = math.inf
+        for obst in self._yard.obstacles:
+            if obst.kind != "person":
+                continue
+            d = math.hypot(self._pose.x - obst.x, self._pose.y - obst.y)
+            if d < best:
+                best = d
+        return float(best)
+
+    def oracle_labels(self) -> dict[str, np.ndarray]:
+        """True height-field / grass rasters (exporter labels, not the observer)."""
+        if self._terrain.slope is None:
+            self._terrain.recompute_slope()
+        assert self._terrain.slope is not None
+        return {
+            "elevation": self._terrain.elevation.astype(np.float32).copy(),
+            "slope": self._terrain.slope.astype(np.float32).copy(),
+            "hazard": self._terrain.hazard_map(self.cfg.robot.steep_slope_rad),
+            "grass": self._coverage.as_float(),
+        }
 
     def terrain_layer_images(self) -> dict[str, np.ndarray]:
         """False-color elevation / slope / hazard rasters the policy sees."""
@@ -675,8 +724,19 @@ class MowerEnv(gym.Env):
             "tipover": terrain_ev.tipover,
             "drain_drop": terrain_ev.drain_drop,
             "steep": terrain_ev.steep,
+            "nearest_person_m": self._nearest_person_m(),
+            "scenario": self.scenario.name if self.scenario else "",
+            "weather": _weather_dict(self.scenario),
+            "geofence": [list(p) for p in (self.scenario.geofence if self.scenario else [])],
         }
         return obs, info
+
+
+def _weather_dict(scenario: Optional[Scenario]) -> dict[str, Any]:
+    if scenario is None:
+        return {"night": False, "dawn": False, "wet": False, "lighting": "day"}
+    w = scenario.weather
+    return {"night": w.night, "dawn": w.dawn, "wet": w.wet, "lighting": w.lighting}
 
 
 def _cam_pose_dict(pose: Pose, cam: CameraSpec) -> dict[str, Any]:

@@ -39,5 +39,7 @@ htmlcov/
 # Demo / local artifacts (keep the package configs/)
 /artifacts/
 /demo_out/
+/dataset_out/
+/farm_out/
 *.ppm
 .DS_Store

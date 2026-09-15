@@ -41,7 +41,14 @@ python -m jims_mower.demo --policy random --out demo_random
 
 # Or:
 python -m jims_mower.demo --cameras 6 --hand-signals --out demo_out
+
+# WAVE 1A — scenario yard, dataset dump, farm dry-run (BEV is in demo_out)
+python -m jims_mower.demo --config suburban --steps 12 --out demo_out
+python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --out dataset_out
+python -m jims_mower.farm --dry-run --out farm_out
 ```
+
+Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
 
 ```python
 import gymnasium as gym
@@ -384,19 +391,44 @@ back-projection, terrain observers (oracle / heuristic / blind), the
 costmap and coverage planner (channels forbidden), the controller (slows
 on steep / stops on tip / replans when the vision map grows), the GPS+IMU
 pose stub, reward, the renderer’s non-flat shading and plan overlay, the
-Gymnasium env checker, and heuristic+planner episodes on `steep_yard`
+Gymnasium env checker, heuristic+planner episodes on `steep_yard`
 (fixed seeds: no channel entry; coverage vs oracle is reported without a
-fake mAP). GitHub Actions runs the same suite headless on Python 3.10–3.12
-plus a short terrain-policy demo smoke (heuristic default).
+fake mAP), the scenario loader, dataset-export layout, scorecards on
+frozen seeds, and a farm dry-run. GitHub Actions PR CI runs the same
+suite headless on Python 3.10–3.12 plus a short terrain-policy demo
+smoke (heuristic default). The full seed×scenario farm is a separate
+[manual / nightly workflow](.github/workflows/farm.yml), not PR CI.
+
+## WAVE 1A foundation
+
+| Piece | Module / path |
+| --- | --- |
+| Scenario DSL | [`src/jims_mower/scenarios.py`](src/jims_mower/scenarios.py), [`configs/scenarios/`](configs/scenarios/) |
+| Dataset exporter | `python -m jims_mower.export` — PNG + JSON sidecars, `coco.json` |
+| Scorecards | [`src/jims_mower/metrics.py`](src/jims_mower/metrics.py) |
+| Overnight farm | `python -m jims_mower.farm` (exit 1 if tip/drain gates fail) |
+| BEV debugger | [`src/jims_mower/bev.py`](src/jims_mower/bev.py) → `bev_final.png` |
+| ICD / roadmap | [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md) |
+
+Exporter labels are **oracle** height-field / grass rasters. The env
+observer can still be heuristic. Dataset folder layout is written to
+`LAYOUT.md` in the dump.
 
 ## Layout
 
 ```
-configs/default.yaml     camera poses + yard / terrain / sensors / planner
-configs/steep_yard.yaml  louder drain / bank demo
-src/jims_mower/          env, kinematics, terrain, planning, sensors, safety
-src/jims_mower/planning/ costmap, boustrophedon+A*, controller, pose stub
-tests/                   pytest
+ROADMAP.md ICD.md
+configs/default.yaml          camera poses + yard / terrain / sensors / planner
+configs/steep_yard.yaml       louder drain / bank demo
+configs/scenarios/            WAVE 1A yards (suburban, paddock, …)
+src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
+src/jims_mower/scenarios.py   YAML scenario loader
+src/jims_mower/export.py      dataset dump
+src/jims_mower/metrics.py     episode scorecards
+src/jims_mower/farm.py        seed × scenario farm
+src/jims_mower/bev.py         BEV composite
+src/jims_mower/planning/      costmap, boustrophedon+A*, controller, pose stub
+tests/                        pytest
 ```
 
 MIT licensed. See `LICENSE`.

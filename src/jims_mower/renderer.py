@@ -397,6 +397,60 @@ def render_topdown(
     return image
 
 
+def apply_weather_rgb(
+    image: np.ndarray,
+    *,
+    night: bool = False,
+    dawn: bool = False,
+    wet: bool = False,
+) -> np.ndarray:
+    """Dim / tint a camera frame for night, dawn, or wet-surface flags.
+
+    Visual only — no claimed sensor model. Night and dawn are exclusive.
+    """
+    out = np.asarray(image, dtype=np.float32)
+    if night:
+        out *= 0.28
+        out[:, :, 2] = np.minimum(255.0, out[:, :, 2] * 1.15)
+    elif dawn:
+        out *= 0.55
+        out[:, :, 0] = np.minimum(255.0, out[:, :, 0] * 1.25)
+        out[:, :, 2] *= 0.85
+    if wet:
+        out *= 0.90
+        out[:, :, 2] = np.minimum(255.0, out[:, :, 2] * 1.06)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def render_costmap_rgb(
+    cost: np.ndarray,
+    blocked: np.ndarray,
+    *,
+    image_size: int = 240,
+) -> np.ndarray:
+    """False-color costmap: green free, yellow slow, red blocked."""
+    rows, cols = cost.shape
+    if cols >= rows:
+        width = image_size
+        height = max(8, int(round(image_size * rows / cols)))
+    else:
+        height = image_size
+        width = max(8, int(round(image_size * cols / rows)))
+    yy = (np.linspace(0, rows - 1, height)).astype(int)
+    xx = (np.linspace(0, cols - 1, width)).astype(int)
+    sampled = np.asarray(cost, dtype=np.float32)[yy[:, None], xx[None, :]]
+    blk = np.asarray(blocked, dtype=bool)[yy[:, None], xx[None, :]]
+    sampled = sampled[::-1]
+    blk = blk[::-1]
+    finite = np.isfinite(sampled)
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    image[:] = (40, 90, 50)
+    steep = finite & (sampled >= 4.0)
+    image[steep] = (210, 160, 40)
+    image[~finite | blk] = (140, 30, 28)
+    return image
+
+
 def render_scalar_map(
     grid: np.ndarray,
     *,

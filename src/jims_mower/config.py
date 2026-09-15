@@ -269,6 +269,14 @@ def default_camera_rig(count: int = 6, fov_deg: float = 70.0) -> list[CameraSpec
     ]
 
 
+def overlay_config(cfg: EnvConfig, data: dict[str, Any]) -> EnvConfig:
+    """Merge a mapping onto an existing config and re-validate."""
+    if not isinstance(data, dict):
+        raise ConfigError("overlay must be a mapping")
+    _merge_dataclass(cfg, data)
+    return validate_config(cfg)
+
+
 def _merge_dataclass(obj: Any, data: dict[str, Any]) -> None:
     valid = {f.name for f in fields(obj)}
     for key, value in data.items():

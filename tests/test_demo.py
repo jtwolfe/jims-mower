@@ -32,6 +32,8 @@ def test_demo_writes_cameras_and_summary(tmp_path: Path) -> None:
     assert (step0 / "slope.png").is_file()
     assert (step0 / "hazard.png").is_file()
     assert (step0 / "plan_overlay.png").is_file()
+    assert (step0 / "bev.png").is_file()
+    assert (tmp_path / "bev_final.png").is_file()
     assert (step0 / "sensors.json").is_file()
     sensors = json.loads((step0 / "sensors.json").read_text(encoding="utf-8"))
     assert len(sensors["imu"]) == 6

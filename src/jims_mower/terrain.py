@@ -406,15 +406,43 @@ def generate_terrain(
     n_puddles: int = 0,
     puddle_radius_m: float = 0.45,
     puddle_depth_m: float = 0.04,
+    explicit_drains: Optional[list[DrainFeature]] = None,
+    explicit_banks: Optional[list[BankFeature]] = None,
 ) -> HeightField:
-    """Procedural yard elevation. Disabled → a flat field (still labeled)."""
+    """Procedural yard elevation. Disabled → a flat field (still labeled).
+
+    ``explicit_drains`` / ``explicit_banks`` (scenario DSL) are carved first.
+    Layout features and remaining random counts apply after that.
+    """
     hf = HeightField.empty(width_m, height_m, resolution_m)
-    if not enabled:
+    if not enabled and not explicit_drains and not explicit_banks:
         return hf
     keep = list(keepout or [])
     # Cap berm height so generated bank faces stay under max_slope_rad.
     max_bank_h = math.tan(max(max_slope_rad, 1e-3)) * (0.5 * bank_width_m)
     bank_h = min(bank_height_m, max_bank_h)
+
+    for drain in explicit_drains or []:
+        _carve_drain(hf, drain)
+        hf.drains.append(drain)
+        keep.extend(hf.feature_keepouts()[-8:])
+
+    for bank in explicit_banks or []:
+        capped = BankFeature(
+            bank.x0,
+            bank.y0,
+            bank.x1,
+            bank.y1,
+            bank.width_m,
+            min(bank.height_m, max_bank_h),
+            kind=bank.kind,
+        )
+        _carve_bank(hf, capped)
+        hf.banks.append(capped)
+
+    if not enabled:
+        hf.recompute_slope()
+        return hf
 
     _apply_layout_features(
         hf,

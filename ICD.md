@@ -1,0 +1,126 @@
+# ICD — Jim's Mower interface control
+
+Short contract for the gym, plugins, and (later) the Orin runtime.
+Implementation: [`src/jims_mower/env.py`](src/jims_mower/env.py),
+[`src/jims_mower/perception/`](src/jims_mower/perception/),
+[`src/jims_mower/planning/`](src/jims_mower/planning/).
+Gymnasium id: `jims_mower/Mower-v0`.
+
+## Action space
+
+`Box(3,)` float32:
+
+| Index | Range | Meaning |
+| --- | --- | --- |
+| 0 | [−1, 1] | Left wheel, fraction of `robot.max_wheel_speed_mps` |
+| 1 | [−1, 1] | Right wheel |
+| 2 | [0, 1] | Trimmer request; **on** if `> 0.5` *and* the interlock allows |
+
+Equal-and-opposite wheels are a zero-radius pivot. The interlock can refuse
+the trimmer when a living thing is inside `robot.trimmer.safety_radius_m` of
+the hub.
+
+## Observation keys
+
+`Dict` space (see `MowerEnv.observation_space`):
+
+| Key | Shape / type | Meaning |
+| --- | --- | --- |
+| `cameras` | dict name → `uint8 (H, W, 3)` | Pinhole RGB, body-frame rig |
+| `coverage` | `float32 (R, C)` | `1` cut grass, `0` uncut, `−1` non-grass |
+| `occupancy` | `float32 (R, C)` | Detection-rasterized, not god-view |
+| `detections` | `float32 (24, 8)` | Padded `[label, cam, u, v, w, h, conf, signal]` |
+| `pose` | `float32 (6,)` | `(x, y, theta, z, pitch, roll)` metres / rad |
+| `imu` | `float32 (6,)` | Body specific force + gyro; rest ≈ `(0,0,9.81,0,0,0)` |
+| `gps` | `float32 (4,)` | `(x, y, z, valid)`; `valid=0` on dropout |
+| `tof` | `float32 (4,)` | Downward ranges FL, FR, RL, RR |
+| `elevation` | `float32 (R, C)` | Observer height estimate (m) |
+| `slope` | `float32 (R, C)` | Observer slope (rad, 0–π/2) |
+| `hazard` | `float32 (R, C)` | Observer hazard classes (below) |
+| `trimmer_enabled` | `float32 (1,)` | `0` or `1` after the interlock |
+| `hand_signal` | `Discrete(5)` | `0` none, `1` stop, `2` go, `3` follow, `4` back |
+
+`info` (not in the space) also carries `terrain_advice`, `detections` as
+dicts, `weather`, `scenario`, `geofence`, `nearest_person_m`, IMU/GPS lists.
+
+Maps `R×C` align with the grass grid: `resolution_m`, origin at world `(0,0)`,
+row = y, col = x.
+
+## Hazard labels
+
+Same integers on the observer raster and on oracle PNGs from the exporter:
+
+| Value | Name | Policy meaning |
+| --- | --- | --- |
+| 0 | free | Cost 1 |
+| 1 | steep | Slow corridor if `slope < planner.max_climb_slope_rad`, else blocked |
+| 2 | drain lip | Reroute; inflated by `planner.drain_clearance_m` |
+| 3 | drain channel | Forbidden; same inflation |
+
+Physics uses the **true** height field. `info["terrain_advice"]` is
+`ok` | `slow` | `reroute` | `stop` from that field (plus IMU cross-check in
+the controller).
+
+## Detector
+
+```python
+class Detector(Protocol):
+    def detect(self, images: dict[str, np.ndarray], context: PerceptionContext) -> list[Detection]: ...
+```
+
+- `images[name]` is `uint8 (H, W, 3)`.
+- A real head **must ignore** `context.obstacles` (sim-only).
+- `Detection`: `label`, `camera`, `bbox=(u,v,w,h)`, `confidence`, optional
+  `world_xy`, `hand_signal`, `category`, `depth_m`.
+- Labels: `person`, `dog`, `cat`, `bird`, `tree`, `furniture`, `toy`
+  ([`constants.LABEL_TO_ID`](src/jims_mower/constants.py)).
+- Gym default: `MockDetector`. Stub: `BlindDetector` (always `[]`).
+
+## TerrainObserver
+
+```python
+class TerrainObserver(Protocol):
+    def estimate(self, images, imu, gps, context) -> TerrainEstimate: ...
+    def reset(self) -> None: ...  # optional; env calls it if present
+```
+
+- Returns `TerrainEstimate(elevation, slope, hazard, source)` at `context.map_shape`.
+- A real head **must ignore** `context.terrain` (god-view `HeightField`).
+- Modes: `heuristic` (default, RGB+ToF, no `context.terrain`), `oracle`
+  (training), `blind` (zeros).
+- `imu` is the 6-vector; `gps` is the 4-vector.
+
+## GrassObserver
+
+```python
+class GrassObserver(Protocol):
+    def estimate(self, images: dict[str, np.ndarray]) -> dict[str, float]: ...
+```
+
+Per-camera uncut-grass fraction. Default: `ColorGrassObserver`.
+
+## Planner / controller
+
+`TerrainPolicy` consumes **observation** maps (whatever the observer wrote),
+not the height field:
+
+1. `build_costmap(hazard, slope, occupancy, …)`
+2. Boustrophedon strips + A* (`plan_coverage`)
+3. Zero-turn tracker; `terrain_advice` + IMU tilt → slow / reroute / stop
+
+`ComplementaryPoseFilter` is a GPS+IMU stub for planner start / attitude, not
+a published EKF.
+
+## Scenario extras (WAVE 1A)
+
+Not observation keys. Loaded via [`scenarios.load_source`](src/jims_mower/scenarios.py):
+
+- `weather.night` / `weather.dawn` / `weather.wet` — camera tint only
+- `geofence` — polygon; `in_yard` fails outside it
+- explicit `drains` / `banks` / `obstacles`
+
+## Exporter labels
+
+[`export.py`](src/jims_mower/export.py) writes **oracle** rasters from
+`MowerEnv.oracle_labels()` (true height field + grass), even if the env
+observer is heuristic. Layout is in the dump's `LAYOUT.md`.

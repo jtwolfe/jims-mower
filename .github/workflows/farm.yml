@@ -1,0 +1,31 @@
+# Optional overnight / manual farm. Not on pull_request — keep PR CI fast.
+name: overnight-farm
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  farm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Headless farm (4 cameras, modest matrix)
+        run: >
+          python -m jims_mower.farm
+          --seeds 0,1,5
+          --steps 24
+          --cameras 4
+          --out farm_out
+      - name: Upload scorecards
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: farm-scorecards
+          path: farm_out
