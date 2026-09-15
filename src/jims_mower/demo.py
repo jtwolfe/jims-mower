@@ -104,6 +104,8 @@ def run_demo(
     config: Optional[str] = None,
     policy: str = "terrain",
     terrain_observer: Optional[str] = None,
+    load_mission: Optional[str] = None,
+    save_mission: Optional[str] = None,
 ) -> dict:
     name = (policy or "terrain").strip().lower()
     if name not in POLICIES:
@@ -125,7 +127,12 @@ def run_demo(
         render_mode="rgb_array",
         hand_signals=hand_signals,
     )
-    obs, info = env.reset(seed=seed)
+    reset_opts: dict = {}
+    if load_mission:
+        reset_opts["load_mission"] = load_mission
+    if save_mission:
+        reset_opts["save_mission"] = save_mission
+    obs, info = env.reset(seed=seed, options=reset_opts or None)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     terrain_policy: Optional[TerrainPolicy] = None
@@ -279,6 +286,9 @@ def run_demo(
         "terrain_mode": env.cfg.perception.terrain_mode,
         "terminated_drain_drop": bool(info.get("drain_drop")),
         "terminated_tipover": bool(info.get("tipover")),
+        "mission_loaded": bool(info.get("mission_loaded")),
+        "geofence_advice": info.get("geofence_advice"),
+        "living_advice": info.get("living_advice"),
         "log": records,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -311,6 +321,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="override perception.terrain_mode (default: YAML, heuristic)",
     )
+    p.add_argument(
+        "--save-mission",
+        type=Path,
+        default=None,
+        help="write map + uncut + pose on close (WAVE 2A resume)",
+    )
+    p.add_argument(
+        "--load-mission",
+        type=Path,
+        default=None,
+        help="restore map + uncut + pose before the first step",
+    )
     return p
 
 
@@ -325,6 +347,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         config=args.config,
         policy=args.policy,
         terrain_observer=args.terrain_observer,
+        load_mission=str(args.load_mission) if args.load_mission else None,
+        save_mission=str(args.save_mission) if args.save_mission else None,
     )
     print(
         f"Wrote {summary['steps_run']} steps, policy={summary['policy']}, "

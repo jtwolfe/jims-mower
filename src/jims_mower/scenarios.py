@@ -25,8 +25,10 @@ from jims_mower.config import (
     overlay_config,
     validate_config,
 )
+from jims_mower.constants import TRAJECTORY_MODES
+from jims_mower.geofence import GeofenceSpec
 from jims_mower.terrain import BankFeature, DrainFeature
-from jims_mower.types import Obstacle
+from jims_mower.types import Obstacle, Trajectory
 from jims_mower.world import place_obstacle
 
 ENV_OVERLAY_KEYS = frozenset(
@@ -45,7 +47,7 @@ ENV_OVERLAY_KEYS = frozenset(
 )
 
 SCENARIO_HINT_KEYS = frozenset(
-    {"weather", "geofence", "drains", "banks", "obstacles", "env", "base"}
+    {"weather", "geofence", "keepout", "drains", "banks", "obstacles", "env", "base"}
 )
 
 LIGHTING_FLAGS = frozenset({"night", "dawn", "day"})
@@ -82,6 +84,7 @@ class Scenario:
     description: str = ""
     weather: WeatherFlags = field(default_factory=WeatherFlags)
     geofence: list[tuple[float, float]] = field(default_factory=list)
+    keepout: list[list[tuple[float, float]]] = field(default_factory=list)
     drains: list[DrainFeature] = field(default_factory=list)
     banks: list[BankFeature] = field(default_factory=list)
     obstacles: list[Obstacle] = field(default_factory=list)
@@ -90,6 +93,13 @@ class Scenario:
 
     def to_env_config(self) -> EnvConfig:
         return self.config
+
+    def geofence_spec(self, inflate_m: float = 0.30) -> GeofenceSpec:
+        return GeofenceSpec(
+            keep_in=list(self.geofence),
+            keep_out=[list(p) for p in self.keepout],
+            inflate_m=float(inflate_m),
+        )
 
 
 def scenario_dir() -> Path:
@@ -150,15 +160,98 @@ def _xy_pair(item: Any, *, field: str) -> tuple[float, float]:
     raise ScenarioError(f"{field} entries must be [x, y] or {{x, y}}")
 
 
-def _parse_geofence(raw: Any) -> list[tuple[float, float]]:
+def _parse_polygon(raw: Any, *, field: str) -> list[tuple[float, float]]:
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise ScenarioError("geofence must be a list of [x, y] vertices")
-    poly = [_xy_pair(p, field="geofence") for p in raw]
+        raise ScenarioError(f"{field} must be a list of [x, y] vertices")
+    poly = [_xy_pair(p, field=field) for p in raw]
     if poly and len(poly) < 3:
-        raise ScenarioError("geofence needs at least 3 vertices")
+        raise ScenarioError(f"{field} needs at least 3 vertices")
     return poly
+
+
+def _parse_geofence(raw: Any) -> tuple[list[tuple[float, float]], list[list[tuple[float, float]]]]:
+    """Keep-in polygon plus optional keep-out holes.
+
+    Legacy: ``geofence: [[x, y], ...]``.
+    Structured::
+
+        geofence:
+          keep_in: [[x, y], ...]
+          keep_out:
+            - [[x, y], ...]
+    """
+    if raw is None:
+        return [], []
+    if isinstance(raw, list):
+        return _parse_polygon(raw, field="geofence"), []
+    if not isinstance(raw, dict):
+        raise ScenarioError("geofence must be a vertex list or a keep_in/keep_out mapping")
+    extra = set(raw) - {"keep_in", "keep_out", "keepout", "polygon", "vertices", "mode"}
+    if extra:
+        raise ScenarioError(f"Unknown geofence keys: {sorted(extra)}")
+    keep_in_raw = raw.get("keep_in", raw.get("polygon", raw.get("vertices")))
+    mode = str(raw.get("mode") or "keep_in").strip().lower()
+    if keep_in_raw is None and mode == "keep_out":
+        keep_in: list[tuple[float, float]] = []
+        keep_out = [_parse_polygon(raw.get("polygon") or raw.get("vertices"), field="geofence.keep_out")]
+        keep_out = [p for p in keep_out if p]
+        return keep_in, keep_out
+    keep_in = _parse_polygon(keep_in_raw, field="geofence.keep_in")
+    holes: list[list[tuple[float, float]]] = []
+    raw_out = raw.get("keep_out", raw.get("keepout"))
+    if raw_out is None:
+        return keep_in, holes
+    if isinstance(raw_out, list) and raw_out and isinstance(raw_out[0], (list, tuple, dict)):
+        # Either a single polygon [[x,y],...] or a list of polygons.
+        if raw_out and isinstance(raw_out[0], (list, tuple)) and len(raw_out[0]) == 2 and not isinstance(
+            raw_out[0][0], (list, tuple)
+        ):
+            holes.append(_parse_polygon(raw_out, field="geofence.keep_out"))
+        else:
+            for i, item in enumerate(raw_out):
+                holes.append(_parse_polygon(item, field=f"geofence.keep_out[{i}]"))
+    else:
+        raise ScenarioError("geofence.keep_out must be a polygon or a list of polygons")
+    return keep_in, holes
+
+
+def _parse_keepout(raw: Any) -> list[list[tuple[float, float]]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ScenarioError("keepout must be a list of polygons")
+    if not raw:
+        return []
+    if raw and isinstance(raw[0], (list, tuple)) and len(raw[0]) == 2 and not isinstance(
+        raw[0][0], (list, tuple)
+    ):
+        return [_parse_polygon(raw, field="keepout")]
+    return [_parse_polygon(item, field=f"keepout[{i}]") for i, item in enumerate(raw)]
+
+
+def _parse_trajectory(raw: Any) -> Optional[Trajectory]:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ScenarioError("obstacle.trajectory must be a mapping")
+    mode = str(raw.get("mode") or "patrol").strip().lower()
+    if mode not in TRAJECTORY_MODES:
+        raise ScenarioError(
+            f"trajectory.mode must be one of {sorted(TRAJECTORY_MODES)}; got {mode!r}"
+        )
+    pts = [_xy_pair(p, field="trajectory.waypoints") for p in (raw.get("waypoints") or [])]
+    if mode != "wander" and len(pts) < 2:
+        raise ScenarioError("trajectory.waypoints needs at least 2 points unless mode is wander")
+    extra = set(raw) - {"mode", "waypoints", "speed_mps"}
+    if extra:
+        raise ScenarioError(f"Unknown trajectory keys: {sorted(extra)}")
+    return Trajectory(
+        mode=mode,
+        waypoints=pts,
+        speed_mps=float(raw.get("speed_mps") or 0.0),
+    )
 
 
 def _parse_weather(raw: Any) -> WeatherFlags:
@@ -247,6 +340,7 @@ def _parse_obstacle(item: Any) -> Obstacle:
             heading=float(item.get("heading", 0.0)),
             name=str(item.get("name", "")),
             z=float(item["z"]) if "z" in item else None,
+            trajectory=_parse_trajectory(item.get("trajectory")),
         )
     except ValueError as exc:
         raise ScenarioError(str(exc)) from exc
@@ -277,7 +371,8 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
     if not name:
         raise ScenarioError("Scenario needs a non-empty name")
     weather = _parse_weather(data.get("weather"))
-    geofence = _parse_geofence(data.get("geofence"))
+    geofence, holes = _parse_geofence(data.get("geofence"))
+    holes.extend(_parse_keepout(data.get("keepout")))
     drains = [_parse_drain(d) for d in (data.get("drains") or [])]
     banks = [_parse_bank(b) for b in (data.get("banks") or [])]
     obstacles = [_parse_obstacle(o) for o in (data.get("obstacles") or [])]
@@ -297,6 +392,7 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
         description=str(data.get("description") or ""),
         weather=weather,
         geofence=geofence,
+        keepout=holes,
         drains=drains,
         banks=banks,
         obstacles=obstacles,

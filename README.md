@@ -51,6 +51,12 @@ python -m jims_mower.demo --cameras 6 --hand-signals --out demo_out
 python -m jims_mower.demo --config suburban --steps 12 --out demo_out
 python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --out dataset_out
 python -m jims_mower.farm --dry-run --out farm_out
+
+# WAVE 2A — geofence + movers, hand-signal policy, mission resume
+python -m jims_mower.demo --config geofence_movers --steps 16 --out demo_fence
+python -m jims_mower.demo --hand-signals --steps 12 --out demo_signals
+python -m jims_mower.demo --steps 16 --save-mission /tmp/mission.npz --out demo_save
+jims-mower-mission resume --in /tmp/mission.npz --steps 8 --out demo_resume
 ```
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
@@ -405,10 +411,11 @@ stub, the runtime contract, record/replay roundtrip, the latency scorecard
 the Gymnasium env checker, heuristic+planner episodes on `steep_yard`
 (fixed seeds: no channel entry; coverage vs oracle is reported without a
 fake mAP), the scenario loader, dataset-export layout, scorecards on
-frozen seeds, and a farm dry-run. GitHub Actions PR CI runs the same
-suite headless on Python 3.10–3.12 plus a short terrain-policy demo
-smoke and a record/replay CLI smoke (heuristic default). The full
-seed×scenario farm is a separate
+frozen seeds, a farm dry-run, moving-agent trajectories, geofence
+costmaps, recovery / hand-signal overrides, and mission save/load.
+GitHub Actions PR CI runs the same suite headless on Python 3.10–3.12
+plus short terrain-policy, suburban, geofence, mission, and record/replay
+smokes (heuristic default). The full seed×scenario farm is a separate
 [manual / nightly workflow](.github/workflows/farm.yml), not PR CI.
 
 ## WAVE 1A foundation
@@ -426,16 +433,32 @@ Exporter labels are **oracle** height-field / grass rasters. The env
 observer can still be heuristic. Dataset folder layout is written to
 `LAYOUT.md` in the dump.
 
+## WAVE 2A — dynamic world + behaviour
+
+| Piece | Module / path |
+| --- | --- |
+| Trajectories | `Obstacle.trajectory` (`patrol` / `loop` / `line` / `wander`) |
+| Living interlock | `info["living_advice"]` — slow / reroute / stop; occupancy replans |
+| Geofence | scenario `keep_in` / `keep_out`; costmap blocks outside |
+| Recovery | reverse → pivot → help after repeated tip / channel advice |
+| Hand signals | curriculum on → controller overrides (`stop`/`go`/`follow`/`back`) |
+| Mission resume | `jims-mower-mission` + `--save-mission` / `--load-mission` |
+
+The planner still runs in-process on small numpy rasters (Orin Nano class).
+There are no claimed mAP / FPS numbers. Do not run the gym renderer on-box.
+
 ## Layout
 
 ```
 ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo
-configs/scenarios/            WAVE 1A yards (suburban, paddock, …)
-docs/                         WAVE1B / WAVE1C notes + runtime contract
+configs/scenarios/            WAVE 1A/1C/2A yards (suburban, geofence_movers, …)
+docs/                         WAVE1B / WAVE1C / WAVE2A notes + runtime contract
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/scenarios.py   YAML scenario loader
+src/jims_mower/geofence.py    keep-in / keep-out polygons
+src/jims_mower/mission.py     map + uncut + pose save/load
 src/jims_mower/export.py      dataset dump
 src/jims_mower/metrics.py     episode scorecards
 src/jims_mower/farm.py        seed × scenario farm

@@ -1,0 +1,73 @@
+kind: scenario
+name: geofence_movers
+description: >
+  WAVE 2A demo — GPS keep-in, a keep-out bed, and a person/dog on simple
+  trajectories. Costmap blocks outside the fence; the planner must slow /
+  stop / reroute around movers. No claimed mAP / FPS.
+base: default
+weather:
+  lighting: day
+  wet: false
+geofence:
+  keep_in:
+    - [0.6, 0.6]
+    - [11.4, 0.6]
+    - [11.4, 11.4]
+    - [0.6, 11.4]
+  keep_out:
+    - - [8.2, 8.2]
+      - [10.4, 8.2]
+      - [10.4, 10.4]
+      - [8.2, 10.4]
+world:
+  width_m: 12.0
+  height_m: 12.0
+  resolution_m: 0.10
+  n_people: 0
+  n_dogs: 0
+  n_cats: 0
+  n_birds: 0
+  n_trees: 1
+  n_furniture: 0
+  n_toys: 0
+  movers:
+    default_mode: wander
+    density: default
+  terrain:
+    enabled: true
+    n_drains: 1
+    n_banks: 1
+    keepout_m: 1.6
+obstacles:
+  - kind: person
+    x: 3.0
+    y: 6.0
+    name: walker
+    trajectory:
+      mode: patrol
+      waypoints:
+        - [3.0, 6.0]
+        - [9.0, 6.0]
+      speed_mps: 0.40
+  - kind: dog
+    x: 4.0
+    y: 3.0
+    name: loop_dog
+    trajectory:
+      mode: loop
+      waypoints:
+        - [4.0, 3.0]
+        - [6.5, 3.0]
+        - [6.5, 5.0]
+        - [4.0, 5.0]
+      speed_mps: 0.55
+  - {kind: tree, x: 2.0, y: 9.5}
+perception:
+  terrain_mode: heuristic
+planner:
+  living_slow_m: 3.0
+  living_reroute_m: 1.8
+  living_stop_m: 0.90
+  geofence_inflate_m: 0.28
+curriculum:
+  hand_signals: false

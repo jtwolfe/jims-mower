@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 
 from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_STEEP
+from jims_mower.geofence import GeofenceSpec, rasterize_geofence
 
 FREE_COST = 1.0
 STEEP_COST = 5.0
@@ -118,6 +119,8 @@ def build_costmap(
     uncertainty_inflate: float = 0.0,
     uncertain_hazard_boost: float = 0.0,
     uncertain_confidence_floor: float = 0.25,
+    geofence: Optional[GeofenceSpec] = None,
+    geofence_inflate_m: float = 0.30,
 ) -> Costmap:
     """Build a traversal costmap.
 
@@ -128,7 +131,8 @@ def build_costmap(
       3 drain channel — forbidden (blocked, plus clearance inflation)
 
     Occupancy > 0.5 is blocked (trees / detections). A yard-edge margin keeps
-    the body inside ``in_yard``.
+    the body inside ``in_yard``. Cells outside a keep-in polygon (or inside a
+    keep-out) are blocked after ``geofence_inflate_m``.
 
     ``confidence`` (0–1, same shape) inflates finite costs when low:
     ``cost *= 1 + uncertainty_inflate * (1 - conf)``, plus
@@ -174,6 +178,13 @@ def build_costmap(
             raise ValueError("extra_blocked shape must match hazard")
         blocked[extra] = True
         cost[extra] = BLOCKED_COST
+
+    if geofence is not None and geofence.has_polygons():
+        geo = rasterize_geofence(hazard.shape, resolution_m=resolution_m, spec=geofence)
+        geo_r = int(math.ceil(max(0.0, float(geofence_inflate_m)) / max(resolution_m, 1e-6)))
+        geo_keep = _disk_dilate(geo, geo_r)
+        blocked[geo_keep] = True
+        cost[geo_keep] = BLOCKED_COST
 
     margin_cells = int(math.floor(max(0.0, float(margin_m)) / max(resolution_m, 1e-6)))
     if margin_cells > 0:

@@ -8,7 +8,14 @@ from typing import Any, Optional
 import numpy as np
 
 from jims_mower.config import EnvConfig
-from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN_EDGE, TERRAIN_ADVICE
+from jims_mower.constants import (
+    GRAVITY_MPS2,
+    HAZARD_DRAIN_EDGE,
+    HAND_SIGNALS,
+    ID_TO_SIGNAL,
+    TERRAIN_ADVICE,
+)
+from jims_mower.geofence import GeofenceSpec
 from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wrap_angle
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
@@ -138,6 +145,16 @@ class TerrainPolicy:
         self._height_m = cfg.world.height_m
         self._resolution_m = cfg.world.resolution_m
         self._drain_cells = 0
+        self._occ_cells = 0
+        self._geofence = GeofenceSpec()
+        self._stop_streak = 0
+        self._reroute_streak = 0
+        self._recovery = "idle"
+        self._recovery_left = 0
+        self.recoveries = 0
+        self.last_recovery = "idle"
+        self.help_requested = False
+        self.last_signal: Optional[str] = None
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> CoveragePlan:
         info = info or {}
@@ -155,8 +172,18 @@ class TerrainPolicy:
         self.replans = 0
         self._reroute_cool = 0
         self.last_advice = "ok"
+        self._geofence = geofence_from_info(info, self.cfg)
+        self._stop_streak = 0
+        self._reroute_streak = 0
+        self._recovery = "idle"
+        self._recovery_left = 0
+        self.recoveries = 0
+        self.last_recovery = "idle"
+        self.help_requested = False
+        self.last_signal = None
         self._remember_map_size(obs)
         self._drain_cells = _drain_cell_count(obs.get("hazard"))
+        self._occ_cells = _occ_cell_count(obs.get("occupancy"))
         self.plan = self._build_plan(obs, start, extra_blocked=None)
         self.index = _skip_arrived(self.plan.waypoints, start, self.cfg.planner.arrive_radius_m)
         return self.plan
@@ -194,20 +221,40 @@ class TerrainPolicy:
             pose_pitch=pose_hint.pitch,
             pose_roll=pose_hint.roll,
         )
-        advice = combine_advice(env_advice, sensed, chassis)
+        self._geofence = geofence_from_info(info, self.cfg)
+        living = str(info.get("living_advice") or "ok")
+        fence = str(info.get("geofence_advice") or "ok")
+        advice = combine_advice(env_advice, sensed, chassis, living, fence)
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
         self.last_advice = advice
 
+        signal = observed_hand_signal(obs, self.cfg.curriculum.hand_signals)
+        self.last_signal = signal
+        if signal is not None:
+            override = self._hand_signal_action(signal, pose, obs, info, advice)
+            if override is not None:
+                return override
+
+        if self.help_requested:
+            self.last_recovery = "help"
+            self.last_advice = "stop"
+            return self._hold()
+
+        terrain_only = combine_advice(env_advice, sensed, chassis)
+        self._update_recovery_streaks(terrain_only)
+        recovered = self._maybe_recovery_action(terrain_only, pose)
+        if recovered is not None:
+            return recovered
+
         if advice == "stop":
-            self._last_v = 0.0
-            self._last_omega = 0.0
-            return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+            return self._hold()
 
         if self.plan is None:
             self.reset(obs, info)
 
         self._maybe_replan_new_hazards(obs, pose)
+        self._maybe_replan_occupancy(obs, pose)
 
         if advice == "reroute":
             self._handle_reroute(obs, pose)
@@ -294,6 +341,8 @@ class TerrainPolicy:
             uncertainty_inflate=unc.inflate,
             uncertain_hazard_boost=unc.hazard_boost,
             uncertain_confidence_floor=unc.confidence_floor,
+            geofence=self._geofence,
+            geofence_inflate_m=self.cfg.planner.geofence_inflate_m,
         )
         mowable = _mowable_mask(coverage, costmap.blocked.shape)
         return plan_coverage(
@@ -344,8 +393,203 @@ class TerrainPolicy:
             self._reroute_cool -= 1
             return
         extra = _cone_mask(hazard.shape, pose, res)
+        occ = obs.get("occupancy")
+        if occ is not None:
+            extra = extra | (np.asarray(occ, dtype=np.float32) > 0.5)
         self._replan(obs, pose, extra_blocked=extra)
         self._reroute_cool = 10
+
+    def _maybe_replan_occupancy(self, obs: dict[str, Any], pose: Pose) -> None:
+        """Temporary block + replan when a moving detection sits on the path."""
+        occ = obs.get("occupancy")
+        n = _occ_cell_count(occ)
+        if occ is None or self.plan is None:
+            self._occ_cells = n
+            return
+        res = self._resolution_m
+        hit = False
+        waypoints = self.waypoints
+        grid = np.asarray(occ, dtype=np.float32)
+        look = waypoints[self.index : self.index + 4]
+        for tx, ty in look:
+            col = int(tx / res)
+            row = int(ty / res)
+            if 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1] and grid[row, col] > 0.5:
+                hit = True
+                break
+        grew = n >= self._occ_cells + 4
+        if (hit or grew) and self.replans < self.cfg.planner.max_replans:
+            extra = grid > 0.5
+            self._replan(obs, pose, extra_blocked=extra)
+        self._occ_cells = max(self._occ_cells, n)
+
+    def _hold(self) -> np.ndarray:
+        self._last_v = 0.0
+        self._last_omega = 0.0
+        return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+
+    def _set_wheels(self, left: float, right: float, trimmer: float = 0.0) -> np.ndarray:
+        vmax = self.cfg.robot.max_wheel_speed_mps
+        self._last_v, self._last_omega = unicycle_from_wheels(
+            float(left) * vmax,
+            float(right) * vmax,
+            self.cfg.robot.wheelbase_m,
+        )
+        return np.array([left, right, trimmer], dtype=np.float32)
+
+    def _update_recovery_streaks(self, terrain_advice: str) -> None:
+        if self._recovery != "idle":
+            return
+        if terrain_advice == "stop":
+            self._stop_streak += 1
+            self._reroute_streak = 0
+        elif terrain_advice == "reroute":
+            self._reroute_streak += 1
+            self._stop_streak = 0
+        else:
+            self._stop_streak = 0
+            self._reroute_streak = 0
+
+    def _maybe_recovery_action(self, terrain_advice: str, pose: Pose) -> Optional[np.ndarray]:
+        """Reverse off a lip, pivot, then call-for-help if tip/channel keeps firing."""
+        plan = self.cfg.planner
+        if self._recovery == "idle":
+            repeated = (
+                self._stop_streak >= plan.recovery_trigger
+                or self._reroute_streak >= plan.recovery_trigger + 1
+            )
+            if not repeated:
+                return None
+            if self.recoveries >= plan.max_recoveries:
+                self.help_requested = True
+                self.last_recovery = "help"
+                self.last_advice = "stop"
+                return self._hold()
+            self._recovery = "reverse"
+            self._recovery_left = plan.recovery_reverse_steps
+            self.recoveries += 1
+            self.last_recovery = "reverse"
+        if self._recovery == "reverse":
+            self.last_recovery = "reverse"
+            self._recovery_left -= 1
+            if self._recovery_left <= 0:
+                self._recovery = "pivot"
+                self._recovery_left = plan.recovery_pivot_steps
+            cruise = plan.cruise_speed * plan.slow_speed_factor
+            return self._set_wheels(-cruise, -cruise, 0.0)
+        if self._recovery == "pivot":
+            self.last_recovery = "pivot"
+            self._recovery_left -= 1
+            if self._recovery_left <= 0:
+                self._recovery = "idle"
+                self._stop_streak = 0
+                self._reroute_streak = 0
+                self._reroute_cool = 0
+            return self._set_wheels(-0.45, 0.45, 0.0)
+        return None
+
+    def _hand_signal_action(
+        self,
+        signal: str,
+        pose: Pose,
+        obs: dict[str, Any],
+        info: dict[str, Any],
+        advice: str,
+    ) -> Optional[np.ndarray]:
+        """Map curriculum stop/go/follow/back onto controller overrides."""
+        if signal == "stop":
+            self.help_requested = False
+            self.last_advice = "stop"
+            return self._hold()
+        if signal == "back":
+            self.help_requested = False
+            cruise = self.cfg.planner.cruise_speed * self.cfg.planner.slow_speed_factor
+            return self._set_wheels(-cruise, -cruise, 0.0)
+        if signal == "go":
+            self.help_requested = False
+            self._recovery = "idle"
+            self._stop_streak = 0
+            return None
+        if signal == "follow":
+            self.help_requested = False
+            target = nearest_person_xy(info)
+            if target is None:
+                return None
+            cruise = self.cfg.planner.cruise_speed * self.cfg.planner.slow_speed_factor
+            wheels, _dist, _err = tracking_action(
+                pose,
+                target,
+                cruise=cruise,
+                wheelbase_m=self.cfg.robot.wheelbase_m,
+                turn_in_place_rad=self.cfg.planner.turn_in_place_rad,
+            )
+            return self._set_wheels(float(wheels[0]), float(wheels[1]), 0.0)
+        return None
+
+
+def observed_hand_signal(obs: dict[str, Any], enabled: bool) -> Optional[str]:
+    if not enabled:
+        return None
+    raw = obs.get("hand_signal", 0)
+    if isinstance(raw, str):
+        name = raw.strip().lower()
+        return name if name in HAND_SIGNALS else None
+    try:
+        sid = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return ID_TO_SIGNAL.get(sid)
+
+
+def nearest_person_xy(info: dict[str, Any]) -> Optional[tuple[float, float]]:
+    pose = info.get("pose") if isinstance(info.get("pose"), dict) else {}
+    px = float(pose.get("x", 0.0))
+    py = float(pose.get("y", 0.0))
+    best: Optional[tuple[float, float]] = None
+    best_d = math.inf
+    for det in info.get("detections") or []:
+        if not isinstance(det, dict) or det.get("label") != "person":
+            continue
+        xy = det.get("world_xy")
+        if not xy or len(xy) < 2:
+            continue
+        x, y = float(xy[0]), float(xy[1])
+        d = math.hypot(x - px, y - py)
+        if d < best_d:
+            best_d = d
+            best = (x, y)
+    return best
+
+
+def geofence_from_info(info: dict[str, Any], cfg: EnvConfig) -> GeofenceSpec:
+    raw = info.get("geofence_spec")
+    inflate = cfg.planner.geofence_inflate_m
+    if isinstance(raw, dict):
+        keep_in = [_xy_tuple(p) for p in (raw.get("keep_in") or []) if p is not None]
+        keep_out = [
+            [_xy_tuple(p) for p in poly]
+            for poly in (raw.get("keep_out") or [])
+            if poly
+        ]
+        return GeofenceSpec(keep_in=keep_in, keep_out=keep_out, inflate_m=inflate)
+    legacy = info.get("geofence") or []
+    keep_in = [_xy_tuple(p) for p in legacy if p is not None]
+    return GeofenceSpec(keep_in=keep_in, inflate_m=inflate)
+
+
+def _xy_tuple(item: Any) -> tuple[float, float]:
+    if isinstance(item, dict):
+        return float(item["x"]), float(item["y"])
+    return float(item[0]), float(item[1])
+
+
+def _occ_cell_count(occupancy: Any) -> int:
+    if occupancy is None:
+        return 0
+    arr = np.asarray(occupancy)
+    if arr.size == 0:
+        return 0
+    return int((arr > 0.5).sum())
 
 
 def _skip_arrived(

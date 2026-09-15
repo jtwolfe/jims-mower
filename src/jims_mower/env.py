@@ -31,7 +31,9 @@ from jims_mower.kinematics import (
     unicycle_from_wheels,
     wheel_clearances,
 )
+from jims_mower.geofence import GeofenceSpec, geofence_advice
 from jims_mower.maps import GrassCoverageMap, occupancy_from_detections
+from jims_mower.mission import apply_mission, load_mission, save_mission
 from jims_mower.perception import ColorGrassObserver, HandSignalCurriculum, MockDetector
 from jims_mower.perception.base import Detector, GrassObserver
 from jims_mower.perception.terrain import TerrainObserver, terrain_observer_from_mode
@@ -41,6 +43,8 @@ from jims_mower.safety import (
     cutter_risk_hit,
     first_collision,
     in_yard,
+    living_advice,
+    nearest_living,
     terrain_hazards,
     trimmer_interlock,
 )
@@ -244,6 +248,9 @@ class MowerEnv(gym.Env):
         self._had_episode = False
         self._grass_save_path: Optional[str] = None
         self._grass_loaded = False
+        self._mission_save_path: Optional[str] = None
+        self._mission_loaded = False
+        self._episode_seed: Optional[int] = None
 
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None
@@ -256,6 +263,11 @@ class MowerEnv(gym.Env):
         persist = options.get("save_grass", grow_cfg.persist_path)
         load_path = options.get("load_grass", grow_cfg.persist_path)
         self._grass_save_path = str(persist) if persist else None
+        mission_save = options.get("save_mission")
+        mission_load = options.get("load_mission")
+        self._mission_save_path = str(mission_save) if mission_save else None
+        self._mission_loaded = False
+        self._episode_seed = seed
         previous_cut = None
         if grow_cfg.enabled and self._had_episode:
             previous_cut = self._coverage.cut.copy()
@@ -312,6 +324,8 @@ class MowerEnv(gym.Env):
             orchard_rows=self.cfg.world.orchard_rows,
             orchard_cols=self.cfg.world.orchard_cols,
             explicit=list(self.scenario.obstacles) if self.scenario else None,
+            mover_mode=self.cfg.world.movers.default_mode,
+            density=self.cfg.world.movers.density,
         )
         self._coverage.reset()
         for obst in self._yard.static():
@@ -319,7 +333,13 @@ class MowerEnv(gym.Env):
                 self._coverage.exclude_circle(obst.x, obst.y, obst.radius)
         self._coverage.exclude_mask(self._terrain.labels != TERRAIN_DRAIN)
         loaded = False
-        if load_path and Path(load_path).is_file():
+        mission_pose = None
+        if mission_load and Path(mission_load).is_file():
+            state = load_mission(mission_load)
+            mission_pose = apply_mission(self._coverage, state)
+            loaded = True
+            self._mission_loaded = True
+        elif load_path and Path(load_path).is_file():
             self._coverage.load_state(load_path)
             for obst in self._yard.static():
                 if obst.kind in {"tree", "furniture"}:
@@ -341,6 +361,8 @@ class MowerEnv(gym.Env):
         )
         self._had_episode = True
         self._grass_loaded = loaded
+        if mission_pose is not None:
+            self._pose = mission_pose
         self._pose = sit_on_terrain(
             self._pose,
             self._terrain,
@@ -386,7 +408,12 @@ class MowerEnv(gym.Env):
         v, omega = unicycle_from_wheels(left_n * vmax, right_n * vmax, self.cfg.robot.wheelbase_m)
         self._last_v = v
         self._last_omega = omega
-        step_movers(self._yard, self.cfg.dt, self.np_random)
+        step_movers(
+            self._yard,
+            self.cfg.dt,
+            self.np_random,
+            heading_jitter=self.cfg.world.movers.heading_jitter,
+        )
         self._signals.maybe_rotate(self._yard.obstacles, self.np_random)
 
         decision = trimmer_interlock(
@@ -417,7 +444,7 @@ class MowerEnv(gym.Env):
             self.cfg.world.width_m,
             self.cfg.world.height_m,
             self.cfg.robot.collision_radius_m,
-            geofence=self.scenario.geofence if self.scenario else None,
+            spec=self.geofence_spec(),
         )
         terrain_ev = terrain_hazards(
             self._pose,
@@ -479,15 +506,34 @@ class MowerEnv(gym.Env):
         )
         if terminated or truncated:
             self._persist_grass()
+            self._persist_mission()
         return obs, float(breakdown.total), terminated, truncated, info
 
     def close(self) -> None:
         self._persist_grass()
+        self._persist_mission()
         super().close()
+
+    def geofence_spec(self) -> GeofenceSpec:
+        if self.scenario is None:
+            return GeofenceSpec()
+        return self.scenario.geofence_spec(self.cfg.planner.geofence_inflate_m)
 
     def _persist_grass(self) -> None:
         if self._grass_save_path:
             self._coverage.save_state(self._grass_save_path)
+
+    def _persist_mission(self) -> None:
+        if not self._mission_save_path:
+            return
+        save_mission(
+            self._mission_save_path,
+            self._coverage,
+            self._pose,
+            scenario=self.scenario.name if self.scenario else "",
+            seed=self._episode_seed,
+            steps=self._steps,
+        )
 
     def render(self) -> Optional[np.ndarray]:
         if self.render_mode == "rgb_array":
@@ -665,6 +711,22 @@ class MowerEnv(gym.Env):
             wheel_drop_m=self.cfg.robot.wheel_drop_m,
             steep_slope_rad=self.cfg.robot.steep_slope_rad,
         )
+        spec = self.geofence_spec()
+        fence_advice = geofence_advice(
+            self._pose,
+            spec,
+            slow_m=self.cfg.planner.geofence_slow_m,
+            stop_m=self.cfg.planner.geofence_stop_m,
+        )
+        hub = trimmer_xy(self._pose, self.cfg.robot.trimmer.offset_m)
+        dist, living_obst = nearest_living(hub, self._yard.obstacles)
+        living = living_advice(
+            dist,
+            living_obst.kind if living_obst is not None else None,
+            slow_m=self.cfg.planner.living_slow_m,
+            reroute_m=self.cfg.planner.living_reroute_m,
+            stop_m=self.cfg.planner.living_stop_m,
+        )
         obs = {
             "cameras": images,
             "coverage": self._coverage.as_float(),
@@ -720,6 +782,7 @@ class MowerEnv(gym.Env):
             "layout": self.cfg.world.layout,
             "weather_pack": self.cfg.weather.pack,
             "grass_loaded": self._grass_loaded,
+            "mission_loaded": self._mission_loaded,
             "terrain_source": terrain_est.source,
             "terrain_advice": terrain_ev.advice,
             "terrain_reason": terrain_ev.reason,
@@ -729,7 +792,11 @@ class MowerEnv(gym.Env):
             "nearest_person_m": self._nearest_person_m(),
             "scenario": self.scenario.name if self.scenario else "",
             "weather": _weather_dict(self.scenario),
-            "geofence": [list(p) for p in (self.scenario.geofence if self.scenario else [])],
+            "geofence": [list(p) for p in spec.keep_in],
+            "geofence_spec": spec.as_info(),
+            "geofence_advice": fence_advice,
+            "living_advice": living.advice,
+            "living_reason": living.reason,
         }
         return obs, info
 
