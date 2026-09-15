@@ -7,12 +7,31 @@ import numpy as np
 from jims_mower.bev import render_bev
 from jims_mower.env import MowerEnv
 from jims_mower.planning import TerrainPolicy
-from tests.conftest import tiny_config_dict
+
+
+def _tiny() -> dict:
+    return {
+        "dt": 0.1,
+        "max_steps": 40,
+        "sensors": {"width": 32, "height": 24, "camera_count": 4, "fov_deg": 70.0},
+        "world": {
+            "width_m": 8.0,
+            "height_m": 8.0,
+            "resolution_m": 0.20,
+            "n_people": 1,
+            "n_dogs": 0,
+            "n_cats": 0,
+            "n_birds": 0,
+            "n_trees": 1,
+            "n_furniture": 0,
+            "n_toys": 0,
+            "terrain": {"enabled": True, "n_drains": 1, "n_banks": 0},
+        },
+    }
 
 
 def test_bev_composite_has_panels_and_insets() -> None:
-    cfg = tiny_config_dict()
-    cfg["world"]["terrain"] = {"enabled": True, "n_drains": 1, "n_banks": 0}
+    cfg = _tiny()
     env = MowerEnv(config=cfg, render_mode="rgb_array")
     obs, info = env.reset(seed=2)
     policy = TerrainPolicy(env.cfg)

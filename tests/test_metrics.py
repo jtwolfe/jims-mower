@@ -8,21 +8,30 @@ from pathlib import Path
 from jims_mower.config import load_config
 from jims_mower.env import MowerEnv
 from jims_mower.metrics import evaluate_episode, write_scorecard
-from tests.conftest import tiny_config_dict
 
 
 def _flat_safe_cfg() -> dict:
-    cfg = tiny_config_dict()
-    cfg["max_steps"] = 20
-    cfg["world"]["n_people"] = 0
-    cfg["world"]["n_dogs"] = 0
-    cfg["world"]["n_cats"] = 0
-    cfg["world"]["n_birds"] = 0
-    cfg["world"]["n_trees"] = 0
-    cfg["world"]["n_furniture"] = 0
-    cfg["world"]["n_toys"] = 0
-    cfg["world"]["terrain"] = {"enabled": False}
-    return cfg
+    return {
+        "dt": 0.1,
+        "max_steps": 20,
+        "sensors": {"width": 32, "height": 24, "camera_count": 4, "fov_deg": 70.0},
+        "world": {
+            "width_m": 8.0,
+            "height_m": 8.0,
+            "resolution_m": 0.20,
+            "n_people": 0,
+            "n_dogs": 0,
+            "n_cats": 0,
+            "n_birds": 0,
+            "n_trees": 0,
+            "n_furniture": 0,
+            "n_toys": 0,
+            "terrain": {"enabled": False},
+        },
+        "robot": {
+            "trimmer": {"safety_radius_m": 1.2, "offset_m": 0.32, "radius_m": 0.16}
+        },
+    }
 
 
 def _steep_no_people():

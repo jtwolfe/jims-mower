@@ -8,18 +8,30 @@ from pathlib import Path
 import numpy as np
 
 from jims_mower.export import export_dataset
-from tests.conftest import tiny_config_dict
 
 
 def _tiny_export_cfg() -> dict:
-    cfg = tiny_config_dict()
-    cfg["max_steps"] = 8
-    cfg["world"]["n_people"] = 0
-    cfg["world"]["n_dogs"] = 0
-    cfg["world"]["n_toys"] = 0
-    cfg["world"]["n_trees"] = 0
-    cfg["world"]["terrain"] = {"enabled": True, "n_drains": 1, "n_banks": 0, "noise_amp_m": 0.0}
-    return cfg
+    return {
+        "dt": 0.1,
+        "max_steps": 8,
+        "sensors": {"width": 32, "height": 24, "camera_count": 4, "fov_deg": 70.0},
+        "world": {
+            "width_m": 8.0,
+            "height_m": 8.0,
+            "resolution_m": 0.20,
+            "n_people": 0,
+            "n_dogs": 0,
+            "n_cats": 0,
+            "n_birds": 0,
+            "n_trees": 0,
+            "n_furniture": 0,
+            "n_toys": 0,
+            "terrain": {"enabled": True, "n_drains": 1, "n_banks": 0, "noise_amp_m": 0.0},
+        },
+        "robot": {
+            "trimmer": {"safety_radius_m": 1.2, "offset_m": 0.32, "radius_m": 0.16}
+        },
+    }
 
 
 def test_export_layout(tmp_path: Path) -> None:
