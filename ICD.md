@@ -37,6 +37,7 @@ the hub.
 | `elevation` | `float32 (R, C)` | Observer height estimate (m) |
 | `slope` | `float32 (R, C)` | Observer slope (rad, 0–π/2) |
 | `hazard` | `float32 (R, C)` | Observer hazard classes (below) |
+| `confidence` | `float32 (R, C)` | Relative observer merge weight 0–1 (not a published score) |
 | `trimmer_enabled` | `float32 (1,)` | `0` or `1` after the interlock |
 | `hand_signal` | `Discrete(5)` | `0` none, `1` stop, `2` go, `3` follow, `4` back |
 
