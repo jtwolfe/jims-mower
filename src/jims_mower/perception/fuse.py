@@ -89,7 +89,11 @@ def collect_stamps(
     if not np.any(inb):
         return empty
     rr, cc, lab, rng_v, conf_v = rr[inb], cc[inb], lab[inb], rng_v[inb], conf_v[inb]
-    radii = np.clip(np.ceil((0.10 + 0.035 * rng_v) / max(resolution_m, 1e-6)), 1, 6).astype(np.int32)
+    # Channels may stamp a bit wider (seated-plane miss); lips stay tight so a
+    # smooth grade does not grow a fake ditch.
+    radii = np.clip(np.ceil((0.10 + 0.028 * rng_v) / max(resolution_m, 1e-6)), 1, 5).astype(np.int32)
+    lip_only = lab < HAZARD_DRAIN
+    radii = np.where(lip_only, np.minimum(radii, 2), radii).astype(np.int32)
     keys = rr.astype(np.int64) * map_cols + cc.astype(np.int64)
     order = np.argsort(keys)
     keys, rr, cc, lab, radii, conf_v = (
@@ -166,6 +170,84 @@ def fuse_stamps(
     return hazard, conf
 
 
+def _dilate_bool(mask: np.ndarray, cells: int) -> np.ndarray:
+    if cells <= 0 or not np.any(mask):
+        return mask.astype(bool, copy=True)
+    out = mask.astype(bool, copy=True)
+    for _ in range(int(cells)):
+        grown = out.copy()
+        grown[1:, :] |= out[:-1, :]
+        grown[:-1, :] |= out[1:, :]
+        grown[:, 1:] |= out[:, :-1]
+        grown[:, :-1] |= out[:, 1:]
+        out = grown
+    return out
+
+
+def gate_isolated_lips(
+    hazard: np.ndarray,
+    *,
+    dilate_cells: int = 3,
+    min_blob: int = 12,
+) -> np.ndarray:
+    """Drop tiny isolated lip specks (dirt / shade), keep real ditches.
+
+    A lip must neighbour a channel *or* sit in a connected drain-family
+    blob of at least ``min_blob`` cells. Smooth-grade dirt is speckly;
+    a channel is a long stripe. Requiring a channel neighbour alone
+    wipes true ditches the colour stub labels only as lips.
+    """
+    out = np.asarray(hazard, dtype=np.float32).copy()
+    channel = out >= HAZARD_DRAIN
+    lip = (out >= HAZARD_DRAIN_EDGE) & (out < HAZARD_DRAIN)
+    if not np.any(lip):
+        return out
+    keep = _dilate_bool(channel, dilate_cells)
+    family = out >= HAZARD_DRAIN_EDGE
+    keep = keep | _large_components(family, min_blob=min_blob)
+    drop = lip & ~keep
+    out[drop] = 0.0
+    return out
+
+
+def _large_components(mask: np.ndarray, *, min_blob: int) -> np.ndarray:
+    """True on 4-connected components whose size is at least ``min_blob``."""
+    if min_blob <= 1 or not np.any(mask):
+        return mask.astype(bool, copy=True)
+    h, w = mask.shape
+    labels = np.zeros((h, w), dtype=np.int32)
+    sizes: list[int] = [0]
+    lab = 0
+    for row in range(h):
+        for col in range(w):
+            if not mask[row, col] or labels[row, col]:
+                continue
+            lab += 1
+            stack = [(row, col)]
+            labels[row, col] = lab
+            n = 0
+            while stack:
+                i, j = stack.pop()
+                n += 1
+                if i > 0 and mask[i - 1, j] and labels[i - 1, j] == 0:
+                    labels[i - 1, j] = lab
+                    stack.append((i - 1, j))
+                if i + 1 < h and mask[i + 1, j] and labels[i + 1, j] == 0:
+                    labels[i + 1, j] = lab
+                    stack.append((i + 1, j))
+                if j > 0 and mask[i, j - 1] and labels[i, j - 1] == 0:
+                    labels[i, j - 1] = lab
+                    stack.append((i, j - 1))
+                if j + 1 < w and mask[i, j + 1] and labels[i, j + 1] == 0:
+                    labels[i, j + 1] = lab
+                    stack.append((i, j + 1))
+            sizes.append(n)
+    if lab == 0:
+        return np.zeros_like(mask, dtype=bool)
+    big = np.array([s >= int(min_blob) for s in sizes], dtype=bool)
+    return big[labels]
+
+
 def paint_geometry_from_hazard(
     hazard: np.ndarray,
     *,
@@ -173,16 +255,27 @@ def paint_geometry_from_hazard(
     slope: np.ndarray,
     pose_z: float,
     steep_rad: float,
+    relative: bool = True,
 ) -> None:
-    """Fill elevation / slope from a fused hazard raster (in-place)."""
+    """Fill elevation / slope from a fused hazard raster (in-place).
+
+    When ``relative`` is set, drain drops sit on the already-painted grade
+    instead of flattening the cell to ``pose_z``.
+    """
     drain = hazard >= HAZARD_DRAIN_EDGE
     if np.any(drain):
         drop = np.where(hazard >= HAZARD_DRAIN, 0.14, 0.05).astype(np.float32)
-        elevation[drain] = np.minimum(elevation[drain], np.float32(pose_z) - drop[drain])
+        if relative:
+            elevation[drain] = elevation[drain] - drop[drain]
+        else:
+            elevation[drain] = np.minimum(elevation[drain], np.float32(pose_z) - drop[drain])
         slope[drain] = np.maximum(slope[drain], np.float32(steep_rad))
     bank = hazard == HAZARD_STEEP
     if np.any(bank):
-        elevation[bank] = np.maximum(elevation[bank], np.float32(pose_z + 0.08))
+        if relative:
+            elevation[bank] = elevation[bank] + np.float32(0.08)
+        else:
+            elevation[bank] = np.maximum(elevation[bank], np.float32(pose_z + 0.08))
         slope[bank] = np.maximum(slope[bank], np.float32(steep_rad))
 
 

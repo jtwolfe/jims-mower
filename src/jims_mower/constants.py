@@ -19,6 +19,8 @@ WORLD_LAYOUTS = frozenset(
         "terrace",
         "kerb_gutter",
         "swale",
+        "golf_rough",
+        "golf_fairway",
     }
 )
 WEATHER_PACKS = frozenset({"clear", "dawn", "dusk", "night", "rain"})
@@ -64,6 +66,11 @@ DRAIN_RGB = (58, 42, 28)
 DRAIN_EDGE_RGB = (86, 62, 40)
 BANK_RGB = (72, 118, 52)
 PUDDLE_RGB = (48, 92, 128)
+PATH_RGB = (128, 128, 122)
+BUNKER_RGB = (210, 180, 120)
+BUILDING_RGB = (92, 92, 98)
+GARDEN_RGB = (72, 96, 48)
+GREEN_RGB = (36, 128, 72)
 
 # Height-field labels (first-class yard features).
 TERRAIN_FLAT = 0
@@ -71,6 +78,29 @@ TERRAIN_BANK = 1
 TERRAIN_DRAIN = 2
 TERRAIN_DRAIN_EDGE = 3
 TERRAIN_PUDDLE = 4
+TERRAIN_PATH = 5
+TERRAIN_BUILDING = 6
+TERRAIN_BUNKER = 7
+TERRAIN_GARDEN = 8
+TERRAIN_GREEN = 9
+
+# Human-structure raster (obs["structure"] / info["structure"]).
+STRUCTURE_NONE = 0
+STRUCTURE_PATH = 1
+STRUCTURE_BUILDING = 2
+STRUCTURE_BUNKER = 3
+STRUCTURE_GARDEN = 4
+STRUCTURE_GREEN = 5
+STRUCTURE_NAMES = (
+    "none",
+    "path_paved",
+    "building",
+    "bunker",
+    "garden_bed",
+    "green",
+)
+PATH_COST = 8.0
+BUNKER_COST = 12.0
 
 # Observation / safety hazard raster: 0 free, 1 steep, 2 drain lip, 3 channel.
 HAZARD_NONE = 0
@@ -110,6 +140,10 @@ SEMANTIC_NON_GRASS = 2
 SEMANTIC_DRAIN = 3
 SEMANTIC_BANK = 4
 SEMANTIC_STATIC = 5
+SEMANTIC_PATH = 6
+SEMANTIC_BUILDING = 7
+SEMANTIC_BUNKER = 8
+SEMANTIC_GARDEN = 9
 SEMANTIC_NAMES = (
     "free",
     "grass",
@@ -117,6 +151,10 @@ SEMANTIC_NAMES = (
     "drain",
     "bank",
     "static",
+    "path_paved",
+    "building",
+    "bunker",
+    "garden_bed",
 )
 NEAR_MISS_LIVING_M = 1.5
 BC_FEATURE_DIM = 40

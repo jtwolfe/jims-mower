@@ -51,6 +51,9 @@ jims-mower-mesh --episode demo_out --out demo_out/yard.glb
 
 The mesh stores true metres (`z_scale=1`). The viewer applies a 4× Y
 lift so a ~5% property grade and 10–20 cm drains read on a 12 m yard.
+Plan overlays use the same world XY and the height-field `z` (or
+`maps/elevation.json`) so the path sits on the mesh, not a flat z=0
+plane. Toggle **observer vs true elev** for the heuristic error overlay.
 
 ## Terrain (yard-scale gradient)
 
@@ -68,6 +71,11 @@ stronger grade. `gradient_yard` is a showcase: ascent along +x, one drain
 running along y so it crosses the slope. The curriculum `flat` scenario
 zeros the gradient. Attitude / tip / drain checks still sample the height
 field, so pitch and roll are nonzero on a pure grade.
+
+The heuristic observer recovers that grade from IMU pitch/roll + pose
+(`elevation_prior`). See [`TERRAIN_MAPS.md`](TERRAIN_MAPS.md) for the
+observer-vs-physics failure mode, path/building layers, and golf yards
+(`golf_rough`, `golf_fairway_snip`).
 
 ## Teach Boundary
 

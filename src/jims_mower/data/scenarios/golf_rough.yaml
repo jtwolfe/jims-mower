@@ -1,0 +1,78 @@
+# Uneven golf-rough snip: multi-scale undulation, cart path, bunker, shed.
+# Procedural height — no DEM download. Optional world.terrain.dem_path hook.
+kind: scenario
+name: golf_rough
+description: Undulating rough with a paved cart path, sand bunker, and a shed.
+base: default
+weather:
+  lighting: day
+  wet: false
+geofence:
+  - [0.6, 0.6]
+  - [13.4, 0.6]
+  - [13.4, 11.4]
+  - [0.6, 11.4]
+world:
+  layout: golf_rough
+  width_m: 14.0
+  height_m: 12.0
+  resolution_m: 0.10
+  n_people: 0
+  n_dogs: 0
+  n_cats: 0
+  n_birds: 0
+  n_trees: 2
+  n_furniture: 0
+  n_toys: 0
+  n_hoses: 0
+  n_cords: 0
+  n_puddles: 0
+  terrain:
+    enabled: true
+    n_drains: 0
+    n_banks: 0
+    noise_amp_m: 0.018
+    keepout_m: 1.6
+    multi_scale_amp_m: 0.12
+    swale_amp_m: 0.10
+    base_gradient:
+      slope_rad: 0.04
+      yaw_rad: 0.35
+      undulation_m: 0.06
+paths:
+  - width_m: 1.15
+    kind: path_paved
+    vertices:
+      - [1.2, 2.4]
+      - [5.0, 3.1]
+      - [8.6, 5.8]
+      - [12.6, 7.4]
+buildings:
+  - kind: building
+    height_m: 0.18
+    vertices:
+      - [11.6, 9.6]
+      - [13.1, 9.6]
+      - [13.1, 11.0]
+      - [11.6, 11.0]
+bunkers:
+  - {x: 6.8, y: 8.4, radius_m: 1.55, depth_m: 0.24}
+garden_beds:
+  - kind: garden_bed
+    vertices:
+      - [1.0, 9.6]
+      - [2.6, 9.6]
+      - [2.6, 11.1]
+      - [1.0, 11.1]
+obstacles:
+  - {kind: tree, x: 3.4, y: 10.4}
+  - {kind: tree, x: 10.2, y: 2.2}
+perception:
+  terrain_mode: heuristic
+planner:
+  max_climb_slope_rad: 0.34
+  drain_clearance_m: 0.36
+  blend_elevation_prior: true
+  elevation_prior_weight: 0.55
+  path_cost: 8.0
+  bunker_cost: 12.0

@@ -157,6 +157,9 @@ class TerrainConfig:
     puddle_radius_m: float = 0.45
     puddle_depth_m: float = 0.04
     base_gradient: BaseGradientConfig = field(default_factory=BaseGradientConfig)
+    multi_scale_amp_m: float = 0.0
+    swale_amp_m: float = 0.0
+    dem_path: Optional[str] = None
 
 
 @dataclass
@@ -331,6 +334,10 @@ class PlannerConfig:
     safe_state: SafeStateConfig = field(default_factory=SafeStateConfig)
     wet_slope_extra: float = 3.0
     energy_aware_strips: bool = True
+    blend_elevation_prior: bool = True
+    elevation_prior_weight: float = 0.55
+    path_cost: float = 8.0
+    bunker_cost: float = 12.0
 
 
 @dataclass
@@ -548,6 +555,10 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("max_slope_rad must be positive")
     if terr.noise_amp_m < 0:
         raise ConfigError("noise_amp_m must be >= 0")
+    if terr.multi_scale_amp_m < 0:
+        raise ConfigError("multi_scale_amp_m must be >= 0")
+    if terr.swale_amp_m < 0:
+        raise ConfigError("swale_amp_m must be >= 0")
     if terr.puddle_radius_m <= 0 or terr.puddle_depth_m < 0:
         raise ConfigError("puddle_radius_m must be > 0 and puddle_depth_m >= 0")
     grad = terr.base_gradient
@@ -741,6 +752,10 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner.safe_state.recover_ok_steps must be >= 1")
     if plan.wet_slope_extra < 0:
         raise ConfigError("planner.wet_slope_extra must be >= 0")
+    if not 0.0 <= float(plan.elevation_prior_weight) <= 1.0:
+        raise ConfigError("planner.elevation_prior_weight must be in [0, 1]")
+    if float(plan.path_cost) < 0.0 or float(plan.bunker_cost) < 0.0:
+        raise ConfigError("planner path_cost/bunker_cost must be >= 0")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

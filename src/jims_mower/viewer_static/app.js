@@ -14,6 +14,9 @@ const state = {
   playing: false,
   width: 12,
   height: 12,
+  resolution: 0.1,
+  relief: 4,
+  elevation: null,
   meshGroup: null,
   overlays: {},
   fenceGroup: null,
@@ -53,12 +56,29 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 
-function worldToScene(x, y, z = 0.04) {
-  return new THREE.Vector3(x, z, y);
+function sampleElev(x, y) {
+  const grid = state.elevation;
+  if (!grid || !grid.values || !grid.cols) return 0;
+  const res = grid.resolution_m || state.resolution || 0.1;
+  const col = Math.max(0, Math.min(grid.cols - 1, Math.floor(x / res)));
+  const row = Math.max(0, Math.min(grid.rows - 1, Math.floor(y / res)));
+  const v = grid.values[row * grid.cols + col];
+  return Number.isFinite(v) ? v : 0;
+}
+
+function worldToScene(x, y, z = null) {
+  const elev = z == null ? sampleElev(x, y) : z;
+  const lift = 0.06 + elev * (state.relief || 4);
+  return new THREE.Vector3(x, lift, y);
 }
 
 function lineFromXY(points, color, closed = false) {
-  const pts = points.map(([x, y]) => worldToScene(x, y, 0.08));
+  const pts = points.map((pt) => {
+    const x = pt[0];
+    const y = pt[1];
+    const z = pt.length > 2 && pt[2] != null ? pt[2] : sampleElev(x, y);
+    return worldToScene(x, y, z);
+  });
   if (closed && pts.length > 2) pts.push(pts[0].clone());
   const geo = new THREE.BufferGeometry().setFromPoints(pts);
   return new THREE.Line(geo, new THREE.LineBasicMaterial({ color, linewidth: 2 }));
@@ -153,6 +173,7 @@ async function loadTerrain(manifest) {
   await mkOverlay("coverage", maps.coverage, 0xffffff);
   await mkOverlay("hazard", maps.hazard, 0xffffff);
   await mkOverlay("occupancy", maps.occupancy, 0xffffff);
+  await mkOverlay("error", maps.elevation_error, 0xffffff);
   return group;
 }
 
@@ -160,6 +181,7 @@ function setOverlayVis() {
   if (state.overlays.coverage) state.overlays.coverage.visible = $("tog-coverage").checked;
   if (state.overlays.hazard) state.overlays.hazard.visible = $("tog-hazard").checked;
   if (state.overlays.occupancy) state.overlays.occupancy.visible = $("tog-occupancy").checked;
+  if (state.overlays.error) state.overlays.error.visible = $("tog-error") && $("tog-error").checked;
   if (state.planLine) state.planLine.visible = $("tog-plan").checked;
   if (state.poseMarker) state.poseMarker.visible = $("tog-pose").checked;
   if (state.fenceGroup) state.fenceGroup.visible = $("tog-fence").checked;
@@ -212,7 +234,7 @@ function updatePose(i) {
   state.index = i;
   const p = poseAt(i);
   if (state.poseMarker) {
-    state.poseMarker.position.copy(worldToScene(p.x, p.y, 0.18 + (p.z || 0)));
+    state.poseMarker.position.copy(worldToScene(p.x, p.y, p.z || 0));
     state.poseMarker.rotation.y = -(p.theta || 0);
   }
   $("scrub").value = String(i);
@@ -340,8 +362,8 @@ $("btn-save").addEventListener("click", async () => {
   }
 });
 
-["tog-coverage", "tog-hazard", "tog-occupancy", "tog-plan", "tog-pose", "tog-fence", "tog-trail"].forEach(
-  (id) => $(id).addEventListener("change", setOverlayVis)
+["tog-coverage", "tog-hazard", "tog-occupancy", "tog-plan", "tog-pose", "tog-fence", "tog-trail", "tog-error"].forEach(
+  (id) => $(id) && $(id).addEventListener("change", setOverlayVis)
 );
 
 $("scrub").addEventListener("input", (ev) => updatePose(Number(ev.target.value)));
@@ -372,6 +394,15 @@ async function boot() {
   state.manifest = manifest;
   state.width = manifest.width_m || 12;
   state.height = manifest.height_m || 12;
+  state.resolution = manifest.resolution_m || 0.1;
+  state.relief = manifest.relief_scale || 4;
+  if (manifest.maps && manifest.maps.elevation) {
+    try {
+      state.elevation = await fetch(`/data/${manifest.maps.elevation}`).then((r) => r.json());
+    } catch (err) {
+      console.warn("elevation json failed", err);
+    }
+  }
   $("subtitle").textContent = `${manifest.policy || "sim"} · ${state.width.toFixed(1)}×${state.height.toFixed(1)} m · no mAP/FPS`;
   $("mesh-chip").textContent = `mesh ${manifest.vertex_count || 0} v / ${manifest.triangle_count || 0} t`;
   controls.target.set(state.width / 2, 0, state.height / 2);
@@ -388,7 +419,7 @@ async function boot() {
   }
   if (manifest.plan) {
     const plan = await fetch(`/data/${manifest.plan}`).then((r) => r.json());
-    state.plan = (plan.waypoints || []).map((p) => [p.x, p.y]);
+    state.plan = (plan.waypoints || []).map((p) => [p.x, p.y, p.z]);
     if (state.plan.length >= 2) {
       state.planLine = lineFromXY(state.plan, 0x2ad4e6, false);
       scene.add(state.planLine);

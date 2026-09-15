@@ -42,6 +42,9 @@ python -m jims_mower.demo --config configs/steep_yard.yaml --out demo_steep
 # Whole-yard slope with a drain crossing the grade:
 python -m jims_mower.demo --config gradient_yard --out demo_gradient
 
+# Uneven golf snip (cart path + bunker + shed):
+python -m jims_mower.demo --config golf_rough --out demo_golf
+
 # Keep the old scripted creep or random wheels:
 python -m jims_mower.demo --policy scripted --out demo_scripted
 python -m jims_mower.demo --policy random --out demo_random
@@ -297,9 +300,11 @@ flowchart LR
 | `cameras` | Dict of uint8 RGB frames, one per configured camera |
 | `coverage` | Grass map: `1` cut, `0` uncut, `-1` non-grass |
 | `occupancy` | Occupancy rasterized from detections |
-| `elevation` | Height-field estimate (metres) |
+| `elevation` | Height-field estimate (metres) — heuristic recovers a yard-scale plane |
+| `elevation_prior` | Low-frequency planar grade from IMU + pose |
 | `slope` | Slope raster (radians, 0–π/2) |
 | `hazard` | `0` free, `1` steep, `2` drain lip, `3` drain channel |
+| `structure` | `0` none, `1` path_paved, `2` building, `3` bunker, `4` garden_bed, `5` green |
 | `confidence` | Per-cell map confidence in `[0, 1]` |
 | `detections` | Padded `[label, cam, u, v, w, h, conf, signal]` |
 | `pose` | `(x, y, theta, z, pitch, roll)` |
@@ -338,6 +343,12 @@ Terrain generation (`world.terrain`):
 The base gradient is applied first and centered on the yard. Drains and
 banks carve on top of that tilted surface. The curriculum `flat` scenario
 zeros the gradient. `steep_yard` uses a stronger grade (~0.10 rad).
+`golf_rough` / `golf_fairway_snip` add multi-scale undulation plus authored
+cart paths, bunkers, and buildings. See [`docs/TERRAIN_MAPS.md`](docs/TERRAIN_MAPS.md).
+
+`world.terrain.dem_path` is an optional vendored `.npy` height patch
+(resampled, mean-centered). CI does not download ELVIS / OpenTopography /
+SRTM. A 32×32 synthetic fixture ships as `bundled_dem_path()`.
 
 Sensor noise (`sensors.imu` / `sensors.gps` / `sensors.tof`): white noise
 stds, IMU accel bias (drawn once per episode), GPS dropout probability.
@@ -364,6 +375,8 @@ Coverage planner (`planner`):
 | `slow_speed_factor` | Wheel-speed scale when advice is `slow` |
 | `strip_spacing_m` | Boustrophedon lane width |
 | `cruise_speed` | Nominal forward command in \([-1, 1]\) |
+| `blend_elevation_prior` | Floor observer slope with the IMU plane (default on) |
+| `path_cost` / `bunker_cost` | Traversal cost for paved ribbons / sand bowls |
 
 Default 6-camera body-frame rig (x forward, y left, z up). Front cameras are
 pitched a bit more down than v0 so drain lips sit in frame:

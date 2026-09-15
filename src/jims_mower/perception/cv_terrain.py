@@ -13,7 +13,13 @@ import math
 import numpy as np
 
 from jims_mower.cameras import attitude_plane_hits, camera_world_pose
-from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_STEEP
+from jims_mower.constants import (
+    HAZARD_DRAIN,
+    HAZARD_DRAIN_EDGE,
+    HAZARD_STEEP,
+    STRUCTURE_BUNKER,
+    STRUCTURE_PATH,
+)
 from jims_mower.types import CameraSpec, Pose
 
 # Plane-projection horizon. Beyond this, one pixel covers too much yard.
@@ -41,18 +47,19 @@ def classify_terrain_rgb(image: np.ndarray) -> np.ndarray:
     # (DRAIN_RGB ≈ 58,42,28 plus extra darkening by depth). Lip is the
     # lighter brown (DRAIN_EDGE_RGB ≈ 86,62,40).
     brown = (
-        (r > g - 2)
-        & (g >= b - 6)
-        & (r > 28)
-        & (r < 130)
-        & (g < 100)
-        & (b < 85)
-        & (value < 270)
-        & (r - b > 8)
+        (r > g + 2)
+        & (g >= b - 4)
+        & (r > 30)
+        & (r < 124)
+        & (g < 94)
+        & (b < 78)
+        & (value < 260)
+        & (r - b > 12)
+        & (r - g > 6)
         & ~sky
         & ~hot
     )
-    channel = brown & (value < 180) & (r < 95) & (g < 72)
+    channel = brown & (value < 178) & (r < 94) & (g < 70)
     lip = brown & ~channel
 
     # Banks are olive: green-dominant but a higher R/G than uncut grass
@@ -77,6 +84,75 @@ def classify_terrain_rgb(image: np.ndarray) -> np.ndarray:
     labels[lip] = HAZARD_DRAIN_EDGE
     labels[channel] = HAZARD_DRAIN
     return labels
+
+
+def classify_structure_rgb(image: np.ndarray) -> np.ndarray:
+    """Per-pixel path / bunker cues from renderer-style colour. Not mAP."""
+    if image.ndim != 3 or image.shape[-1] < 3:
+        raise ValueError("image must be HxWx3")
+    r = image[:, :, 0].astype(np.int16)
+    g = image[:, :, 1].astype(np.int16)
+    b = image[:, :, 2].astype(np.int16)
+    # Cart-path grey: R≈G≈B, mid value (PATH_RGB 128,128,122).
+    chroma = np.maximum(np.maximum(np.abs(r - g), np.abs(g - b)), np.abs(r - b))
+    value = (r.astype(np.int32) + g.astype(np.int32) + b.astype(np.int32)) // 3
+    path = (chroma < 18) & (value > 95) & (value < 170)
+    # Bunker sand: warm tan (BUNKER_RGB 210,180,120).
+    bunker = (
+        (r > 150)
+        & (g > 120)
+        & (b > 70)
+        & (b < 160)
+        & (r > g + 8)
+        & (g > b + 8)
+        & (r < 240)
+    )
+    labels = np.zeros(image.shape[:2], dtype=np.uint8)
+    labels[path] = STRUCTURE_PATH
+    labels[bunker] = STRUCTURE_BUNKER
+    return labels
+
+
+def stamp_structure_labels(
+    image: np.ndarray,
+    labels: np.ndarray,
+    cam: CameraSpec,
+    pose: Pose,
+    *,
+    structure: np.ndarray,
+    resolution_m: float,
+    world_size: tuple[float, float],
+    max_range_m: float = DEFAULT_MAX_RANGE_M,
+) -> int:
+    """Back-project path/bunker pixels onto the structure raster."""
+    if image.shape[:2] != labels.shape:
+        raise ValueError("image and labels must share H×W")
+    height, width = labels.shape
+    world_cam = camera_world_pose(pose, cam)
+    hx, hy, valid = attitude_plane_hits(world_cam, width, height, pose)
+    rng = np.hypot(hx - world_cam.x, hy - world_cam.y)
+    inside = (
+        valid
+        & (labels > 0)
+        & (hx >= 0.0)
+        & (hy >= 0.0)
+        & (hx < world_size[0])
+        & (hy < world_size[1])
+        & (rng < max_range_m)
+        & np.isfinite(hx)
+        & np.isfinite(hy)
+    )
+    if not np.any(inside):
+        return 0
+    rows = np.floor(hy[inside] / max(resolution_m, 1e-6)).astype(np.int32)
+    cols = np.floor(hx[inside] / max(resolution_m, 1e-6)).astype(np.int32)
+    lab = labels[inside]
+    h, w = structure.shape
+    ok = (rows >= 0) & (cols >= 0) & (rows < h) & (cols < w)
+    if not np.any(ok):
+        return 0
+    structure[rows[ok], cols[ok]] = np.maximum(structure[rows[ok], cols[ok]], lab[ok])
+    return int(ok.sum())
 
 
 def drain_pixel_fraction(image: np.ndarray) -> float:
@@ -165,7 +241,9 @@ def project_labels_to_maps(
         return 0
     rr, cc, lab, rng_v = rr[inb], cc[inb], lab[inb], rng_v[inb]
     # Far pixels cover more yard; stamp a disk that grows with range.
-    radii = np.clip(np.ceil((0.10 + 0.035 * rng_v) / max(resolution_m, 1e-6)), 1, 6).astype(np.int32)
+    radii = np.clip(np.ceil((0.10 + 0.028 * rng_v) / max(resolution_m, 1e-6)), 1, 5).astype(np.int32)
+    lip_only = lab < HAZARD_DRAIN
+    radii = np.where(lip_only, np.minimum(radii, 2), radii).astype(np.int32)
     # Collapse duplicate cells so a full frame is not a Python loop per pixel.
     keys = rr.astype(np.int64) * map_cols + cc.astype(np.int64)
     order = np.argsort(keys)

@@ -29,6 +29,20 @@
 #   slope_rad / slope_pct, yaw_rad (ascent heading), undulation_m
 #   Default yards are a mild planar grade, not a flat pad. The curriculum
 #   `flat` scenario zeros this. Drains/banks carve on top of the tilt.
+# world.terrain.multi_scale_amp_m / swale_amp_m:
+#   Extra undulation for golf_rough / golf_fairway (not a single plane).
+# world.terrain.dem_path:
+#   Optional vendored .npy height patch (resampled, mean-centered). No
+#   ELVIS / OpenTopography / SRTM download in CI. Packaged stub:
+#   jims_mower.terrain.bundled_dem_path() → data/dem/tiny_patch.npy.
+# paths:                             # paved ribbons (no-mow, high cost)
+#   - {vertices: [[x, y], ...], width_m: 1.2, kind: path_paved}
+# buildings:                         # polygons (blocked, no-mow)
+#   - {vertices: [[x, y], ...], kind: building, height_m?}
+# bunkers:                           # sand bowls (blocked, no-mow)
+#   - {x, y, radius_m, depth_m}
+# garden_beds / greens:              # polygons (blocked, no-mow / no-trimmer)
+#   - {vertices: [[x, y], ...], kind: garden_bed|green}
 #
 # Random spawn counts still apply (world.n_trees, …) after explicit obstacles.
 # Set those counts to 0 when the authored list should be the only objects.

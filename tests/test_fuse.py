@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE
-from jims_mower.perception.fuse import BevStamp, fuse_stamps
+from jims_mower.perception.fuse import BevStamp, fuse_stamps, gate_isolated_lips
 from jims_mower.perception import HeuristicTerrainObserver
 from jims_mower.types import CameraSpec, PerceptionContext, Pose
 
@@ -53,6 +53,16 @@ def test_fuse_two_cameras_cover_more_than_one() -> None:
     both, _ = fuse_stamps([a, b], (12, 12))
     assert int((one > 0).sum()) == 1
     assert int((both > 0).sum()) == 2
+
+
+def test_gate_keeps_ditch_stripe_drops_speck() -> None:
+    hazard = np.zeros((20, 20), dtype=np.float32)
+    hazard[4:16, 8] = HAZARD_DRAIN_EDGE
+    hazard[4:16, 9] = HAZARD_DRAIN
+    hazard[2, 15] = HAZARD_DRAIN_EDGE
+    gated = gate_isolated_lips(hazard)
+    assert int((gated[4:16, 8:10] >= HAZARD_DRAIN_EDGE).sum()) >= 20
+    assert float(gated[2, 15]) == 0.0
 
 
 def test_heuristic_fuse_path_stamps_drain_swatch() -> None:

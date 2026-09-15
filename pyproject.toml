@@ -85,6 +85,7 @@ jims_mower = [
     "data/orin/*.yaml",
     "data/surveys/*.json",
     "data/yards/*.json",
+    "data/dem/*.npy",
     "viewer_static/*",
     "app/static/*",
 ]
