@@ -172,6 +172,7 @@ p.lead, .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 
   border-radius: 18px;
   padding: 8px;
 }
+#tabbar[hidden] { display: none; }
 #tabbar button {
   border: 0;
   background: transparent;
@@ -191,6 +192,7 @@ p.lead, .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 
   padding: 14px;
   margin-bottom: 12px;
 }
+.fault-banner strong { display: block; margin-bottom: 4px; }
 .big-sos {
   height: 160px;
   border-radius: 50%;

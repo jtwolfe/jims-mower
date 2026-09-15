@@ -267,7 +267,7 @@
     const st = state.status || {};
     const faults = st.faults || [];
     const list = faults.length
-      ? faults.map((f) => `<div class="fault-banner"><strong>${f.code}</strong>${f.detail || ""}</div>`).join("")
+      ? faults.map((f) => `<div class="fault-banner"><strong>${f.code}</strong><span>${f.detail || ""}</span></div>`).join("")
       : `<div class="card"><strong>All clear</strong>No latched owner faults.</div>`;
     screen().innerHTML = `
       <h1>SOS</h1>
