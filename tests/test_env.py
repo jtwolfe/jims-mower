@@ -336,6 +336,7 @@ def test_terrain_yard_in_env() -> None:
                     "keepout_m": 1.8,
                 },
             },
+            "perception": {"terrain_mode": "oracle"},
         }
     )
     obs, info = env.reset(seed=30)

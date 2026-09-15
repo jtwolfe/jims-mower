@@ -158,7 +158,7 @@ class CurriculumConfig:
 
 @dataclass
 class PerceptionConfig:
-    terrain_mode: str = "oracle"  # oracle | blind | heuristic
+    terrain_mode: str = "heuristic"  # heuristic | oracle | blind
 
 
 @dataclass

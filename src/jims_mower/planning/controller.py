@@ -140,6 +140,7 @@ class TerrainPolicy:
         self._width_m = cfg.world.width_m
         self._height_m = cfg.world.height_m
         self._resolution_m = cfg.world.resolution_m
+        self._drain_cells = 0
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> CoveragePlan:
         info = info or {}
@@ -158,6 +159,7 @@ class TerrainPolicy:
         self._reroute_cool = 0
         self.last_advice = "ok"
         self._remember_map_size(obs)
+        self._drain_cells = _drain_cell_count(obs.get("hazard"))
         self.plan = self._build_plan(obs, start, extra_blocked=None)
         self.index = _skip_arrived(self.plan.waypoints, start, self.cfg.planner.arrive_radius_m)
         return self.plan
@@ -207,6 +209,8 @@ class TerrainPolicy:
 
         if self.plan is None:
             self.reset(obs, info)
+
+        self._maybe_replan_new_hazards(obs, pose)
 
         if advice == "reroute":
             self._handle_reroute(obs, pose)
@@ -307,6 +311,13 @@ class TerrainPolicy:
         self.index = _skip_arrived(self.plan.waypoints, pose, self.cfg.planner.arrive_radius_m)
         self.replans += 1
 
+    def _maybe_replan_new_hazards(self, obs: dict[str, Any], pose: Pose) -> None:
+        """Rebuild the coverage path when the vision map grows new lips/channels."""
+        n = _drain_cell_count(obs.get("hazard"))
+        if n >= self._drain_cells + 6 and self.replans < self.cfg.planner.max_replans:
+            self._replan(obs, pose, extra_blocked=None)
+        self._drain_cells = max(self._drain_cells, n)
+
     def _handle_reroute(self, obs: dict[str, Any], pose: Pose) -> None:
         waypoints = self.waypoints
         hazard = np.asarray(obs["hazard"], dtype=np.float32)
@@ -344,6 +355,15 @@ def _skip_arrived(
             continue
         break
     return i
+
+
+def _drain_cell_count(hazard: Any) -> int:
+    if hazard is None:
+        return 0
+    arr = np.asarray(hazard)
+    if arr.size == 0:
+        return 0
+    return int((arr >= HAZARD_DRAIN_EDGE).sum())
 
 
 def _pose_from_obs(obs: dict[str, Any], info: dict[str, Any]) -> Pose:

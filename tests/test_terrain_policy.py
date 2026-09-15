@@ -22,6 +22,9 @@ def _steep_cfg() -> dict:
     cfg.world.n_cats = 0
     cfg.world.n_birds = 0
     cfg.max_steps = 80
+    # These tests pin oracle so they stay a god-view planner check.
+    # Heuristic+planner metrics live in test_heuristic_planner.py.
+    cfg.perception.terrain_mode = "oracle"
     return cfg
 
 

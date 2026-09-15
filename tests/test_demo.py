@@ -38,6 +38,8 @@ def test_demo_writes_cameras_and_summary(tmp_path: Path) -> None:
     assert len(sensors["gps"]) == 4
     assert sensors.get("n_drains", 0) >= 1
     assert sensors.get("policy") == "terrain"
+    assert sensors.get("terrain_source") == "heuristic"
+    assert summary.get("terrain_source") == "heuristic"
     assert (step0 / "drain_view.png").is_file()
 
 
@@ -60,3 +62,9 @@ def test_demo_rejects_unknown_policy(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         run_demo(tmp_path, steps=1, policy="fly")
+
+
+def test_demo_terrain_observer_override(tmp_path: Path) -> None:
+    summary = run_demo(tmp_path, steps=2, seed=4, cameras=4, terrain_observer="oracle")
+    assert summary["terrain_source"] == "oracle"
+    assert summary["terrain_mode"] == "oracle"

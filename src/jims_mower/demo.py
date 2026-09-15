@@ -101,6 +101,7 @@ def run_demo(
     hand_signals: bool = False,
     config: Optional[str] = None,
     policy: str = "terrain",
+    terrain_observer: Optional[str] = None,
 ) -> dict:
     name = (policy or "terrain").strip().lower()
     if name not in POLICIES:
@@ -109,6 +110,13 @@ def run_demo(
     if cameras is not None:
         cfg.sensors.camera_count = cameras
         cfg.sensors.cameras = []
+    if terrain_observer:
+        key = terrain_observer.strip().lower()
+        if key not in {"oracle", "heuristic", "blind"}:
+            raise ValueError(
+                f"terrain_observer must be oracle|heuristic|blind; got {terrain_observer!r}"
+            )
+        cfg.perception.terrain_mode = key
     env = MowerEnv(config=cfg, render_mode="rgb_array", hand_signals=hand_signals)
     obs, info = env.reset(seed=seed)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +171,7 @@ def run_demo(
                     "n_drains": info.get("n_drains"),
                     "n_banks": info.get("n_banks"),
                     "terrain_source": info.get("terrain_source"),
+                    "terrain_mode": env.cfg.perception.terrain_mode,
                     "terrain_advice": info.get("terrain_advice"),
                     "policy": name,
                     "waypoint_index": terrain_policy.index if terrain_policy else None,
@@ -237,6 +246,8 @@ def run_demo(
         "final_imu": info.get("imu"),
         "final_gps": info.get("gps"),
         "n_waypoints": len(plan_payload["waypoints"]),
+        "terrain_source": info.get("terrain_source"),
+        "terrain_mode": env.cfg.perception.terrain_mode,
         "terminated_drain_drop": bool(info.get("drain_drop")),
         "terminated_tipover": bool(info.get("tipover")),
         "log": records,
@@ -260,6 +271,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="terrain",
         help="terrain (default coverage planner), scripted creep, or random wheels",
     )
+    p.add_argument(
+        "--terrain-observer",
+        choices=("heuristic", "oracle", "blind"),
+        default=None,
+        help="override perception.terrain_mode (default: YAML, heuristic)",
+    )
     return p
 
 
@@ -273,9 +290,11 @@ def main(argv: Optional[list[str]] = None) -> None:
         hand_signals=args.hand_signals,
         config=args.config,
         policy=args.policy,
+        terrain_observer=args.terrain_observer,
     )
     print(
         f"Wrote {summary['steps_run']} steps, policy={summary['policy']}, "
+        f"observer={summary.get('terrain_source')}, "
         f"cameras={summary['cameras']} → {args.out}"
     )
     print(f"Final coverage: {summary['final_coverage_fraction']:.4f}")
