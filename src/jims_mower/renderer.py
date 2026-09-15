@@ -7,6 +7,7 @@ from typing import Optional
 
 import numpy as np
 
+from jims_mower.appearance import Appearance
 from jims_mower.cameras import camera_world_pose, ground_hits, heightfield_hits, project_point
 from jims_mower.constants import (
     BANK_RGB,
@@ -15,10 +16,12 @@ from jims_mower.constants import (
     DRAIN_EDGE_RGB,
     DRAIN_RGB,
     KIND_RGB,
+    PUDDLE_RGB,
     SKY_RGB,
     TERRAIN_BANK,
     TERRAIN_DRAIN,
     TERRAIN_DRAIN_EDGE,
+    TERRAIN_PUDDLE,
     UNCUT_GRASS_RGB,
 )
 from jims_mower.maps import GrassCoverageMap
@@ -46,6 +49,8 @@ def _terrain_base_color(
             return DRAIN_RGB
         if label == TERRAIN_DRAIN_EDGE:
             return DRAIN_EDGE_RGB
+        if label == TERRAIN_PUDDLE:
+            return PUDDLE_RGB
     sample = coverage.sample_world(x, y)
     if sample < 0.0:
         return DIRT_RGB
@@ -65,6 +70,7 @@ def render_camera(
     height: int,
     yard_size: tuple[float, float],
     terrain: Optional[HeightField] = None,
+    appearance: Optional[Appearance] = None,
 ) -> np.ndarray:
     """Synthesize one RGB view: ray-traced ground plus projected blobs.
 
@@ -72,9 +78,10 @@ def render_camera(
     ground pixels are shaded by slope (Lambert) and drain/bank labels so
     a CV hook can tell a ditch from flat grass.
     """
+    app = appearance or Appearance.neutral()
     world_cam = camera_world_pose(pose, cam)
     image = np.zeros((height, width, 3), dtype=np.uint8)
-    image[:] = SKY_RGB
+    image[:] = app.sky_rgb
 
     if terrain is not None:
         hx, hy, _hz, valid = heightfield_hits(world_cam, width, height, terrain.sample_many)
@@ -90,21 +97,35 @@ def render_camera(
     dirt = valid & ~inside
     image[dirt] = DIRT_RGB
 
-    light = np.array([-0.35, 0.25, 0.90], dtype=np.float64)
-    light = light / np.linalg.norm(light)
+    light = np.asarray(app.light_dir, dtype=np.float64)
+    light = light / max(np.linalg.norm(light), 1e-9)
     rows, cols = np.where(inside)
     for r, c in zip(rows.tolist(), cols.tolist()):
         x = float(hx[r, c])
         y = float(hy[r, c])
         color = _terrain_base_color(coverage, terrain, x, y)
-        shade = 1.0
+        shade = float(app.ambient)
         if terrain is not None:
             nx, ny, nz = terrain.normal_at(x, y)
-            shade = float(np.clip(0.50 + 0.50 * (nx * light[0] + ny * light[1] + nz * light[2]), 0.28, 1.15))
-            # Extra darkening by depth so drain bottoms read as holes.
-            if terrain.sample_label(x, y) == TERRAIN_DRAIN:
+            ndotl = nx * light[0] + ny * light[1] + nz * light[2]
+            shade = float(np.clip(0.50 + 0.50 * ndotl, 0.28, 1.15)) * float(app.ambient)
+            label = terrain.sample_label(x, y)
+            if label == TERRAIN_DRAIN:
                 depth = max(0.0, -terrain.sample(x, y))
                 shade *= float(np.clip(1.0 - 1.6 * depth, 0.35, 1.0))
+            if app.wet_specular and label in (0, TERRAIN_BANK, TERRAIN_PUDDLE):
+                spec = max(0.0, float(ndotl)) ** 12 * (0.55 if label == TERRAIN_PUDDLE else 0.28)
+                shade += spec
+        for cx, cy, rx, ry, dark in app.shadow_blobs:
+            if ((x - cx) / max(rx, 1e-6)) ** 2 + ((y - cy) / max(ry, 1e-6)) ** 2 <= 1.0:
+                shade *= dark
+                break
+        if app.porch_lights:
+            extra = 0.0
+            for lx, ly, intensity, _rgb in app.porch_lights:
+                dist2 = (x - lx) ** 2 + (y - ly) ** 2
+                extra += intensity / (1.0 + 2.8 * dist2)
+            shade += 0.22 * extra
         image[r, c] = _shade_rgb(color, shade)
 
     # Painter's algorithm: far objects first.
@@ -119,13 +140,27 @@ def render_camera(
 
     fx = 0.5 * width / math.tan(math.radians(world_cam.fov_deg) * 0.5)
     for depth, obst in drawn:
+        color = KIND_RGB.get(obst.kind, (20, 20, 20))
+        if obst.length_m > 0.2:
+            _stamp_segment(
+                image,
+                obst,
+                world_cam,
+                width,
+                height,
+                fx,
+                color,
+            )
+            continue
         proj = project_point(obst.x, obst.y, obst.visual_z, world_cam, width, height)
         if proj is None:
             continue
         u, v, _ = proj
         radius_px = max(1.5, fx * (obst.radius / max(depth, 1e-3)))
-        _stamp_disk(image, u, v, radius_px, KIND_RGB.get(obst.kind, (20, 20, 20)))
-    return image
+        _stamp_disk(image, u, v, radius_px, color)
+    if app.porch_lights:
+        _stamp_porch_blooms(image, world_cam, width, height, app)
+    return _apply_camera_effects(image, app)
 
 
 def _stamp_disk(
@@ -148,6 +183,118 @@ def _stamp_disk(
     yy, xx = np.meshgrid(ys, xs, indexing="ij")
     mask = (xx - u) ** 2 + (yy - v) ** 2 <= radius_px**2
     image[y0:y1, x0:x1][mask] = color
+
+
+def _stamp_segment(
+    image: np.ndarray,
+    obst: Obstacle,
+    world_cam,
+    width: int,
+    height: int,
+    fx: float,
+    color: tuple[int, int, int],
+) -> None:
+    x0, y0, x1, y1 = obst.segment_ends()
+    steps = max(3, int(math.ceil(max(obst.length_m, 0.3) / max(obst.radius * 2.0, 0.08))))
+    for i in range(steps + 1):
+        t = i / steps
+        x = x0 + t * (x1 - x0)
+        y = y0 + t * (y1 - y0)
+        proj = project_point(x, y, obst.visual_z, world_cam, width, height)
+        if proj is None:
+            continue
+        u, v, depth = proj
+        radius_px = max(1.2, fx * (obst.radius / max(depth, 1e-3)))
+        _stamp_disk(image, u, v, radius_px, color)
+
+
+def _stamp_porch_blooms(
+    image: np.ndarray,
+    world_cam,
+    width: int,
+    height: int,
+    app: Appearance,
+) -> None:
+    for lx, ly, intensity, rgb in app.porch_lights:
+        proj = project_point(lx, ly, 1.6, world_cam, width, height)
+        if proj is None:
+            continue
+        u, v, depth = proj
+        radius = max(2.5, 18.0 * intensity / max(depth, 0.4))
+        _stamp_glow(image, u, v, radius, rgb, weight=0.55)
+
+
+def _stamp_glow(
+    image: np.ndarray,
+    u: float,
+    v: float,
+    radius_px: float,
+    color: tuple[int, int, int],
+    weight: float,
+) -> None:
+    h, w = image.shape[:2]
+    r = int(math.ceil(radius_px))
+    x0 = max(0, int(u) - r)
+    x1 = min(w, int(u) + r + 1)
+    y0 = max(0, int(v) - r)
+    y1 = min(h, int(v) + r + 1)
+    if x0 >= x1 or y0 >= y1:
+        return
+    ys = np.arange(y0, y1, dtype=np.float32)
+    xs = np.arange(x0, x1, dtype=np.float32)
+    yy, xx = np.meshgrid(ys, xs, indexing="ij")
+    dist = np.sqrt((xx - u) ** 2 + (yy - v) ** 2) / max(radius_px, 1e-6)
+    falloff = np.clip(1.0 - dist, 0.0, 1.0) ** 2
+    patch = image[y0:y1, x0:x1].astype(np.float32)
+    glow = np.asarray(color, dtype=np.float32)
+    alpha = (weight * falloff)[..., None]
+    image[y0:y1, x0:x1] = np.clip(patch * (1.0 - alpha) + glow * alpha, 0, 255).astype(np.uint8)
+
+
+def _apply_camera_effects(image: np.ndarray, app: Appearance) -> np.ndarray:
+    out = image.astype(np.float32)
+    scale = np.asarray(app.colour_scale, dtype=np.float32)
+    if np.any(np.abs(scale - 1.0) > 1e-4):
+        out *= scale
+    if app.night:
+        out *= 0.72
+    if app.vignette:
+        h, w = out.shape[:2]
+        yy = (np.arange(h, dtype=np.float32) + 0.5) / h - 0.5
+        xx = (np.arange(w, dtype=np.float32) + 0.5) / w - 0.5
+        rr = np.sqrt(yy[:, None] ** 2 + xx[None, :] ** 2)
+        vig = np.clip(1.0 - 1.15 * (rr**2), 0.35, 1.0)
+        out *= vig[..., None]
+    if app.camera_dirt and app.dirt_specks:
+        h, w = out.shape[:2]
+        for nu, nv, nr, dark in app.dirt_specks:
+            _stamp_dirt(out, nu * w, nv * h, nr * max(h, w), dark)
+    if app.motion_blur:
+        k = 5
+        kernel = np.ones(k, dtype=np.float32) / k
+        pad = k // 2
+        padded = np.pad(out, ((0, 0), (pad, pad), (0, 0)), mode="edge")
+        blurred = np.zeros_like(out)
+        for i, coeff in enumerate(kernel):
+            blurred += coeff * padded[:, i : i + out.shape[1], :]
+        out = 0.55 * out + 0.45 * blurred
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _stamp_dirt(image: np.ndarray, u: float, v: float, radius_px: float, dark: float) -> None:
+    h, w = image.shape[:2]
+    r = int(math.ceil(radius_px))
+    x0 = max(0, int(u) - r)
+    x1 = min(w, int(u) + r + 1)
+    y0 = max(0, int(v) - r)
+    y1 = min(h, int(v) + r + 1)
+    if x0 >= x1 or y0 >= y1:
+        return
+    ys = np.arange(y0, y1, dtype=np.float32)
+    xs = np.arange(x0, x1, dtype=np.float32)
+    yy, xx = np.meshgrid(ys, xs, indexing="ij")
+    mask = (xx - u) ** 2 + (yy - v) ** 2 <= radius_px**2
+    image[y0:y1, x0:x1][mask] *= float(dark)
 
 
 def render_topdown(
@@ -201,6 +348,7 @@ def render_topdown(
         image[labels == TERRAIN_BANK] = BANK_RGB
         image[labels == TERRAIN_DRAIN_EDGE] = DRAIN_EDGE_RGB
         image[labels == TERRAIN_DRAIN] = DRAIN_RGB
+        image[labels == TERRAIN_PUDDLE] = PUDDLE_RGB
         # Recolor cut grass on banks so coverage is still visible.
         bank_cut = (labels == TERRAIN_BANK) & (sampled > 0.5)
         image[bank_cut] = CUT_GRASS_RGB
@@ -209,9 +357,18 @@ def render_topdown(
         return x * scale_x, (h_m - y) * scale_y
 
     for obst in obstacles:
+        color = KIND_RGB.get(obst.kind, (20, 20, 20))
+        if obst.length_m > 0.2:
+            x0, y0, x1, y1 = obst.segment_ends()
+            steps = max(3, int(math.ceil(obst.length_m / max(obst.radius * 2.0, 0.08))))
+            for i in range(steps + 1):
+                t = i / steps
+                u, v = to_px(x0 + t * (x1 - x0), y0 + t * (y1 - y0))
+                _stamp_disk(image, u, v, max(1.5, obst.radius * scale_x), color)
+            continue
         u, v = to_px(obst.x, obst.y)
         rpx = max(2.0, obst.radius * scale_x)
-        _stamp_disk(image, u, v, rpx, KIND_RGB.get(obst.kind, (20, 20, 20)))
+        _stamp_disk(image, u, v, rpx, color)
 
     ru, rv = to_px(pose.x, pose.y)
     body_r = max(3.0, 0.25 * scale_x)

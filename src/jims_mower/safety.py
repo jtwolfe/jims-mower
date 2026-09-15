@@ -11,7 +11,9 @@ from jims_mower.constants import (
     LIVING_KINDS,
     TERRAIN_DRAIN,
     TERRAIN_DRAIN_EDGE,
+    TERRAIN_PUDDLE,
 )
+from jims_mower.world import point_to_segment_distance
 from jims_mower.kinematics import sit_on_terrain, trimmer_xy, wheel_positions
 from jims_mower.types import Obstacle, Pose
 
@@ -90,10 +92,32 @@ def is_body_collision(
     collision_radius_m: float,
 ) -> bool:
     """True when the robot body circle overlaps an obstacle that can strike it."""
+    if obstacle.is_soft:
+        return False
     if obstacle.kind == "bird" and obstacle.z >= BIRD_COLLISION_Z_M:
         return False
     gap = hypot2(pose.x, pose.y, obstacle.x, obstacle.y)
     return gap < (collision_radius_m + obstacle.radius)
+
+
+def cutter_risk_hit(
+    hub_xy: tuple[float, float],
+    obstacles: Iterable[Obstacle],
+    radius_m: float,
+) -> Optional[Obstacle]:
+    """First hose/cord whose footprint overlaps the spinning trimmer disk."""
+    hx, hy = hub_xy
+    for obst in obstacles:
+        if not obst.is_cutter_risk:
+            continue
+        if obst.length_m > 0.15:
+            x0, y0, x1, y1 = obst.segment_ends()
+            dist = point_to_segment_distance(hx, hy, x0, y0, x1, y1)
+        else:
+            dist = hypot2(hx, hy, obst.x, obst.y)
+        if dist < (radius_m + obst.radius):
+            return obst
+    return None
 
 
 def first_collision(
@@ -197,6 +221,9 @@ def terrain_hazards(
         advice, reason = "reroute", "drain edge — do not drop a wheel in"
     elif steep:
         advice, reason = "slow", "steep slope — reduce speed"
+    elif any(lab == TERRAIN_PUDDLE for lab in labels):
+        advice, reason = "slow", "rain puddle — wet / temporary hazard"
+        steep = True
     else:
         advice, reason = "ok", None
     return TerrainSafety(

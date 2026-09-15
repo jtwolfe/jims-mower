@@ -1,0 +1,28 @@
+# Suburban backyard — furniture, a hose, mild drain.
+world:
+  layout: suburban
+  width_m: 12.0
+  height_m: 10.0
+  resolution_m: 0.10
+  n_people: 1
+  n_dogs: 1
+  n_cats: 0
+  n_birds: 0
+  n_trees: 2
+  n_furniture: 2
+  n_toys: 3
+  n_hoses: 1
+  n_cords: 0
+  n_puddles: 0
+  terrain:
+    enabled: true
+    n_drains: 1
+    n_banks: 1
+    drain_width_m: 0.35
+    drain_depth_m: 0.14
+    drain_length_m: 3.5
+    noise_amp_m: 0.012
+weather:
+  pack: clear
+domain_randomization:
+  enabled: false

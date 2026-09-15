@@ -17,6 +17,7 @@ from jims_mower.constants import (
     TERRAIN_DRAIN,
     TERRAIN_DRAIN_EDGE,
     TERRAIN_FLAT,
+    TERRAIN_PUDDLE,
 )
 
 
@@ -59,6 +60,16 @@ class BankFeature:
         return math.hypot(self.x1 - self.x0, self.y1 - self.y0)
 
 
+@dataclass(frozen=True)
+class PuddleFeature:
+    """Shallow rain puddle — temporary wet hazard, not a drain channel."""
+
+    x: float
+    y: float
+    radius_m: float
+    depth_m: float
+
+
 @dataclass
 class HeightField:
     """Elevation, slope, and terrain-label rasters aligned with the grass map."""
@@ -70,6 +81,7 @@ class HeightField:
     labels: np.ndarray
     drains: list[DrainFeature] = field(default_factory=list)
     banks: list[BankFeature] = field(default_factory=list)
+    puddles: list[PuddleFeature] = field(default_factory=list)
     slope: Optional[np.ndarray] = None
     dzdx: Optional[np.ndarray] = None
     dzdy: Optional[np.ndarray] = None
@@ -214,6 +226,8 @@ class HeightField:
         out[self.slope >= steep_slope_rad] = HAZARD_STEEP
         out[self.labels == TERRAIN_DRAIN_EDGE] = HAZARD_DRAIN_EDGE
         out[self.labels == TERRAIN_DRAIN] = HAZARD_DRAIN
+        # Puddles are caution (steep slot) — not a terminating channel.
+        out[self.labels == TERRAIN_PUDDLE] = HAZARD_STEEP
         return out
 
     def feature_keepouts(self, extra_radius_m: float = 0.25) -> list[tuple[float, float, float]]:
@@ -230,6 +244,8 @@ class HeightField:
                 x = feat.x0 + t * (feat.x1 - feat.x0)
                 y = feat.y0 + t * (feat.y1 - feat.y0)
                 keepout.append((x, y, radius))
+        for puddle in self.puddles:
+            keepout.append((puddle.x, puddle.y, puddle.radius_m + extra_radius_m))
         return keepout
 
 
@@ -278,6 +294,22 @@ def _carve_drain(hf: HeightField, drain: DrainFeature) -> None:
         pass
     hf.labels[edge] = np.maximum(hf.labels[edge], TERRAIN_DRAIN_EDGE)
     hf.labels[channel] = TERRAIN_DRAIN
+
+
+def _carve_puddle(hf: HeightField, puddle: PuddleFeature) -> None:
+    yy = (np.arange(hf.rows) + 0.5) * hf.resolution_m
+    xx = (np.arange(hf.cols) + 0.5) * hf.resolution_m
+    grid_x, grid_y = np.meshgrid(xx, yy)
+    dist = np.hypot(grid_x - puddle.x, grid_y - puddle.y)
+    mask = dist <= puddle.radius_m
+    if not np.any(mask):
+        return
+    # Cosine bowl so the lip is walkable; skip existing channels.
+    profile = 0.5 * (1.0 + np.cos(np.pi * dist / max(puddle.radius_m, 1e-6)))
+    writable = mask & (hf.labels != TERRAIN_DRAIN) & (hf.labels != TERRAIN_DRAIN_EDGE)
+    hf.elevation[writable] -= np.float32(puddle.depth_m) * profile[writable].astype(np.float32)
+    puddle_only = writable & (hf.labels == TERRAIN_FLAT)
+    hf.labels[puddle_only] = TERRAIN_PUDDLE
 
 
 def _carve_bank(hf: HeightField, bank: BankFeature) -> None:
@@ -370,6 +402,10 @@ def generate_terrain(
     noise_amp_m: float = 0.015,
     keepout: Optional[list[tuple[float, float, float]]] = None,
     enabled: bool = True,
+    layout: str = "random",
+    n_puddles: int = 0,
+    puddle_radius_m: float = 0.45,
+    puddle_depth_m: float = 0.04,
 ) -> HeightField:
     """Procedural yard elevation. Disabled → a flat field (still labeled)."""
     hf = HeightField.empty(width_m, height_m, resolution_m)
@@ -380,7 +416,29 @@ def generate_terrain(
     max_bank_h = math.tan(max(max_slope_rad, 1e-3)) * (0.5 * bank_width_m)
     bank_h = min(bank_height_m, max_bank_h)
 
-    for _ in range(max(0, int(n_drains))):
+    _apply_layout_features(
+        hf,
+        rng,
+        layout=layout,
+        width_m=width_m,
+        height_m=height_m,
+        drain_width_m=drain_width_m,
+        drain_depth_m=drain_depth_m,
+        drain_length_m=drain_length_m,
+        drain_side_slope=drain_side_slope,
+        bank_width_m=bank_width_m,
+        bank_h=bank_h,
+        bank_length_m=bank_length_m,
+        keep=keep,
+    )
+
+    remaining_drains = max(0, int(n_drains) - len(hf.drains))
+    remaining_banks = max(0, int(n_banks) - len(hf.banks))
+    if layout in {"terrace", "kerb_gutter", "swale"}:
+        remaining_drains = 0
+        remaining_banks = 0
+
+    for _ in range(remaining_drains):
         seg = _place_segment(
             rng,
             width_m,
@@ -401,7 +459,7 @@ def generate_terrain(
         hf.drains.append(drain)
         keep.extend(hf.feature_keepouts()[-8:])
 
-    for _ in range(max(0, int(n_banks))):
+    for _ in range(remaining_banks):
         seg = _place_segment(
             rng,
             width_m,
@@ -416,6 +474,17 @@ def generate_terrain(
         _carve_bank(hf, bank)
         hf.banks.append(bank)
 
+    _place_puddles(
+        hf,
+        rng,
+        n_puddles=n_puddles,
+        radius_m=puddle_radius_m,
+        depth_m=puddle_depth_m,
+        keep=keep,
+        width_m=width_m,
+        height_m=height_m,
+    )
+
     if noise_amp_m > 0:
         noise = _smooth_noise(rng, hf.rows, hf.cols, noise_amp_m)
         # Keep drain channels as designed — only rumble the grass/banks.
@@ -424,3 +493,121 @@ def generate_terrain(
 
     hf.recompute_slope()
     return hf
+
+
+def _apply_layout_features(
+    hf: HeightField,
+    rng: np.random.Generator,
+    *,
+    layout: str,
+    width_m: float,
+    height_m: float,
+    drain_width_m: float,
+    drain_depth_m: float,
+    drain_length_m: float,
+    drain_side_slope: float,
+    bank_width_m: float,
+    bank_h: float,
+    bank_length_m: float,
+    keep: list[tuple[float, float, float]],
+) -> None:
+    """Structured drains/banks for terrace, kerb+gutter, and swale yards."""
+    margin = 0.7
+    if layout == "terrace":
+        n_walls = 3
+        usable = max(1.0, height_m - 2.0 * margin)
+        for i in range(n_walls):
+            y = margin + (i + 1) * usable / (n_walls + 1)
+            x0, x1 = margin + 0.4, width_m - margin - 0.4
+            bank = BankFeature(
+                x0,
+                y,
+                x1,
+                y,
+                width_m=min(bank_width_m, 1.4),
+                height_m=bank_h * (0.65 + 0.18 * i),
+                kind="retaining_wall",
+            )
+            _carve_bank(hf, bank)
+            hf.banks.append(bank)
+        keep.extend(hf.feature_keepouts())
+        return
+    if layout == "kerb_gutter":
+        y = min(0.85, 0.12 * height_m)
+        drain = DrainFeature(
+            margin,
+            y,
+            width_m - margin,
+            y,
+            width_m=max(drain_width_m, 0.35),
+            depth_m=drain_depth_m,
+            side_slope=drain_side_slope,
+            kind="gutter",
+        )
+        _carve_drain(hf, drain)
+        hf.drains.append(drain)
+        kerb = BankFeature(
+            margin,
+            y + 0.55,
+            width_m - margin,
+            y + 0.55,
+            width_m=min(0.70, bank_width_m),
+            height_m=min(0.18, bank_h),
+            kind="kerb",
+        )
+        _carve_bank(hf, kerb)
+        hf.banks.append(kerb)
+        keep.extend(hf.feature_keepouts())
+        return
+    if layout == "swale":
+        x0, x1 = margin + 0.3, width_m - margin - 0.3
+        y = 0.5 * height_m
+        drain = DrainFeature(
+            x0,
+            y,
+            x1,
+            y,
+            width_m=max(drain_width_m, 0.70),
+            depth_m=max(drain_depth_m, 0.14),
+            side_slope=max(drain_side_slope, 1.1),
+            kind="swale",
+        )
+        _carve_drain(hf, drain)
+        hf.drains.append(drain)
+        keep.extend(hf.feature_keepouts())
+        return
+    _ = (rng, drain_length_m, bank_length_m)
+
+
+def _place_puddles(
+    hf: HeightField,
+    rng: np.random.Generator,
+    *,
+    n_puddles: int,
+    radius_m: float,
+    depth_m: float,
+    keep: list[tuple[float, float, float]],
+    width_m: float,
+    height_m: float,
+) -> None:
+    margin = radius_m + 0.6
+    for _ in range(max(0, int(n_puddles))):
+        placed = False
+        for _try in range(50):
+            x = float(rng.uniform(margin, width_m - margin))
+            y = float(rng.uniform(margin, height_m - margin))
+            blocked = False
+            for kx, ky, kr in keep:
+                if math.hypot(x - kx, y - ky) < kr + radius_m * 0.4:
+                    blocked = True
+                    break
+            if blocked:
+                continue
+            puddle = PuddleFeature(x, y, radius_m, depth_m)
+            _carve_puddle(hf, puddle)
+            hf.puddles.append(puddle)
+            keep.append((x, y, radius_m + 0.2))
+            placed = True
+            break
+        if not placed:
+            break

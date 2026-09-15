@@ -149,6 +149,30 @@ def test_rejects_bad_max_climb() -> None:
         load_config({"planner": {"max_climb_slope_rad": 0.0}})
 
 
+def test_rejects_bad_world_layout() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"world": {"layout": "moon_base"}})
+
+
+def test_rejects_bad_weather_pack() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"weather": {"pack": "hailstorm"}})
+
+
+def test_rejects_bad_grass_frac() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"world": {"grass": {"regenerate_frac": 1.5}}})
+
+
+def test_wave1c_defaults() -> None:
+    cfg = load_config()
+    assert cfg.world.layout == "random"
+    assert cfg.world.n_hoses == 0
+    assert cfg.weather.pack == "clear"
+    assert cfg.domain_randomization.enabled is False
+    assert cfg.world.grass.enabled is False
+
+
 def test_planner_yaml_override() -> None:
     cfg = load_config({"planner": {"drain_clearance_m": 0.55, "cruise_speed": 0.4}})
     assert cfg.planner.drain_clearance_m == pytest.approx(0.55)

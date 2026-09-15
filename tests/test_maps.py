@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -97,6 +99,28 @@ def test_exclude_mask_drops_drain_cells() -> None:
     m.exclude_mask(keep)
     assert m.grass_cell_count() == 15
     assert m.as_float()[0, 0] == pytest.approx(-1.0)
+
+
+def test_regenerate_grows_cut_cells_back() -> None:
+    m = GrassCoverageMap(4.0, 4.0, 0.5)
+    m.mark_circle(2.0, 2.0, 2.0)
+    before = m.cut_cell_count()
+    assert before > 4
+    grown = m.regenerate(np.random.default_rng(0), 0.25)
+    assert grown > 0
+    assert m.cut_cell_count() == before - grown
+
+
+def test_grass_state_roundtrip(tmp_path: Path) -> None:
+    m = GrassCoverageMap(3.0, 3.0, 0.5)
+    m.exclude_circle(0.4, 0.4, 0.4)
+    m.mark_circle(2.0, 2.0, 0.8)
+    path = tmp_path / "yard_grass.npz"
+    m.save_state(path)
+    other = GrassCoverageMap(3.0, 3.0, 0.5)
+    other.load_state(path)
+    assert np.array_equal(other.cut, m.cut)
+    assert np.array_equal(other.grass, m.grass)
 
 
 def test_as_float_dtype() -> None:

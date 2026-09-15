@@ -348,6 +348,71 @@ def test_terrain_yard_in_env() -> None:
     env.close()
 
 
+def test_grass_regenerates_across_resets() -> None:
+    env = MowerEnv(
+        config={
+            "max_steps": 30,
+            "sensors": {"width": 16, "height": 12, "camera_count": 4},
+            "world": {
+                "width_m": 8.0,
+                "height_m": 8.0,
+                "resolution_m": 0.2,
+                "n_people": 0,
+                "n_dogs": 0,
+                "n_cats": 0,
+                "n_birds": 0,
+                "n_trees": 0,
+                "n_furniture": 0,
+                "n_toys": 0,
+                "terrain": {"enabled": False},
+                "grass": {"enabled": True, "regenerate_frac": 0.5},
+            },
+        }
+    )
+    env.reset(seed=21)
+    for _ in range(10):
+        env.step(np.array([0.7, 0.7, 1.0], dtype=np.float32))
+    cut1 = env._coverage.cut_cell_count()
+    assert cut1 > 2
+    env.reset()
+    cut2 = env._coverage.cut_cell_count()
+    assert 0 < cut2 < cut1
+    env.close()
+
+
+def test_grass_persist_continue_tomorrow(tmp_path) -> None:
+    path = tmp_path / "yard_grass.npz"
+    cfg = {
+        "sensors": {"width": 16, "height": 12, "camera_count": 4},
+        "world": {
+            "width_m": 8.0,
+            "height_m": 8.0,
+            "resolution_m": 0.2,
+            "n_people": 0,
+            "n_dogs": 0,
+            "n_cats": 0,
+            "n_birds": 0,
+            "n_trees": 0,
+            "n_furniture": 0,
+            "n_toys": 0,
+            "terrain": {"enabled": False},
+            "grass": {"enabled": False, "persist_path": str(path)},
+        },
+    }
+    env = MowerEnv(config=cfg)
+    env.reset(seed=22)
+    for _ in range(8):
+        env.step(np.array([0.7, 0.7, 1.0], dtype=np.float32))
+    cut = env._coverage.cut.copy()
+    env.close()
+    assert path.is_file()
+    env2 = MowerEnv(config=cfg)
+    _, info = env2.reset(seed=23)
+    assert info["grass_loaded"] is True
+    assert np.array_equal(env2._coverage.cut, cut)
+    env2.close()
+
+
 def test_observation_in_spaces() -> None:
     env = _env()
     obs, _ = env.reset(seed=14)
