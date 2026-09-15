@@ -84,15 +84,29 @@ authored hard areas stay readable.
 
 `world.terrain.dem_path` loads a vendored `.npy` height patch, resamples
 it to the yard grid, mean-centers it, and **adds** it to the procedural
-field. There is no OpenTopography / ELVIS / SRTM download in CI.
+field. CI never downloads a public DEM.
+
+A 32×32 synthetic fixture ships at
+`src/jims_mower/data/dem/tiny_patch.npy` (`bundled_dem_path()`). Golf
+scenarios stay procedural by default — point `dem_path` at that file
+only when you want the hook exercised.
 
 ```yaml
 world:
   terrain:
-    dem_path: configs/yards/dem/tiny_patch.npy   # 2-D float32, any size
+    dem_path: src/jims_mower/data/dem/tiny_patch.npy   # 2-D float32
     multi_scale_amp_m: 0.08
     swale_amp_m: 0.06
 ```
 
-Ship a tiny fixture if you need one. Procedural golf yards are the
-default.
+Public sources if you author a larger crop offline (do not fetch in CI):
+
+| Source | Notes |
+| --- | --- |
+| [ELVIS](https://elevation.fsdf.org.au/) | Best for real AU yards; LiDAR where available (Geoscience Australia). |
+| [GA LiDAR 5 m DEM](https://ecat.ga.gov.au/geonetwork/eng/api/records/22be4b55-2465-4320-e053-10a3070a5236) | Via ELVIS / GA catalogue. |
+| [OpenTopography Copernicus GLO-30](https://portal.opentopography.org/raster?opentopoID=OTSDEM.032021.4326.3) | ~30 m — coarse for a 50–200 m yard snip. |
+
+OSM golf tags (`leisure=golf_course`, `golf=fairway|green|bunker`) are
+layout masks, not elevation. Crop / resample offline to a 2-D `.npy`
+and vendor it; `apply_dem_npy` only adds height.

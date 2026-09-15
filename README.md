@@ -347,7 +347,8 @@ zeros the gradient. `steep_yard` uses a stronger grade (~0.10 rad).
 cart paths, bunkers, and buildings. See [`docs/TERRAIN_MAPS.md`](docs/TERRAIN_MAPS.md).
 
 `world.terrain.dem_path` is an optional vendored `.npy` height patch
-(resampled, mean-centered). CI does not download a public DEM.
+(resampled, mean-centered). CI does not download ELVIS / OpenTopography /
+SRTM. A 32×32 synthetic fixture ships as `bundled_dem_path()`.
 
 Sensor noise (`sensors.imu` / `sensors.gps` / `sensors.tof`): white noise
 stds, IMU accel bias (drawn once per episode), GPS dropout probability.

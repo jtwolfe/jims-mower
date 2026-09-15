@@ -30,7 +30,7 @@ from jims_mower.structures import (
     apply_polygons,
     rasterize_polyline,
 )
-from jims_mower.terrain import HeightField, apply_dem_npy
+from jims_mower.terrain import HeightField, apply_dem_npy, bundled_dem_path
 
 
 def test_golf_scenarios_registered() -> None:
@@ -164,6 +164,17 @@ def test_dem_npy_hook(tmp_path: Path) -> None:
     apply_dem_npy(hf, dest)
     assert hf.elevation.shape == before.shape
     assert float(np.abs(hf.elevation - before).max()) > 0.05
+
+
+def test_bundled_dem_fixture() -> None:
+    dest = bundled_dem_path()
+    assert dest.is_file()
+    hf = HeightField.empty(6.0, 6.0, 0.5)
+    before = hf.elevation.copy()
+    apply_dem_npy(hf, dest)
+    assert hf.elevation.shape == before.shape
+    assert float(np.abs(hf.elevation - before).max()) > 0.02
+    assert abs(float(hf.elevation.mean() - before.mean())) < 0.02
 
 
 def test_rasterize_polyline_width() -> None:

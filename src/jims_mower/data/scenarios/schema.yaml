@@ -33,7 +33,8 @@
 #   Extra undulation for golf_rough / golf_fairway (not a single plane).
 # world.terrain.dem_path:
 #   Optional vendored .npy height patch (resampled, mean-centered). No
-#   OpenTopography / SRTM download in CI — ship a tiny fixture if you need one.
+#   ELVIS / OpenTopography / SRTM download in CI. Packaged stub:
+#   jims_mower.terrain.bundled_dem_path() → data/dem/tiny_patch.npy.
 # paths:                             # paved ribbons (no-mow, high cost)
 #   - {vertices: [[x, y], ...], width_m: 1.2, kind: path_paved}
 # buildings:                         # polygons (blocked, no-mow)

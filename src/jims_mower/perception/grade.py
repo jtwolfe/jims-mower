@@ -106,7 +106,7 @@ class PlanarGradeModel:
         if len(self._samples) < 6:
             return
         pts = np.asarray(self._samples, dtype=np.float64)
-        span = float(np.hypot(pts[:, 0].ptp(), pts[:, 1].ptp()))
+        span = float(np.hypot(np.ptp(pts[:, 0]), np.ptp(pts[:, 1])))
         if span < 0.8:
             return
         a = np.column_stack((pts[:, 0], pts[:, 1], np.ones(len(pts))))

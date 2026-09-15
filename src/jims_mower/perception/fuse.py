@@ -166,10 +166,7 @@ def fuse_stamps(
             take = better | tie
             patch_h[take] = lab
             patch_c[take] = np.maximum(patch_c[take], weight)
-    gated = gate_isolated_lips(hazard)
-    dropped = (hazard >= HAZARD_DRAIN_EDGE) & (gated < HAZARD_DRAIN_EDGE)
-    conf[dropped] = 0.0
-    return gated, conf
+    return hazard, conf
 
 
 def _dilate_bool(mask: np.ndarray, cells: int) -> np.ndarray:

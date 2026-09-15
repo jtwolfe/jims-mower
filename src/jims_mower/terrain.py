@@ -747,6 +747,11 @@ def _apply_multi_scale(
     hf.elevation += rumble
 
 
+def bundled_dem_path() -> Path:
+    """Tiny synthetic height patch shipped with the package (no network)."""
+    return Path(__file__).resolve().parent / "data" / "dem" / "tiny_patch.npy"
+
+
 def apply_dem_npy(hf: HeightField, path: Union[str, Path]) -> None:
     """Add a vendored height patch. Resamples to the yard grid. No network."""
     dest = Path(path)

@@ -16,7 +16,7 @@ from jims_mower.perception.cv_terrain import (
     stamp_structure_labels,
     stamp_tof_corners,
 )
-from jims_mower.perception.fuse import fuse_camera_labels, paint_geometry_from_hazard
+from jims_mower.perception.fuse import fuse_camera_labels, gate_isolated_lips, paint_geometry_from_hazard
 from jims_mower.perception.grade import PlanarGradeModel, paint_planar_grade
 from jims_mower.perception.learn import TerrainMLP, classify_image, load_weights
 from jims_mower.perception.temporal import HazardHysteresis
@@ -224,6 +224,7 @@ class HeuristicTerrainObserver:
             self._confidence = (
                 conf if self._confidence is None else np.maximum(self._confidence, conf)
             )
+        self._hazard = gate_isolated_lips(self._hazard)
         paint_geometry_from_hazard(
             self._hazard,
             elevation=self._elevation,
@@ -453,6 +454,7 @@ class LearnedTerrainObserver:
         else:
             self._hazard = np.maximum(self._hazard, fused)
         self._confidence = conf
+        self._hazard = gate_isolated_lips(self._hazard)
         paint_geometry_from_hazard(
             self._hazard,
             elevation=self._elevation,
@@ -487,7 +489,15 @@ class LearnedTerrainObserver:
 
     def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
         assert self._hazard is not None
+        channel = self._hazard >= HAZARD_DRAIN
         fresh = (self._hazard >= HAZARD_DRAIN_EDGE) & (prev_hazard < HAZARD_DRAIN_EDGE)
+        if np.any(channel):
+            near = channel.copy()
+            near[1:, :] |= channel[:-1, :]
+            near[:-1, :] |= channel[1:, :]
+            near[:, 1:] |= channel[:, :-1]
+            near[:, :-1] |= channel[:, 1:]
+            fresh = fresh & near
         if not np.any(fresh):
             return
         grown = fresh.copy()
