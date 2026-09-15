@@ -30,6 +30,11 @@ jobs:
           jims-mower-record --out /tmp/jims-mower-ci-ep --steps 2 --cameras 4 --policy terrain
           jims-mower-replay /tmp/jims-mower-ci-ep --mode offline --out /tmp/jims-mower-ci-rep
           jims-mower-replay /tmp/jims-mower-ci-ep --mode env
+          jims-mower-bridge /tmp/jims-mower-ci-ep --out /tmp/jims-mower-ci-bridge.json
+      - name: Design-study dry-run
+        run: jims-mower-study --dry-run --out /tmp/jims-mower-ci-study
+      - name: TensorRT placeholder dry-run
+        run: jims-mower-export-trt --dry-run --out /tmp/jims-mower-ci-trt.json
       - name: Geofence + movers demo smoke
         run: jims-mower-demo --config configs/scenarios/geofence_movers.yaml --steps 4 --out /tmp/jims-mower-ci-geofence --cameras 4 --policy terrain
       - name: Mission resume smoke

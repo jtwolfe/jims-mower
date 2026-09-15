@@ -20,6 +20,7 @@ from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wr
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
 from jims_mower.planning.fusion import attitude_from_accel, make_pose_filter
+from jims_mower.runtime.budget import budget_advice
 from jims_mower.safe_state import SafeStateMachine, estop_requested
 from jims_mower.types import Pose
 
@@ -158,6 +159,7 @@ class TerrainPolicy:
         self.last_signal: Optional[str] = None
         self.safe = SafeStateMachine.from_config(cfg.planner.safe_state)
         self.last_safe_mode = self.safe.mode
+        self.last_budget = "ok"
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> CoveragePlan:
         info = info or {}
@@ -186,6 +188,7 @@ class TerrainPolicy:
         self.last_signal = None
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
+        self.last_budget = "ok"
         self._remember_map_size(obs)
         self._drain_cells = _drain_cell_count(obs.get("hazard"))
         self._occ_cells = _occ_cell_count(obs.get("occupancy"))
@@ -229,7 +232,9 @@ class TerrainPolicy:
         self._geofence = geofence_from_info(info, self.cfg)
         living = str(info.get("living_advice") or "ok")
         fence = str(info.get("geofence_advice") or "ok")
-        advice = combine_advice(env_advice, sensed, chassis, living, fence)
+        power = budget_advice(info)
+        self.last_budget = power
+        advice = combine_advice(env_advice, sensed, chassis, living, fence, power)
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
         self.last_advice = advice

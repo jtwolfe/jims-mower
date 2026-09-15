@@ -27,6 +27,7 @@ HAND_SIGNALS = ("stop", "go", "follow", "back")
 TRAJECTORY_MODES = frozenset({"wander", "patrol", "loop", "line"})
 MOVER_DENSITIES = frozenset({"sparse", "default", "busy"})
 RECOVERY_MODES = ("idle", "reverse", "pivot", "help")
+TOF_COUNTS = frozenset({0, 2, 4})
 
 # Count overlays for world.movers.density. ``default`` leaves YAML counts.
 DENSITY_COUNTS = {

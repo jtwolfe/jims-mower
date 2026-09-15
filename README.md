@@ -413,6 +413,13 @@ This package is the **training / eval gym**, not the robot runtime.
 - Enable `hand_signals` only when you are actually labeling or synthesizing
   that curriculum — it is optional.
 
+See [`docs/JETSON.md`](docs/JETSON.md) and
+[`docker/Dockerfile.aarch64`](docker/Dockerfile.aarch64) for WAVE 3B
+packaging notes. Fake I2C / UART / CSI drivers and a stdlib
+multiprocessing bridge live in `jims_mower.runtime`. Do **not** invent
+onboard FPS. `jims-mower-export-trt --dry-run` is a TensorRT command
+placeholder (`fps_claim: null`).
+
 ## Tests
 
 ```bash
@@ -434,14 +441,18 @@ channel entry; coverage vs oracle is reported without a fake mAP), the
 scenario loader, dataset-export layout, scorecards on frozen seeds, a farm
 dry-run, moving-agent trajectories, geofence costmaps, recovery /
 hand-signal overrides, mission save/load, the ESTOP/limp machine, BC
-collect/train, the numpy RL smoke, incident/telemetry dumps, and the
-owner overlay stub. GitHub Actions PR CI runs the same suite headless on
-Python 3.10–3.12 plus short terrain-policy, suburban, geofence, mission,
-record/replay, BC collect/train, numpy RL smoke, incident viewer,
-telemetry, and owner overlay smokes (heuristic default). Torch and SB3
-are optional extras and are not installed in CI. The full
-seed×scenario farm is a separate
+collect/train, the numpy RL smoke, incident/telemetry dumps, the owner
+overlay stub, fake-driver bridge replay, design-study dry-run, and the
+TensorRT placeholder. GitHub Actions PR CI runs the same suite headless
+on Python 3.10–3.12 plus short terrain-policy, suburban, geofence,
+mission, record/replay, BC collect/train, numpy RL smoke, incident
+viewer, telemetry, owner overlay, bridge-replay, design-study dry-run,
+and TensorRT-placeholder smokes (heuristic default). Torch and SB3 are
+optional extras and are not installed in CI. The full seed×scenario
+farm is a separate
 [manual / nightly workflow](.github/workflows/farm.yml), not PR CI.
+Design-study **live** sweeps (`jims-mower-study` without `--dry-run`)
+are laptop / overnight jobs.
 
 ## WAVE 1A foundation
 
@@ -489,6 +500,24 @@ The BC/RL stubs are **baselines**, not claimed SOTA. Train MSE / episode
 return in logs are diagnostic only. torch and stable-baselines3 stay out
 of the default install and out of PR CI.
 
+## WAVE 3B — runtime stubs / Orin notes / studies
+
+| Piece | Module / path |
+| --- | --- |
+| Fake drivers | `jims_mower.runtime.drivers` — I2C IMU, UART GNSS, CSI cams, I2C ToF |
+| Bridge | `jims-mower-bridge` — stdlib multiprocessing, no ZMQ / gRPC |
+| ROS 2 stubs | `jims_mower.runtime.ros2_stubs` — `[ros2]` marker extra; no `rclpy` in CI |
+| Studies | `jims-mower-study` — camera 4/5/6, ToF 0/2/4, IMU×; tip / drain-entry rates |
+| Budget | `OrinBudget` — limp / stop when `runtime.enabled` and hot or low SOC |
+| Jetson notes | [`docs/JETSON.md`](docs/JETSON.md), [`docs/WAVE3B.md`](docs/WAVE3B.md) |
+
+```bash
+jims-mower-study --dry-run --out study_out
+jims-mower-record --out /tmp/ep --steps 8 --cameras 4
+jims-mower-bridge /tmp/ep
+jims-mower-export-trt --dry-run
+```
+
 ## Layout
 
 ```
@@ -496,8 +525,10 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo
 configs/scenarios/            WAVE 1A/1C/2A yards (suburban, geofence_movers, …)
-docs/                         WAVE1B / WAVE1C / WAVE2A / WAVE2B / WAVE3A + runtime contract
+docs/                         WAVE1B / WAVE1C / WAVE2A / WAVE2B / WAVE3A / WAVE3B + JETSON + runtime contract
+docker/Dockerfile.aarch64     Orin / aarch64 packaging notes (not CI)
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
+src/jims_mower/runtime/       fake drivers, bridge, budget, TRT placeholder
 src/jims_mower/scenarios.py   YAML scenario loader
 src/jims_mower/geofence.py    keep-in / keep-out polygons
 src/jims_mower/mission.py     map + uncut + pose save/load

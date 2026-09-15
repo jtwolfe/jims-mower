@@ -117,16 +117,25 @@ def simulate_tof(
     noise_std_m: float,
     max_range_m: float,
     enabled: bool = True,
+    count: int = 4,
 ) -> np.ndarray:
-    """Downward ranges at the four wheel corners (FL, FR, RL, RR)."""
+    """Downward ranges at the four wheel corners (FL, FR, RL, RR).
+
+    ``count`` is 0 (all zero), 2 (front pair only), or 4 (full). Unused
+    corners stay 0 so ``stamp_tof_corners`` skips them.
+    """
     n = 4
-    if not enabled:
+    n_active = int(count)
+    if not enabled or n_active <= 0:
         return np.zeros(n, dtype=np.float32)
     noisy = np.asarray(clearances_m, dtype=np.float64).reshape(-1)[:n]
     if noisy.size < n:
         noisy = np.pad(noisy, (0, n - noisy.size))
     noisy = noisy + rng.normal(0.0, noise_std_m, size=n)
-    return np.clip(noisy, 0.0, max_range_m).astype(np.float32)
+    out = np.clip(noisy, 0.0, max_range_m).astype(np.float32)
+    if n_active < n:
+        out[n_active:] = 0.0
+    return out
 
 
 def imu_to_array(sample: IMUSample) -> np.ndarray:

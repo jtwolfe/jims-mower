@@ -13,6 +13,7 @@ from jims_mower.planning import TerrainPolicy, build_costmap, plan_coverage
 from jims_mower.geofence import GeofenceSpec
 from jims_mower.mission import load_mission, save_mission
 from jims_mower.planning.fusion import EkfPoseFilter
+from jims_mower.runtime.budget import OrinBudget
 from jims_mower.safety import living_advice, terrain_hazards, trimmer_interlock
 from jims_mower.safe_state import SafeStateMachine
 
@@ -38,6 +39,7 @@ __all__ = [
     "EpisodeScorecard",
     "GeofenceSpec",
     "MowerEnv",
+    "OrinBudget",
     "SafeStateMachine",
     "Scenario",
     "TerrainPolicy",

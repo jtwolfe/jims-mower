@@ -1,0 +1,41 @@
+# Jetson Orin Nano / JetPack 6 class image — NOTES FIRST.
+#
+# CI (ubuntu-latest x86_64) does NOT build this file. Build on aarch64:
+#   docker build -f docker/Dockerfile.aarch64 -t jims-mower:orin .
+#
+# Base is a generic ARM64 Python image so the file stays useful without a
+# private nvcr.io login. On the board, prefer a JetPack / l4t-base image
+# and keep the same pip install line.
+#
+# Do NOT run on-box (see docs/JETSON.md):
+#   - gym renderer / render()
+#   - OracleTerrainObserver
+#   - jims-mower-farm / jims-mower-study full sweeps
+#   - desktop OpenCV HighGUI
+#
+# This image is a packaging sketch, not a claimed FPS / mAP runtime.
+
+FROM python:3.11-slim-bookworm
+
+LABEL org.opencontainers.image.title="jims-mower orin notes"
+LABEL org.opencontainers.image.description="Gym + runtime stubs. Not a benchmark image."
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    # Hint only — the gym never reads this as a measured TDP.
+    JIMS_MOWER_ORIN_CLASS=1
+
+WORKDIR /opt/jims-mower
+
+# Keep the default install light (no rclpy, no tensorrt, no zmq).
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
+COPY configs ./configs
+COPY scripts ./scripts
+
+RUN pip install --no-cache-dir -e .
+
+# Runtime entrypoints that *are* sane on a headless board for bench replay:
+#   jims-mower-replay, jims-mower-bridge, jims-mower-export-trt --dry-run
+# Do not default CMD to the gym demo renderer.
+CMD ["python", "-c", "import jims_mower; print(jims_mower.__version__, 'orin-class stub; not a benchmark')"]

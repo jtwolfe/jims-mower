@@ -2,6 +2,7 @@
 
 from jims_mower.planning.controller import (
     TerrainPolicy,
+    combine_advice,
     observed_hand_signal,
     tracking_action,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "TerrainPolicy",
     "attitude_from_accel",
     "build_costmap",
+    "combine_advice",
     "make_pose_filter",
     "observed_hand_signal",
     "plan_coverage",

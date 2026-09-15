@@ -41,6 +41,7 @@ htmlcov/
 /demo_out/
 /dataset_out/
 /farm_out/
+/study_out/
 /terrain_mlp.npz
 /bc_logs/
 /bc_weights.npz

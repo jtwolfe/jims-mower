@@ -42,7 +42,9 @@ the hub.
 | `hand_signal` | `Discrete(5)` | `0` none, `1` stop, `2` go, `3` follow, `4` back |
 
 `info` (not in the space) also carries `terrain_advice`, `living_advice`,
-`geofence_advice`, `detections` as dicts, `weather`, `scenario`, `geofence`
+`geofence_advice`, `budget_advice` (`ok` / `slow` / `stop` from the
+Orin-class battery / thermal stub when `runtime.enabled`), `battery_soc`,
+`thermal_c`, `detections` as dicts, `weather`, `scenario`, `geofence`
 (keep-in vertices), `geofence_spec` (`keep_in` / `keep_out`),
 `nearest_person_m`, IMU/GPS lists.
 
@@ -122,7 +124,15 @@ not the height field:
 `ComplementaryPoseFilter` is a GPS+IMU stub for planner start / attitude, not
 a published EKF. The controller wraps wheel commands in
 [`SafeStateMachine`](src/jims_mower/safe_state.py): **RUN** / **LIMP** /
-**ESTOP** / **SAFE**.
+**ESTOP** / **SAFE**. `info["budget_advice"]` from `OrinBudget` is combined
+with the other advice strings so a hot / low-SOC stub can limp or hold.
+
+On a laptop, `jims_mower.runtime.drivers` publish the same IMU / GNSS /
+camera / ToF contract kinds onto in-process queues (fake I2C / UART / CSI).
+`jims-mower-bridge` replays a recorded episode through those queues. CI
+does not install ROS 2; optional `[ros2]` node stubs are import-guarded.
+`sensors.tof.count` is one of `{0, 2, 4}`. `runtime.enabled` defaults
+false so gym tests do not limp.
 
 ## Software ESTOP / limp / safe (WAVE 3A)
 
@@ -163,6 +173,8 @@ Not observation keys. Loaded via [`scenarios.load_source`](src/jims_mower/scenar
   `trajectory`: `wander` / `patrol` / `loop` / `line`)
 - mission resume — `reset(options={"load_mission","save_mission"})` and
   `jims-mower-mission` write map + uncut + pose (`jims_mower.mission.v1`)
+- `sensors.tof.count` — `0` / `2` / `4` downward corners (unused stay 0)
+- `runtime.enabled` — Orin-class battery / thermal limp stub (off by default)
 
 ## Exporter labels
 

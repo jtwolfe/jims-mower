@@ -98,6 +98,18 @@ def test_tof_clipped_and_shaped() -> None:
     assert out[3] == pytest.approx(1.2)
 
 
+def test_tof_count_masks_unused_corners() -> None:
+    rng = np.random.default_rng(5)
+    raw = np.array([0.20, 0.21, 0.22, 0.23])
+    two = simulate_tof(raw, rng, noise_std_m=0.0, max_range_m=1.2, count=2)
+    assert two[0] == pytest.approx(0.20)
+    assert two[1] == pytest.approx(0.21)
+    assert two[2] == pytest.approx(0.0)
+    assert two[3] == pytest.approx(0.0)
+    none = simulate_tof(raw, rng, noise_std_m=0.0, max_range_m=1.2, count=0)
+    assert np.allclose(none, 0.0)
+
+
 def test_env_obs_sensor_shapes() -> None:
     env = MowerEnv(
         config={
