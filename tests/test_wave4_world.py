@@ -14,7 +14,7 @@ from jims_mower.survey import SurveyError, load_survey
 
 def test_new_scenarios_registered() -> None:
     names = list_scenarios()
-    for name in ("flat", "narrow_gate", "fence_line", "property_scale"):
+    for name in ("flat", "narrow_gate", "fence_line", "property_scale", "acre_yard"):
         assert name in names
 
 

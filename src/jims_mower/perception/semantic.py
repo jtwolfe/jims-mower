@@ -28,6 +28,7 @@ from jims_mower.constants import (
     STRUCTURE_GARDEN,
     STRUCTURE_GREEN,
     STRUCTURE_PATH,
+    STRUCTURE_POND,
 )
 
 
@@ -63,6 +64,7 @@ def semantic_raster(
         out[struct == STRUCTURE_BUNKER] = SEMANTIC_BUNKER
         out[np.isin(struct, (STRUCTURE_GARDEN, STRUCTURE_GREEN))] = SEMANTIC_GARDEN
         out[struct == STRUCTURE_BUILDING] = SEMANTIC_BUILDING
+        out[struct == STRUCTURE_POND] = SEMANTIC_NON_GRASS
     if occupancy is not None:
         occ = np.asarray(occupancy, dtype=np.float32)
         if occ.shape != cov.shape:

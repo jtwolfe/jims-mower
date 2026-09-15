@@ -45,6 +45,12 @@ python -m jims_mower.demo --config gradient_yard --out demo_gradient
 # Uneven golf snip (cart path + bunker + shed):
 python -m jims_mower.demo --config golf_rough --out demo_golf
 
+# One-acre explore/mow yard (70×58 m @ 0.50 m). Smoke only — not a
+# coverage benchmark. Mesh: --stride 3 or 4.
+python -m jims_mower.demo --config acre_yard --steps 80 --out demo_acre
+jims-mower-mission-demo --config acre_yard --out mission_acre
+jims-mower-mesh --out acre.glb --config acre_yard --seed 3 --stride 4
+
 # Full mission: guided perimeter → explore/map → review → global mow
 # Default --steps is 6000. --fast uses mission_tiny for CI smoke.
 jims-mower-mission-demo --config golf_rough --out mission_out
@@ -356,7 +362,10 @@ The base gradient is applied first and centered on the yard. Drains and
 banks carve on top of that tilted surface. The curriculum `flat` scenario
 zeros the gradient. `steep_yard` uses a stronger grade (~0.10 rad).
 `golf_rough` / `golf_fairway_snip` add multi-scale undulation plus authored
-cart paths, bunkers, and buildings. See [`docs/TERRAIN_MAPS.md`](docs/TERRAIN_MAPS.md).
+cart paths, bunkers, and buildings. `acre_yard` is a ~1-acre (70×58 m @
+0.50 m, ~16.2k cells) suburban/rural block with trees, bush beds, sand
+bowls, paths, sheds, a pond keep-out, and uneven ground. See
+[`docs/TERRAIN_MAPS.md`](docs/TERRAIN_MAPS.md).
 
 `world.terrain.dem_path` is an optional vendored `.npy` height patch
 (resampled, mean-centered). CI does not download ELVIS / OpenTopography /

@@ -18,6 +18,7 @@ jims-mower-demo --config configs/scenarios/playground.yaml --policy scripted --o
 | `suburban.yaml` | Backyard furniture, hose, mild drain, mild yard grade |
 | `gradient_yard.yaml` | Whole-yard planar slope + a drain crossing it |
 | `golf_rough.yaml` / `golf_fairway_snip.yaml` | Undulating golf snips + cart path / bunker |
+| `acre_yard.yaml` | ~1-acre (70×58 m @ 0.50 m) trees / beds / sand / paths / sheds / pond |
 | `rural_paddock.yaml` | Larger sparse paddock |
 | `playground.yaml` | Many toys |
 | `orchard.yaml` | Tree rows |
@@ -28,7 +29,7 @@ jims-mower-demo --config configs/scenarios/playground.yaml --policy scripted --o
 
 ## World features
 
-- **Layouts** (`world.layout`): `random`, `suburban`, `paddock`, `playground`, `orchard`, `terrace`, `kerb_gutter`, `swale`.
+- **Layouts** (`world.layout`): `random`, `suburban`, `paddock`, `playground`, `orchard`, `terrace`, `kerb_gutter`, `swale`, `golf_rough`, `golf_fairway`, `acre_yard`.
 - **Rain puddles** (`world.n_puddles`): shallow circular depressions. Temporary weather hazards — they shade as water, mark the hazard raster as *steep/caution*, and ask the chassis to *slow*. They do **not** terminate as a drain-drop.
 - **Hose / extension cord** (`world.n_hoses`, `world.n_cords`): soft ground clutter. The body can drive over them. If the trimmer disk overlaps one while spinning, `info["cutter_risk"]` is set (string-line / cable cut).
 

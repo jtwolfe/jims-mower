@@ -45,6 +45,10 @@
 #   - {x, y, radius_m, depth_m}
 # garden_beds / greens:              # polygons (blocked, no-mow / no-trimmer)
 #   - {vertices: [[x, y], ...], kind: garden_bed|green}
+# ponds:                             # water keep-out (not a hydro simulator)
+#   - {vertices: [[x, y], ...], kind: pond, depth_m?}
+#   Painted as standing water, merged into geofence keep-out, excluded
+#   from coverage. Pair with n_puddles / drains for leftover wet spots.
 #
 # Random spawn counts still apply (world.n_trees, …) after explicit obstacles.
 # Set those counts to 0 when the authored list should be the only objects.

@@ -11,6 +11,7 @@ from jims_mower.constants import (
     LIVING_KINDS,
     TERRAIN_DRAIN,
     TERRAIN_DRAIN_EDGE,
+    TERRAIN_POND,
     TERRAIN_PUDDLE,
 )
 from jims_mower.geofence import (
@@ -282,6 +283,9 @@ def terrain_hazards(
         advice, reason = "reroute", "drain edge — do not drop a wheel in"
     elif steep:
         advice, reason = "slow", "steep slope — reduce speed"
+    elif any(lab == TERRAIN_POND for lab in labels):
+        advice, reason = "stop", "pond keep-out — not mowable water"
+        steep = True
     elif any(lab == TERRAIN_PUDDLE for lab in labels):
         advice, reason = "slow", "rain puddle — wet / temporary hazard"
         steep = True

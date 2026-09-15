@@ -75,7 +75,7 @@ field, so pitch and roll are nonzero on a pure grade.
 The heuristic observer recovers that grade from IMU pitch/roll + pose
 (`elevation_prior`). See [`TERRAIN_MAPS.md`](TERRAIN_MAPS.md) for the
 observer-vs-physics failure mode, path/building layers, and golf yards
-(`golf_rough`, `golf_fairway_snip`).
+(`golf_rough`, `golf_fairway_snip`, `acre_yard`).
 
 ## Teach Boundary
 

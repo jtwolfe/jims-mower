@@ -21,6 +21,7 @@ WORLD_LAYOUTS = frozenset(
         "swale",
         "golf_rough",
         "golf_fairway",
+        "acre_yard",
     }
 )
 WEATHER_PACKS = frozenset({"clear", "dawn", "dusk", "night", "rain"})
@@ -66,6 +67,7 @@ DRAIN_RGB = (58, 42, 28)
 DRAIN_EDGE_RGB = (86, 62, 40)
 BANK_RGB = (72, 118, 52)
 PUDDLE_RGB = (48, 92, 128)
+POND_RGB = (36, 78, 118)
 PATH_RGB = (128, 128, 122)
 BUNKER_RGB = (210, 180, 120)
 BUILDING_RGB = (92, 92, 98)
@@ -83,6 +85,7 @@ TERRAIN_BUILDING = 6
 TERRAIN_BUNKER = 7
 TERRAIN_GARDEN = 8
 TERRAIN_GREEN = 9
+TERRAIN_POND = 10
 
 # Human-structure raster (obs["structure"] / info["structure"]).
 STRUCTURE_NONE = 0
@@ -91,6 +94,7 @@ STRUCTURE_BUILDING = 2
 STRUCTURE_BUNKER = 3
 STRUCTURE_GARDEN = 4
 STRUCTURE_GREEN = 5
+STRUCTURE_POND = 6
 STRUCTURE_NAMES = (
     "none",
     "path_paved",
@@ -98,6 +102,7 @@ STRUCTURE_NAMES = (
     "bunker",
     "garden_bed",
     "green",
+    "pond",
 )
 PATH_COST = 8.0
 BUNKER_COST = 12.0

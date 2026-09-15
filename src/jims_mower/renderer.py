@@ -22,6 +22,7 @@ from jims_mower.constants import (
     KIND_RGB,
     LONG_GRASS_RGB,
     PATH_RGB,
+    POND_RGB,
     PUDDLE_RGB,
     SKY_RGB,
     TERRAIN_BANK,
@@ -32,6 +33,7 @@ from jims_mower.constants import (
     TERRAIN_GARDEN,
     TERRAIN_GREEN,
     TERRAIN_PATH,
+    TERRAIN_POND,
     TERRAIN_PUDDLE,
     UNCUT_GRASS_RGB,
 )
@@ -64,6 +66,8 @@ def _terrain_base_color(
             return DRAIN_EDGE_RGB
         if label == TERRAIN_PUDDLE:
             return PUDDLE_RGB
+        if label == TERRAIN_POND:
+            return POND_RGB
         if label == TERRAIN_PATH:
             return PATH_RGB
         if label == TERRAIN_BUNKER:
@@ -136,8 +140,10 @@ def render_camera(
             if label == TERRAIN_DRAIN:
                 depth = max(0.0, -terrain.sample(x, y))
                 shade *= float(np.clip(1.0 - 1.6 * depth, 0.35, 1.0))
-            if app.wet_specular and label in (0, TERRAIN_BANK, TERRAIN_PUDDLE):
-                spec = max(0.0, float(ndotl)) ** 12 * (0.55 if label == TERRAIN_PUDDLE else 0.28)
+            if app.wet_specular and label in (0, TERRAIN_BANK, TERRAIN_PUDDLE, TERRAIN_POND):
+                spec = max(0.0, float(ndotl)) ** 12 * (
+                    0.55 if label in (TERRAIN_PUDDLE, TERRAIN_POND) else 0.28
+                )
                 shade += spec
         for cx, cy, rx, ry, dark in app.shadow_blobs:
             if ((x - cx) / max(rx, 1e-6)) ** 2 + ((y - cy) / max(ry, 1e-6)) ** 2 <= 1.0:
@@ -372,6 +378,7 @@ def render_topdown(
         image[labels == TERRAIN_DRAIN_EDGE] = DRAIN_EDGE_RGB
         image[labels == TERRAIN_DRAIN] = DRAIN_RGB
         image[labels == TERRAIN_PUDDLE] = PUDDLE_RGB
+        image[labels == TERRAIN_POND] = POND_RGB
         # Recolor cut grass on banks so coverage is still visible.
         bank_cut = (labels == TERRAIN_BANK) & (sampled > 0.5)
         image[bank_cut] = CUT_GRASS_RGB

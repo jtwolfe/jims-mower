@@ -65,6 +65,7 @@ SCENARIO_HINT_KEYS = frozenset(
         "bunkers",
         "garden_beds",
         "greens",
+        "ponds",
     }
 )
 
@@ -111,6 +112,7 @@ class Scenario:
     bunkers: list[BunkerFeature] = field(default_factory=list)
     garden_beds: list[PolygonFeature] = field(default_factory=list)
     greens: list[PolygonFeature] = field(default_factory=list)
+    ponds: list[PolygonFeature] = field(default_factory=list)
     config: EnvConfig = field(default_factory=EnvConfig)
     path: Optional[Path] = None
 
@@ -385,6 +387,24 @@ def _parse_polygon_feature(item: Any, *, field: str, default_kind: str) -> Polyg
     )
 
 
+def _parse_pond(item: Any) -> PolygonFeature:
+    if not isinstance(item, dict):
+        raise ScenarioError("Each pond must be a mapping")
+    raw = item.get("vertices") or item.get("polygon")
+    if not raw:
+        raise ScenarioError("pond needs vertices: [[x, y], ...]")
+    verts = _parse_polygon(raw, field="pond.vertices")
+    extra = set(item) - {"vertices", "polygon", "kind", "height_m", "depth_m"}
+    if extra:
+        raise ScenarioError(f"Unknown pond keys: {sorted(extra)}")
+    depth = item.get("depth_m", item.get("height_m", 0.28))
+    return PolygonFeature(
+        vertices=tuple(verts),
+        kind=str(item.get("kind", "pond")),
+        height_m=float(depth),
+    )
+
+
 def _parse_bunker(item: Any) -> BunkerFeature:
     if not isinstance(item, dict):
         raise ScenarioError("Each bunker must be a mapping")
@@ -467,6 +487,9 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
         _parse_polygon_feature(p, field="green", default_kind="green")
         for p in (data.get("greens") or [])
     ]
+    ponds = [_parse_pond(p) for p in (data.get("ponds") or [])]
+    for pond in ponds:
+        holes.append(list(pond.vertices))
     try:
         cfg = load_config(_resolve_base(data.get("base")))
         overlay = _env_overlay(data)
@@ -500,6 +523,7 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
         bunkers=bunkers,
         garden_beds=garden_beds,
         greens=greens,
+        ponds=ponds,
         config=cfg,
         path=path,
     )

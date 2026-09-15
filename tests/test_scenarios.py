@@ -45,6 +45,7 @@ DSL_EXTRAS = (
     "golf_rough",
     "golf_fairway_snip",
     "mission_tiny",
+    "acre_yard",
 )
 
 
@@ -148,6 +149,11 @@ def test_each_dsl_scenario_loads() -> None:
         scn = load_dsl_scenario(name)
         assert scn.name == name
         assert scn.config.world.width_m > 0
+        if scn.config.world.width_m * scn.config.world.height_m > 500.0:
+            scn.config.sensors.width = 16
+            scn.config.sensors.height = 12
+            scn.config.sensors.camera_count = 4
+            scn.config.sensors.cameras = []
         env = MowerEnv(config=scn, render_mode=None)
         obs, info = env.reset(seed=0)
         assert "cameras" in obs
