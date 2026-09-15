@@ -134,13 +134,13 @@ async function loadTerrain(manifest) {
         new THREE.MeshBasicMaterial({
           map: tex,
           transparent: true,
-          opacity: 0.55,
+          opacity: 0.42,
           depthWrite: false,
           color,
         })
       );
       plane.rotation.x = -Math.PI / 2;
-      plane.position.set(w / 2, 0.03, h / 2);
+      plane.position.set(w / 2, 0.12, h / 2);
       plane.visible = false;
       group.add(plane);
       state.overlays[key] = plane;
@@ -378,6 +378,8 @@ async function boot() {
   camera.position.set(state.width * 0.15, Math.max(state.width, state.height) * 0.9, state.height * 1.15);
 
   state.meshGroup = await loadTerrain(manifest);
+  // Viewer-only lift so 10–20 cm drains/banks read on a 12 m yard.
+  state.meshGroup.scale.y = 4;
   scene.add(state.meshGroup);
 
   if (manifest.poses) {
@@ -431,7 +433,7 @@ async function boot() {
     select.appendChild(opt);
   });
   $("scrub").max = String(Math.max(0, state.poses.length - 1));
-  $("tog-coverage").checked = true;
+  $("tog-coverage").checked = false;
   setOverlayVis();
   updatePose(0);
   tick();
