@@ -538,14 +538,18 @@ class MissionPolicy:
             return self._hold()
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
         if advice == "stop":
+            # Sit still — driving here is what tips on golf undulation.
             self._calibrate_stall += 1
-            if self._calibrate_stall >= 6 and self.index < len(self.global_plan.waypoints):
+            if self._calibrate_stall >= 2 and self.index < len(self.global_plan.waypoints):
                 skipped = self.global_plan.waypoints[self.index]
                 self._skipped_global.append(skipped)
                 self._emit("unreachable_segment", {"x": skipped[0], "y": skipped[1], "index": self.index, "reason": "stop"})
                 self.index += 1
                 self._calibrate_stall = 0
-            return self._nudge_inward(pose)
+            if len(self._skipped_global) >= 12:
+                self._emit("mow_budget", {"reason": "imu_stop_ridge", "waypoints_left": max(0, len(self.global_plan.waypoints) - self.index)})
+                self._transition(MissionPhase.RETURN_HOME)
+            return self._hold()
         self._calibrate_stall = 0
         if self.index >= len(self.global_plan.waypoints):
             self._emit("mow_complete", self.global_plan.as_metrics())
