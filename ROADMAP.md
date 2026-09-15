@@ -53,7 +53,7 @@ stub, multi-camera BEV fuse, temporal filters. No claimed mAP / FPS.
 - [ ] Hand-signal classifier behind `HandSignalCurriculum` (optional)
 - [ ] Grass coverage net behind `GrassObserver` (replace color heuristic)
 - [x] Domain-randomised lighting / wet / dawn from scenario flags — WAVE 1C renderer + WAVE 2B `--domain-rand` export note
-- [x] Optional `TerrainEstimate.confidence` merge weights (relative, not a published score) — WAVE 2B
+- [x] Uncertainty maps on `TerrainEstimate` (relative merge weights, not published scores) — WAVE 1B costmap + WAVE 2B BEV fuse
 
 ## Mapping
 

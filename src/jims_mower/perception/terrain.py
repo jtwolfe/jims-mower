@@ -417,7 +417,7 @@ class LearnedTerrainObserver:
             self._slope.copy(),
             self._hazard.copy(),
             source="learned",
-            confidence=None if self._confidence is None else self._confidence.copy(),
+            confidence=self._confidence.copy(),
         )
 
     def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
