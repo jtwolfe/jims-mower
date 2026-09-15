@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Packaging / setuptools
+*.egg-info/
+.eggs/
+dist/
+build/
+eggs/
+*.egg
+pip-wheel-metadata/
+
+# Virtualenvs
+.venv/
+venv/
+ENV/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Env and editor
+.env
+.env.*
+.idea/
+.vscode/
+*.swp
+
+# Demo / local artifacts (keep the package configs/)
+/artifacts/
+/demo_out/
+*.ppm
+.DS_Store
