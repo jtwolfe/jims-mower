@@ -12,7 +12,7 @@ import pytest
 from jims_mower.app.backend import MemoryBackend, make_backend
 from jims_mower.app.cli import build_parser
 from jims_mower.app.server import make_server
-from jims_mower.constants import APP_STATUS_SCHEMA, YARD_PROFILE_SCHEMA
+from jims_mower.constants import APP_STATUS_SCHEMA, MESH_SCHEMA, YARD_PROFILE_SCHEMA
 from jims_mower.yard_profile import default_yard_profile
 
 
@@ -68,8 +68,9 @@ def test_status_yard_maps_and_commands() -> None:
         code, mesh = _json(host, port, "GET", "/map/mesh")
         assert code == 200
         assert mesh["not_slam"] is True
-        assert "occupied" in mesh
-        assert mesh["ux_a_href"].startswith("/static/ux_a/")
+        assert mesh["schema"] == MESH_SCHEMA
+        assert mesh["vertex_count"] >= 3
+        assert mesh["ux_a_href"] == "/viewer"
 
         code, cov = _json(host, port, "GET", "/map/coverage")
         assert code == 200
@@ -135,6 +136,28 @@ def test_sse_and_static_shell() -> None:
         health = json.loads(resp.read().decode("utf-8"))
         conn.close()
         assert health["ok"] is True
+
+        conn = HTTPConnection(host, port, timeout=4.0)
+        conn.request("GET", "/viewer")
+        resp = conn.getresponse()
+        html = resp.read().decode("utf-8")
+        conn.close()
+        assert resp.status == 200
+        assert "three" in html
+        assert "/viewer/app.js" in html
+
+        code, manifest = _json(host, port, "GET", "/api/manifest")
+        assert code == 200
+        assert manifest["mesh_json"] == "yard.json"
+        assert manifest["profile"] == "profile.json"
+        assert manifest["vertex_count"] >= 3
+
+        code, profile = _json(host, port, "GET", "/data/profile.json")
+        assert code == 200
+        assert profile["schema"] == YARD_PROFILE_SCHEMA
+        code, mesh_json = _json(host, port, "GET", "/data/yard.json")
+        assert mesh_json["schema"] == MESH_SCHEMA
+        assert mesh_json["vertex_count"] >= 3
     finally:
         httpd.shutdown()
         httpd.server_close()

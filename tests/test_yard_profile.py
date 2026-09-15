@@ -27,15 +27,15 @@ def test_default_roundtrip(tmp_path: Path) -> None:
     loaded = load_yard_profile(dest)
     assert loaded.schema == YARD_PROFILE_SCHEMA
     assert loaded.name == "example_yard"
-    assert loaded.home.x == pytest.approx(2.0)
+    assert loaded.home["x"] == pytest.approx(2.0)
     assert len(loaded.keep_in) == 4
     assert len(loaded.keep_out[0]) == 4
-    assert loaded.radio.primary == "lora"
-    assert loaded.radio.bluetooth is True
-    assert loaded.radio.wifi_enabled is False
-    assert loaded.radio.lora_enabled is True
-    assert loaded.schedule.days == ("mon", "wed", "fri")
-    assert loaded.to_geofence_spec().has_polygons()
+    assert loaded.radio["primary"] == "lora"
+    assert loaded.radio["bluetooth"] is True
+    assert loaded.radio["wifi"]["enabled"] is False
+    assert loaded.radio["lora"]["enabled"] is True
+    assert loaded.schedule["days"] == ["mon", "wed", "fri"]
+    assert loaded.geofence_spec().has_polygons()
 
 
 def test_validate_rejects_bad_schema() -> None:
@@ -51,9 +51,9 @@ def test_validate_polygons_and_paths() -> None:
     with pytest.raises(YardProfileError, match="3 vertices"):
         validate_yard_profile(bad)
     with pytest.raises(YardProfileError, match="relative"):
-        validate_yard_profile(dict(base, mesh_path="/abs/mesh.json"))
+        validate_yard_profile(dict(base, mesh="/abs/mesh.json"))
     with pytest.raises(YardProfileError, match="parent"):
-        validate_yard_profile(dict(base, mesh_path="../secret.json"))
+        validate_yard_profile(dict(base, mesh="../secret.json"))
 
 
 def test_validate_radio_and_schedule() -> None:
@@ -70,7 +70,7 @@ def test_from_geofence_and_survey() -> None:
     spec = GeofenceSpec(keep_in=[(0, 0), (4, 0), (4, 3), (0, 3)], keep_out=[[(1, 1), (2, 1), (2, 2), (1, 2)]])
     profile = yard_profile_from_geofence(spec, name="gf", width_m=5, height_m=4)
     assert profile.keep_in[0] == (0.0, 0.0)
-    assert profile.home.x == 0.0
+    assert profile.home["x"] == 0.0
     survey = {
         "schema": SURVEY_SCHEMA,
         "name": "surveyed",
@@ -86,6 +86,6 @@ def test_from_geofence_and_survey() -> None:
 def test_example_file_loads() -> None:
     repo = Path(__file__).resolve().parents[1] / "configs" / "yards" / "example_profile.json"
     profile = load_yard_profile(repo)
-    assert profile.mesh_path.endswith("example_yard.mesh.json")
+    assert profile.mesh in {"yard.glb", "maps/example_yard.mesh.json"} or profile.mesh.endswith(".glb")
     raw = json.loads(repo.read_text(encoding="utf-8"))
     assert validate_yard_profile(raw)["schema"] == YARD_PROFILE_SCHEMA

@@ -212,20 +212,11 @@
         <button class="btn ghost" id="stop">Stop</button>
       </div>
       <button class="btn ghost" id="ret">Return home</button>
-      <p style="margin-top:10px"><a class="linkish" id="ux-a" href="/#/map">2D map (UX-A mesh viewer not installed)</a></p>`;
+      <p style="margin-top:10px"><a class="linkish" id="ux-a" href="/viewer">Open UX-A mesh viewer</a></p>`;
     if (window.JimsViewer && state.yard) window.JimsViewer.drawYard($("#yard-svg"), state);
     $("#start").onclick = () => command("start");
     $("#stop").onclick = () => command("stop");
     $("#ret").onclick = () => command("return");
-    if (window.JimsViewer) {
-      window.JimsViewer.uxAAvailable().then((ok) => {
-        const a = $("#ux-a");
-        if (ok && a) {
-          a.href = window.JimsViewer.uxAHref;
-          a.textContent = "Open UX-A mesh viewer";
-        }
-      });
-    }
   }
 
   function renderHealth() {

@@ -13,19 +13,21 @@ from jims_mower.constants import (
     APP_COMMANDS,
     APP_STATUS_SCHEMA,
     COVERAGE_MAP_SCHEMA,
-    MESH_MAP_SCHEMA,
+    MESH_SCHEMA,
     SAFE_MODES,
+    VIEWER_SCHEMA,
 )
 from jims_mower.episode import EpisodeReader
 from jims_mower.geofence import allowed_xy
+from jims_mower.mesh import mesh_from_elevation, mesh_to_payload
+from jims_mower.profile import RadioPrefs
 from jims_mower.safe_state import SafeStateMachine
 from jims_mower.yard_profile import (
-    HomePose,
-    RadioPrefs,
     YardProfile,
     YardProfileError,
     default_yard_profile,
     load_yard_profile,
+    radio_prefs,
     save_yard_profile,
     yard_profile_from_geofence,
 )
@@ -46,7 +48,22 @@ def _pose_dict(x: float, y: float, theta: float) -> dict[str, float]:
     return {"x": float(x), "y": float(y), "theta": float(theta)}
 
 
-def _radio_status(radio: RadioPrefs, *, rssi: int = -88) -> dict[str, Any]:
+def _radio_status(radio: Any, *, rssi: int = -88) -> dict[str, Any]:
+    if not isinstance(radio, RadioPrefs):
+        raw = radio or {}
+        if isinstance(raw, YardProfile):
+            radio = radio_prefs(raw)
+        else:
+            wifi = raw.get("wifi") if isinstance(raw.get("wifi"), dict) else {}
+            lora = raw.get("lora") if isinstance(raw.get("lora"), dict) else {}
+            radio = RadioPrefs(
+                bluetooth=bool(raw.get("bluetooth", True)),
+                wifi_enabled=bool(wifi.get("enabled", False)),
+                wifi_ssid=str(wifi.get("ssid") or ""),
+                lora_enabled=bool(lora.get("enabled", True)),
+                lora_channel=int(lora.get("channel", 1)),
+                primary=str(raw.get("primary") or "lora"),
+            )
     primary = radio.primary
     if primary == "lora" and not radio.lora_enabled:
         primary = "bluetooth" if radio.bluetooth else "wifi"
@@ -102,47 +119,72 @@ def _coverage_payload(grid: np.ndarray, yard: YardProfile) -> dict[str, Any]:
     }
 
 
-def _mesh_from_grid(grid: np.ndarray, yard: YardProfile, *, path: str = "") -> dict[str, Any]:
-    small = _downsample(np.asarray(grid, dtype=np.float32), max_side=32)
-    rows, cols = small.shape
-    cells: list[list[int]] = []
-    for r in range(rows):
-        for c in range(cols):
-            if float(small[r, c]) >= 0.45:
-                cells.append([r, c])
+def _mesh_from_grid(
+    elev: Optional[np.ndarray],
+    yard: YardProfile,
+    *,
+    coverage: Optional[np.ndarray] = None,
+) -> dict[str, Any]:
+    rows = max(8, min(48, int(round(yard.height_m / max(yard.resolution_m, 0.2)))))
+    cols = max(8, min(48, int(round(yard.width_m / max(yard.resolution_m, 0.2)))))
+    if elev is None:
+        elev = np.zeros((rows, cols), dtype=np.float32)
+    else:
+        elev = np.asarray(elev, dtype=np.float32)
+        if elev.ndim != 2 or elev.size == 0:
+            elev = np.zeros((rows, cols), dtype=np.float32)
+    cov = None if coverage is None else np.asarray(coverage, dtype=np.float32)
+    mesh = mesh_from_elevation(
+        elev,
+        width_m=float(yard.width_m),
+        height_m=float(yard.height_m),
+        resolution_m=float(yard.resolution_m),
+        coverage=cov if cov is not None and cov.shape == elev.shape else None,
+        stride=max(1, int(max(elev.shape) / 24)),
+    )
+    payload = mesh_to_payload(mesh)
+    payload.update(
+        {
+            "schema": MESH_SCHEMA,
+            "path": yard.mesh,
+            "viewer": "/viewer",
+            "ux_a_href": "/viewer",
+            "note": "UX-A TerrainMesh payload (three.js World Viewer). No second WebGL stack.",
+            "not_slam": True,
+        }
+    )
+    return payload
+
+
+def viewer_manifest(backend: AppBackend) -> dict[str, Any]:
+    status = backend.status()
+    yard = backend.get_yard()
+    mesh = backend.mesh()
     return {
-        "schema": MESH_MAP_SCHEMA,
-        "path": path or yard.mesh_path,
-        "width_m": float(yard.width_m),
-        "height_m": float(yard.height_m),
-        "resolution_m": float(yard.width_m) / max(cols, 1),
-        "rows": int(rows),
-        "cols": int(cols),
-        "occupied": cells,
-        "viewer": "/#/map",
-        "ux_a_href": "/static/ux_a/index.html",
-        "note": "2D occupancy mesh stub. UX-A three.js viewer deep-links via ux_a_href when present.",
-        "not_slam": True,
+        "schema": VIEWER_SCHEMA,
+        "width_m": float(yard.get("width_m") or 16.0),
+        "height_m": float(yard.get("height_m") or 12.0),
+        "resolution_m": float(yard.get("resolution_m") or 0.20),
+        "mesh": None,
+        "mesh_json": "yard.json",
+        "maps": {},
+        "profile": "profile.json",
+        "poses": None,
+        "vertex_count": int(mesh.get("vertex_count") or 0),
+        "triangle_count": int(mesh.get("triangle_count") or 0),
+        "health": {
+            "placeholder": False,
+            "label": "battery",
+            "value": (status.get("battery") or {}).get("soc"),
+        },
+        "radio": {
+            "placeholder": False,
+            "label": (status.get("radio") or {}).get("link"),
+            "value": (status.get("radio") or {}).get("rssi"),
+        },
+        "not_a_benchmark": True,
+        "note": "Owner-app live bundle — same UX-A viewer_static / mesh payload.",
     }
-
-
-def _load_mesh_file(mesh_path: str, root: Optional[Path]) -> Optional[dict[str, Any]]:
-    if not mesh_path:
-        return None
-    candidates = [Path(mesh_path)]
-    if root is not None:
-        candidates.append(Path(root) / mesh_path)
-    for cand in candidates:
-        if cand.is_file():
-            import json
-
-            try:
-                data = json.loads(cand.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                return None
-            if isinstance(data, dict):
-                return data
-    return None
 
 
 class MemoryBackend:
@@ -157,7 +199,7 @@ class MemoryBackend:
         self._lock = threading.Lock()
         self.yard = yard or default_yard_profile()
         self.yard_path = Path(yard_path) if yard_path else None
-        self.pose = dict(self.yard.home.as_dict())
+        self.pose = dict(self.yard.home)
         self.mission = "idle"
         self.safe = SafeStateMachine()
         self.soc = 0.92
@@ -171,7 +213,7 @@ class MemoryBackend:
         self._paint_keepout()
 
     def _paint_keepout(self) -> None:
-        spec = self.yard.to_geofence_spec()
+        spec = self.yard.geofence_spec()
         rows, cols = self._coverage.shape
         res = self.yard.resolution_m
         for r in range(rows):
@@ -270,11 +312,7 @@ class MemoryBackend:
 
     def mesh(self) -> dict[str, Any]:
         with self._lock:
-            payload = _mesh_from_grid(self._occ, self.yard)
-            extra = _load_mesh_file(self.yard.mesh_path, self.yard_path.parent if self.yard_path else None)
-            if extra:
-                payload["file"] = extra
-            return payload
+            return _mesh_from_grid(None, self.yard, coverage=self._coverage)
 
     def coverage(self) -> dict[str, Any]:
         with self._lock:
@@ -288,7 +326,7 @@ class MemoryBackend:
                 self.pose["theta"] = float(self.pose["theta"])
                 self.pose["x"] = float(self.pose["x"]) + 0.18 * math.cos(self.pose["theta"])
                 self.pose["y"] = float(self.pose["y"]) + 0.18 * math.sin(self.pose["theta"])
-                spec = self.yard.to_geofence_spec()
+                spec = self.yard.geofence_spec()
                 if not allowed_xy(self.pose["x"], self.pose["y"], spec):
                     self.pose["theta"] += 0.65
                     self.pose["x"] = float(np.clip(self.pose["x"], 0.4, self.yard.width_m - 0.4))
@@ -299,11 +337,11 @@ class MemoryBackend:
                 self.soc = max(0.05, self.soc - 0.0008)
                 self.hours_mowed += 0.002
             elif self.mission == "returning":
-                hx, hy = self.yard.home.x, self.yard.home.y
+                hx, hy = float(self.yard.home.get("x", 1.0)), float(self.yard.home.get("y", 1.0))
                 dx, dy = hx - self.pose["x"], hy - self.pose["y"]
                 dist = math.hypot(dx, dy)
                 if dist < 0.25:
-                    self.pose = dict(self.yard.home.as_dict())
+                    self.pose = dict(self.yard.home)
                     self.mission = "idle"
                 else:
                     self.pose["theta"] = math.atan2(dy, dx)
@@ -348,11 +386,11 @@ class SimBackend:
             width_m=self.env.cfg.world.width_m,
             height_m=self.env.cfg.world.height_m,
             resolution_m=self.env.cfg.world.resolution_m,
-            home=HomePose(
-                x=float(self._info["pose"]["x"]),
-                y=float(self._info["pose"]["y"]),
-                theta=float(self._info["pose"]["theta"]),
-            ),
+            home={
+                "x": float(self._info["pose"]["x"]),
+                "y": float(self._info["pose"]["y"]),
+                "theta": float(self._info["pose"]["theta"]),
+            },
         )
         self.yard_path = Path(yard_path) if yard_path else None
         self.mission = "idle"
@@ -440,12 +478,8 @@ class SimBackend:
 
     def mesh(self) -> dict[str, Any]:
         with self._lock:
-            occ = np.asarray(self._obs.get("occupancy"), dtype=np.float32)
-            payload = _mesh_from_grid(occ, self.yard)
-            extra = _load_mesh_file(self.yard.mesh_path, self.yard_path.parent if self.yard_path else None)
-            if extra:
-                payload["file"] = extra
-            return payload
+            elev = getattr(getattr(self.env, "_terrain", None), "elevation", None)
+            return _mesh_from_grid(elev, self.yard, coverage=self._obs.get("coverage"))
 
     def coverage(self) -> dict[str, Any]:
         with self._lock:
@@ -458,7 +492,7 @@ class SimBackend:
                 return self._status_unlocked()
             if self.mission == "returning":
                 pose = self._info.get("pose") or {}
-                hx, hy = self.yard.home.x, self.yard.home.y
+                hx, hy = float(self.yard.home.get("x", 1.0)), float(self.yard.home.get("y", 1.0))
                 heading = math.atan2(hy - float(pose.get("y", 0.0)), hx - float(pose.get("x", 0.0)))
                 # Crude equal-speed creep toward home; planner still owns mowing.
                 action = np.array([0.35, 0.35, 0.0], dtype=np.float32)
@@ -472,7 +506,7 @@ class SimBackend:
             self.hours_mowed += float(self.env.cfg.dt) / 3600.0
             if self.mission == "returning":
                 pose = info.get("pose") or {}
-                if math.hypot(float(pose.get("x", 0.0)) - self.yard.home.x, float(pose.get("y", 0.0)) - self.yard.home.y) < 0.6:
+                if math.hypot(float(pose.get("x", 0.0)) - float(self.yard.home.get("x", 1.0)), float(pose.get("y", 0.0)) - float(self.yard.home.get("y", 1.0))) < 0.6:
                     self.mission = "idle"
             if terminated or truncated:
                 self.mission = "idle"
@@ -533,11 +567,11 @@ class EpisodeBackend:
             width_m=float(world.get("width_m") or 16.0),
             height_m=float(world.get("height_m") or 12.0),
             resolution_m=float(world.get("resolution_m") or 0.20),
-            home=HomePose(
-                x=float(pose.get("x", 1.0)),
-                y=float(pose.get("y", 1.0)),
-                theta=float(pose.get("theta", 0.0)),
-            ),
+            home={
+                "x": float(pose.get("x", 1.0)),
+                "y": float(pose.get("y", 1.0)),
+                "theta": float(pose.get("theta", 0.0)),
+            },
             keep_in=keep_in,
             keep_out=keep_out,
         )
@@ -625,8 +659,8 @@ class EpisodeBackend:
     def mesh(self) -> dict[str, Any]:
         with self._lock:
             obs = self._current().get("obs") or {}
-            occ = np.asarray(obs.get("occupancy") if obs.get("occupancy") is not None else np.zeros((8, 8)), dtype=np.float32)
-            return _mesh_from_grid(occ, self.yard)
+            elev = obs.get("elevation")
+            return _mesh_from_grid(elev, self.yard, coverage=obs.get("coverage"))
 
     def coverage(self) -> dict[str, Any]:
         with self._lock:

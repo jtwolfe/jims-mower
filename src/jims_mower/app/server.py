@@ -9,10 +9,9 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
-from jims_mower.app.backend import AppBackend
+from jims_mower.app.backend import AppBackend, viewer_manifest
+from jims_mower.viewer import static_dir as viewer_static_dir
 from jims_mower.yard_profile import YardProfileError, yard_profile_from_dict
-
-UX_A_VIEWER = "/static/ux_a/index.html"
 
 
 def static_dir() -> Path:
@@ -72,17 +71,6 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
             if dest.is_dir():
                 dest = dest / "index.html"
             if not dest.is_file():
-                # UX-A viewer is optional until that wave lands.
-                if rel.startswith("ux_a/"):
-                    self._send_json(
-                        404,
-                        {
-                            "error": "UX-A mesh viewer is not installed",
-                            "hint": "Deep-link /static/ux_a/index.html when the WAVE UX-A viewer lands; do not add a second three.js stack.",
-                            "fallback": "/#/map",
-                        },
-                    )
-                    return
                 self._send_json(404, {"error": "not found"})
                 return
             ctype = mimetypes.guess_type(dest.name)[0] or "application/octet-stream"
@@ -106,6 +94,24 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                     return
                 if path.startswith("/static/"):
                     self._serve_static(path)
+                    return
+                if path in {"/viewer", "/viewer/"}:
+                    self._serve_viewer_index()
+                    return
+                if path.startswith("/viewer/"):
+                    self._serve_viewer_asset(path[len("/viewer/") :])
+                    return
+                if path == "/api/manifest":
+                    self._send_json(200, viewer_manifest(backend))
+                    return
+                if path == "/api/profile":
+                    self._send_json(200, backend.get_yard())
+                    return
+                if path == "/data/profile.json":
+                    self._send_json(200, backend.get_yard())
+                    return
+                if path in {"/data/yard.json", "/data/yard.mesh.json"}:
+                    self._send_json(200, backend.mesh())
                     return
                 if path == "/status":
                     self._send_json(200, backend.status())
@@ -131,14 +137,6 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                 if path == "/healthz":
                     self._send_json(200, {"ok": True, "app": "jims-mower-app"})
                     return
-                if path == "/viewer":
-                    # Prefer UX-A when present; otherwise the 2D map shell.
-                    ux_a = (root / "ux_a" / "index.html")
-                    target = UX_A_VIEWER if ux_a.is_file() else "/#/map"
-                    self.send_response(302)
-                    self.send_header("Location", target)
-                    self.end_headers()
-                    return
                 self._send_json(404, {"error": "not found"})
             except YardProfileError as exc:
                 self._send_json(400, {"error": str(exc)})
@@ -149,7 +147,7 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
             parsed = urlparse(self.path)
             path = parsed.path.rstrip("/") or "/"
             try:
-                if path != "/yard":
+                if path not in {"/yard", "/api/profile"}:
                     self._send_json(404, {"error": "not found"})
                     return
                 profile = yard_profile_from_dict(self._read_json())
@@ -163,6 +161,11 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
             parsed = urlparse(self.path)
             path = parsed.path.rstrip("/") or "/"
             try:
+                if path == "/api/profile":
+                profile = yard_profile_from_dict(self._read_json())
+                saved = backend.put_yard(profile)
+                self._send_json(200, {"ok": True, "path": "profile.json", "profile": saved})
+                return
                 if path != "/command":
                     self._send_json(404, {"error": "not found"})
                     return
@@ -196,6 +199,31 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                     time.sleep(0.05 if limit > 0 else 0.4)
             except (BrokenPipeError, ConnectionResetError):
                 return
+
+        def _serve_viewer_index(self) -> None:
+            dest = viewer_static_dir() / "index.html"
+            html = dest.read_text(encoding="utf-8")
+            html = html.replace('href="/style.css"', 'href="/viewer/style.css"')
+            html = html.replace('src="/app.js"', 'src="/viewer/app.js"')
+            self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
+
+        def _serve_viewer_asset(self, rel: str) -> None:
+            rel = unquote(rel).lstrip("/")
+            dest = (viewer_static_dir() / rel).resolve()
+            try:
+                dest.relative_to(viewer_static_dir().resolve())
+            except ValueError:
+                self._send_json(403, {"error": "forbidden"})
+                return
+            if not dest.is_file():
+                self._send_json(404, {"error": "not found"})
+                return
+            ctype = mimetypes.guess_type(dest.name)[0] or "application/octet-stream"
+            if dest.suffix in {".js", ".mjs"}:
+                ctype = "text/javascript; charset=utf-8"
+            elif dest.suffix == ".css":
+                ctype = "text/css; charset=utf-8"
+            self._send(200, dest.read_bytes(), ctype)
 
     return AppHandler
 

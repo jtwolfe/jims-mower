@@ -31,17 +31,19 @@ Matches the radio profile: **Bluetooth pair required**, **Wi-Fi optional**,
 
 Hardware bring-up (flash, wiring, field RF) is still out of this repo.
 
-## YardProfile (`jims_mower.yard_profile.v1`)
+## YardProfile (`jims_mower.yard.v1`)
 
-JSON document. Load / save / validate in
-[`src/jims_mower/yard_profile.py`](../src/jims_mower/yard_profile.py).
+Same document as WAVE UX-A (`jims_mower.yard.v1` in
+[`src/jims_mower/profile.py`](../src/jims_mower/profile.py)). UX-C adds
+optional **radio** and **schedule** fields. Load / save / validate reject
+bad schema, short polygons, and parent-traversing `mesh` paths.
 
 | Field | Meaning |
 | --- | --- |
 | `home` | Dock / return pose `{x, y, theta}` metres / rad |
 | `keep_in` | Allowed work polygon (`[x, y]` vertices) |
 | `keep_out` | List of no-go polygons |
-| `mesh_path` | Relative path to a mesh JSON (no `..`, not absolute) |
+| `mesh` | Relative mesh path (`yard.glb` / JSON). Alias: `mesh_path` |
 | `radio` | `bluetooth`, `wifi.enabled` / `ssid`, `lora.enabled` / `channel`, `primary` |
 | `schedule` | Stub only: `days`, `start_local` (`HH:MM`), `duration_min` |
 | `width_m` / `height_m` / `resolution_m` | Local metre frame |
@@ -64,7 +66,9 @@ JSON in / JSON out. Same origin as the static shell.
 | `GET` | `/map/coverage` | downsampled cut/uncut raster |
 | `GET` | `/events` | SSE `data: <status>`; `?n=2` bounds the stream for tests |
 | `GET` | `/` | phone shell |
-| `GET` | `/viewer` | UX-A mesh viewer if present, else `#/map` |
+| `GET` | `/viewer` | UX-A World Viewer (`viewer_static` + CDN three.js) |
+| `GET` | `/api/manifest` | UX-A viewer.json-shaped live bundle |
+| `GET` / `POST` | `/api/profile` | same YardProfile as `/yard` |
 
 `POST /command` `start` after ESTOP is the operator clear.
 
@@ -78,18 +82,17 @@ Narrow phone chrome (~390 px). Hash routes:
 - `#/health` — battery, thermal, radios, hours, schedule stub
 - `#/fault` — ESTOP / SOS
 
-`viewer.js` draws the 2D map only. **Do not add three.js here.**
+`viewer.js` is a 2D SVG fallback for the phone chrome only. The three.js
+World Viewer is **UX-A** (`viewer_static/` + `mesh_to_payload`). The
+owner app serves those same assets at `/viewer` and `/data/yard.json`.
+Do not add a second WebGL stack.
 
-## Coordinate with UX-A
+## Reuse UX-A
 
-If a mesh viewer lands later, drop it at `app/static/ux_a/index.html`
-and reuse that stack. The shell already deep-links:
-
-- `GET /viewer`
-- map page `HEAD /static/ux_a/index.html`
-- `/map/mesh` → `ux_a_href`
-
-See [`src/jims_mower/app/static/ux_a/README.md`](../src/jims_mower/app/static/ux_a/README.md).
+- `GET /viewer` — rewritten `viewer_static/index.html` (CDN three.js)
+- `GET /api/manifest`, `GET|POST /api/profile`, `GET /data/yard.json`
+- `GET /map/mesh` — `jims_mower.mesh.v1` payload (`ux_a_href: /viewer`)
+- Map page link: “Open UX-A mesh viewer”
 
 ## CLI
 

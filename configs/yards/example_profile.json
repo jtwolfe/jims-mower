@@ -1,5 +1,5 @@
 {
-  "schema": "jims_mower.yard_profile.v1",
+  "schema": "jims_mower.yard.v1",
   "name": "example_yard",
   "description": "Default suburban-scale keep-in for the owner app.",
   "width_m": 16.0,
@@ -24,7 +24,7 @@
       [7.0, 7.0]
     ]
   ],
-  "mesh_path": "maps/example_yard.mesh.json",
+  "mesh": "yard.glb",
   "radio": {
     "bluetooth": true,
     "wifi": {

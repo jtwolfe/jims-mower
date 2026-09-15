@@ -1,7 +1,6 @@
-/* 2D yard viewer. WAVE UX-A may later drop a three.js mesh viewer at
-   /static/ux_a/index.html — deep-link that instead of adding a second WebGL stack. */
+/* 2D SVG fallback for the phone chrome. UX-A three.js lives at /viewer. */
 (function (global) {
-  const UX_A = "/static/ux_a/index.html";
+  const UX_A = "/viewer";
 
   function poly(points) {
     return points.map((p) => `${p[0]},${p[1]}`).join(" ");
