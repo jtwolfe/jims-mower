@@ -29,6 +29,18 @@ from jims_mower.viewer import write_viewer_bundle
 DEFAULT_STEPS = 6000
 FAST_STEPS = 420
 DEFAULT_CAM_STRIDE = 20
+FAST_SCENARIO = "mission_tiny"
+FAST_CAM_WIDTH = 32
+FAST_CAM_HEIGHT = 24
+
+
+def resolve_mission_config(config: Optional[Any], *, fast: bool) -> Optional[Any]:
+    """CLI and library callers share this: ``--fast`` defaults to mission_tiny."""
+    if not fast:
+        return config
+    if config is None or config == "golf_rough":
+        return FAST_SCENARIO
+    return config
 
 
 def _save_rgb(path: Path, image: np.ndarray) -> None:
@@ -80,10 +92,15 @@ def run_mission_demo(
     cam_stride: Optional[int] = None,
     snapshot_stride: Optional[int] = None,
 ) -> dict[str, Any]:
-    cfg, scenario = load_source(config)
+    cfg, scenario = load_source(resolve_mission_config(config, fast=fast))
     if cameras is not None:
         cfg.sensors.camera_count = cameras
         cfg.sensors.cameras = []
+    if fast:
+        # Match the unit-test yard: small RGB so CI finishes without a tip-over
+        # on the default 12×12 banks, and so camera stamping stays cheap.
+        cfg.sensors.width = min(int(cfg.sensors.width), FAST_CAM_WIDTH)
+        cfg.sensors.height = min(int(cfg.sensors.height), FAST_CAM_HEIGHT)
     n_steps = int(steps if steps is not None else (FAST_STEPS if fast else DEFAULT_STEPS))
     cfg.max_steps = max(int(cfg.max_steps), n_steps + 2)
     env = MowerEnv(config=cfg, scenario=scenario, render_mode="rgb_array")
@@ -268,7 +285,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Jim's Mower mission demo: calibrate → explore → map-ready → mow"
     )
     p.add_argument("--out", type=Path, default=Path("mission_out"))
-    p.add_argument("--config", type=str, default="golf_rough")
+    p.add_argument(
+        "--config",
+        type=str,
+        default="golf_rough",
+        help="scenario name or YAML (default golf_rough; --fast defaults to mission_tiny)",
+    )
     p.add_argument("--steps", type=int, default=None, help="episode budget (default 6000, or 420 with --fast)")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--cameras", type=int, default=4)
@@ -284,15 +306,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None) -> None:
     args = build_parser().parse_args(argv)
-    config = args.config
-    if args.fast and (config is None or config == "golf_rough"):
-        config = "mission_tiny"
     summary = run_mission_demo(
         args.out,
         steps=args.steps,
         seed=args.seed,
         cameras=args.cameras,
-        config=config,
+        config=resolve_mission_config(args.config, fast=args.fast),
         fast=args.fast,
         cam_stride=args.cam_stride,
         snapshot_stride=args.snapshot_stride,

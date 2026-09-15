@@ -15,8 +15,6 @@ import numpy as np
 
 from jims_mower.cameras import attitude_plane_hits, camera_world_pose
 from jims_mower.constants import (
-    GARDEN_RGB,
-    GREEN_RGB,
     HAZARD_DRAIN,
     HAZARD_DRAIN_EDGE,
     HAZARD_STEEP,
@@ -27,7 +25,7 @@ from jims_mower.constants import (
     STRUCTURE_NONE,
 )
 from jims_mower.geofence import GeofenceSpec, rasterize_geofence
-from jims_mower.perception.cv_terrain import classify_structure_rgb, classify_terrain_rgb
+from jims_mower.perception.cv_terrain import classify_structure_rgb
 from jims_mower.types import CameraSpec, Pose
 
 # Viewer / debug palette (unknown stays dark so the map visibly grows).
@@ -169,7 +167,7 @@ class ObservedMap:
             self.observed[rr, cc] = True
             self.confidence[rr, cc] = np.maximum(self.confidence[rr, cc], 0.55)
             added += int(fresh.sum())
-            self._stamp_semantics_pixels(pix, inside, ok, rr, cc)
+            self._stamp_structure_pixels(pix, inside, ok, rr, cc)
         return added
 
     def ingest_observer(
@@ -197,6 +195,15 @@ class ObservedMap:
             cv = np.asarray(conf, dtype=np.float32)
             if cv.shape == self.confidence.shape:
                 self.confidence[mask] = np.maximum(self.confidence[mask], cv[mask])
+        struct = obs.get("structure")
+        if struct is not None:
+            st = np.asarray(struct)
+            if st.shape == self.structure.shape:
+                # Only on cells we have seen — do not copy authored god-view
+                # structure into unknown space.
+                self.structure[mask] = np.maximum(
+                    self.structure[mask], st[mask].astype(np.uint8)
+                )
         self.refresh_free()
 
     def refresh_free(self) -> None:
@@ -205,8 +212,10 @@ class ObservedMap:
             self.structure,
             (STRUCTURE_BUILDING, STRUCTURE_BUNKER, STRUCTURE_GARDEN, STRUCTURE_GREEN),
         )
-        drain = self.hazard >= HAZARD_DRAIN_EDGE
-        self.free = self.observed & ~hard & ~drain
+        # Channels are forbidden. Isolated lip stamps from the colour
+        # heuristic are not a ditch — the costmap can still slow them.
+        channel = self.hazard >= HAZARD_DRAIN
+        self.free = self.observed & ~hard & ~channel
 
     def keep_in_mask(self, spec: Optional[GeofenceSpec]) -> np.ndarray:
         if spec is None or not spec.has_polygons():
@@ -246,7 +255,7 @@ class ObservedMap:
             self.structure,
             (STRUCTURE_BUILDING, STRUCTURE_BUNKER, STRUCTURE_GARDEN, STRUCTURE_GREEN),
         )
-        blocked = blocked | hard | (self.hazard >= HAZARD_DRAIN_EDGE)
+        blocked = blocked | hard | (self.hazard >= HAZARD_DRAIN)
         if keep_in is not None:
             blocked = blocked | ~np.asarray(keep_in, dtype=bool)
         return blocked
@@ -300,7 +309,7 @@ class ObservedMap:
             return np.array([], dtype=int), np.array([], dtype=int)
         return np.asarray(rows, dtype=int), np.asarray(cols, dtype=int)
 
-    def _stamp_semantics_pixels(
+    def _stamp_structure_pixels(
         self,
         pix: np.ndarray,
         inside: np.ndarray,
@@ -308,44 +317,11 @@ class ObservedMap:
         rr: np.ndarray,
         cc: np.ndarray,
     ) -> None:
-        hazard_lab = classify_terrain_rgb(pix)
+        """Path / bunker colour only. Hazard comes from the gated observer."""
         struct_lab = classify_structure_rgb(pix)
-        extra = _classify_hard_structures(pix)
-        struct_lab = np.maximum(struct_lab, extra)
-        hz = hazard_lab[inside][ok].astype(np.float32)
         st = struct_lab[inside][ok].astype(np.uint8)
-        self.hazard[rr, cc] = np.maximum(self.hazard[rr, cc], hz)
         self.structure[rr, cc] = np.maximum(self.structure[rr, cc], st)
         self.refresh_free()
-
-
-def _classify_hard_structures(image: np.ndarray) -> np.ndarray:
-    """Building / bed / green colour cues for the mission layer only."""
-    r = image[:, :, 0].astype(np.int16)
-    g = image[:, :, 1].astype(np.int16)
-    b = image[:, :, 2].astype(np.int16)
-    chroma = np.maximum(np.maximum(np.abs(r - g), np.abs(g - b)), np.abs(r - b))
-    value = (r.astype(np.int32) + g.astype(np.int32) + b.astype(np.int32)) // 3
-    labels = np.zeros(image.shape[:2], dtype=np.uint8)
-    building = (chroma < 16) & (value > 70) & (value < 110)
-    labels[building] = STRUCTURE_BUILDING
-    garden = (
-        (np.abs(r - GARDEN_RGB[0]) < 28)
-        & (np.abs(g - GARDEN_RGB[1]) < 28)
-        & (g > r + 8)
-        & (g > b)
-        & (value < 120)
-    )
-    labels[garden] = STRUCTURE_GARDEN
-    green = (
-        (np.abs(r - GREEN_RGB[0]) < 22)
-        & (np.abs(g - GREEN_RGB[1]) < 22)
-        & (g > r + 40)
-        & (g > b + 20)
-        & (value < 140)
-    )
-    labels[green] = STRUCTURE_GREEN
-    return labels
 
 
 def frontiers(

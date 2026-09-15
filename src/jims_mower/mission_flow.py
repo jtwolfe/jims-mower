@@ -134,7 +134,7 @@ class MissionPolicy:
             self.settings = _fast_settings(self.settings)
         self.fusion = make_pose_filter(cfg)
         self.safe = SafeStateMachine.from_config(cfg.planner.safe_state)
-        self.teach = TeachPolicy(cfg, margin_m=0.70, arrive_m=0.50, cruise=0.90)
+        self.teach = TeachPolicy(cfg, margin_m=0.70, arrive_m=0.55, cruise=0.75)
         self.observed: Optional[ObservedMap] = None
         self.phase = MissionPhase.CALIBRATE_BOUNDARY
         self.events: list[MissionEvent] = []
@@ -202,6 +202,7 @@ class MissionPolicy:
         self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
         self.teach.spec = self._geofence
         self.teach.reset(obs, info)
+        self._inset_teach_ring(0.55)
         self._home = pose
         self.phase = MissionPhase.CALIBRATE_BOUNDARY
         self.events = []
@@ -257,7 +258,11 @@ class MissionPolicy:
         signal = observed_hand_signal(obs, self.cfg.curriculum.hand_signals)
         if signal == "stop":
             return self._finish(self._hold(), "stop", info)
-        if advice == "stop" and self.phase not in {MissionPhase.REVIEW, MissionPhase.COMPLETE}:
+        if advice == "stop" and self.phase not in {
+            MissionPhase.REVIEW,
+            MissionPhase.COMPLETE,
+            MissionPhase.CALIBRATE_BOUNDARY,
+        }:
             return self._finish(self._hold(), advice, info)
 
         if self.phase == MissionPhase.CALIBRATE_BOUNDARY:
@@ -354,14 +359,18 @@ class MissionPolicy:
             pose_pitch=pose_hint.pitch,
             pose_roll=pose_hint.roll,
         )
-        advice = combine_advice(
-            env_advice,
-            sensed,
-            chassis,
-            str(info.get("living_advice") or "ok"),
-            str(info.get("geofence_advice") or "ok"),
-            budget_advice(info),
-        )
+        living = str(info.get("living_advice") or "ok")
+        fence = str(info.get("geofence_advice") or "ok")
+        power = budget_advice(info)
+        if self.phase == MissionPhase.CALIBRATE_BOUNDARY:
+            # Tracing an inset keep-in: fence/living chatter must not abort the lap.
+            advice = combine_advice(env_advice, sensed, chassis, power)
+        elif self.phase == MissionPhase.EXPLORE:
+            if fence == "stop":
+                fence = "slow"
+            advice = combine_advice(env_advice, sensed, chassis, living, fence, power)
+        else:
+            advice = combine_advice(env_advice, sensed, chassis, living, fence, power)
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
         return advice
@@ -606,9 +615,10 @@ class MissionPolicy:
         keep = snap.keep_in_mask if snap is not None else self.keep_in_mask
         extra = self.observed.unknown_blocked(keep)
         structure = self.observed.structure if snap is None else snap.structure
-        hazard = self.observed.hazard if snap is None else snap.hazard
+        raw_hazard = self.observed.hazard if snap is None else snap.hazard
+        conf = self.observed.confidence if snap is None else snap.confidence
+        hazard = _control_hazard(raw_hazard, conf)
         elevation = self.observed.elevation if snap is None else snap.elevation
-        confidence = self.observed.confidence if snap is None else snap.confidence
         slope = _slope_from_elevation(elevation, self.cfg.world.resolution_m)
         costmap = build_costmap(
             hazard,
@@ -622,7 +632,7 @@ class MissionPolicy:
             occupancy_inflate_m=self.cfg.planner.occupancy_inflate_m,
             margin_m=self.cfg.robot.collision_radius_m,
             extra_blocked=extra,
-            confidence=confidence,
+            confidence=conf,
             uncertainty_inflate=self.cfg.planner.uncertainty.inflate,
             uncertain_hazard_boost=self.cfg.planner.uncertainty.hazard_boost,
             uncertain_confidence_floor=self.cfg.planner.uncertainty.confidence_floor,
@@ -805,7 +815,23 @@ class MissionPolicy:
             help_requested=self.help_requested,
         )
         self.last_safe_mode = self.safe.mode
-        if self.safe.mode in {"estop", "safe"} and self.phase not in {
+        if self.safe.mode == "estop" and self.phase not in {
+            MissionPhase.COMPLETE,
+            MissionPhase.FAULT,
+            MissionPhase.SAFE,
+        }:
+            self._transition(MissionPhase.SAFE)
+        elif (
+            self.safe.mode == "safe"
+            and self.phase in {MissionPhase.CALIBRATE_BOUNDARY, MissionPhase.EXPLORE, MissionPhase.MOW}
+            and not self.help_requested
+            and not bool(info.get("tipover"))
+            and not bool(info.get("drain_drop"))
+        ):
+            # Mapping near a fence or tree must not retire the job.
+            self.safe.clear_if_not_estop()
+            self.last_safe_mode = self.safe.mode
+        elif self.safe.mode == "safe" and self.phase not in {
             MissionPhase.COMPLETE,
             MissionPhase.FAULT,
             MissionPhase.SAFE,
@@ -844,6 +870,15 @@ class MissionPolicy:
         self.events.append(
             MissionEvent(step=self.step, phase=self.phase.value, event=event, detail=detail or {})
         )
+
+    def _inset_teach_ring(self, margin_m: float) -> None:
+        ring = list(self.teach.waypoints)
+        if len(ring) >= 2 and math.hypot(ring[0][0] - ring[-1][0], ring[0][1] - ring[-1][1]) < 1e-6:
+            ring = ring[:-1]
+        inset = _inset_polygon(ring, margin_m)
+        if len(inset) >= 3:
+            self.teach.waypoints = inset + [inset[0]]
+            self.teach.index = 0
 
     def close_phase_ranges(self) -> list[dict[str, Any]]:
         if self.phase_ranges and self.phase_ranges[-1].get("end") is None:
@@ -884,10 +919,40 @@ def _ring_closed(
     return False
 
 
+def _control_hazard(hazard: np.ndarray, confidence: np.ndarray) -> np.ndarray:
+    """Keep real channels; drop low-confidence colour-heuristic lips."""
+    from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE
+
+    hz = np.asarray(hazard, dtype=np.float32).copy()
+    conf = np.asarray(confidence, dtype=np.float32)
+    lips = (hz >= HAZARD_DRAIN_EDGE) & (hz < HAZARD_DRAIN)
+    if conf.shape == hz.shape:
+        hz[lips & (conf < 0.85)] = 0.0
+    return hz
+
+
 def _slope_from_elevation(elevation: np.ndarray, resolution_m: float) -> np.ndarray:
     res = max(float(resolution_m), 1e-6)
     gy, gx = np.gradient(np.asarray(elevation, dtype=np.float32), res)
     return np.arctan(np.hypot(gx, gy)).astype(np.float32)
+
+
+def _inset_polygon(ring: list[tuple[float, float]], margin_m: float) -> list[tuple[float, float]]:
+    """Move vertices toward the centroid so the teach lap stays inside keep-in."""
+    if len(ring) < 3 or margin_m <= 0.0:
+        return list(ring)
+    cx = sum(p[0] for p in ring) / len(ring)
+    cy = sum(p[1] for p in ring) / len(ring)
+    out: list[tuple[float, float]] = []
+    for x, y in ring:
+        dx, dy = cx - x, cy - y
+        dist = math.hypot(dx, dy)
+        if dist < 1e-6:
+            out.append((x, y))
+            continue
+        step = min(float(margin_m), 0.45 * dist)
+        out.append((x + step * dx / dist, y + step * dy / dist))
+    return out
 
 
 def _pose_from_obs(obs: dict[str, Any], info: dict[str, Any]) -> Pose:

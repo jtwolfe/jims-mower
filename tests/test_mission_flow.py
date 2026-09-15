@@ -157,6 +157,7 @@ def test_tiny_mission_reaches_mow_or_complete(tmp_path: Path) -> None:
 
     out = tmp_path / "mission_fast"
     summary = run_mission_demo(out, fast=True, seed=3, cameras=4, steps=360, cam_stride=80, snapshot_stride=30)
+    assert summary.get("scenario") == "mission_tiny"
     phases = [r["phase"] for r in summary.get("phase_ranges") or []]
     assert "calibrate_boundary" in phases
     assert "explore" in phases
@@ -174,8 +175,11 @@ def test_tiny_mission_reaches_mow_or_complete(tmp_path: Path) -> None:
 
 
 def test_mission_cli_help() -> None:
-    from jims_mower.mission_demo import build_parser
+    from jims_mower.mission_demo import build_parser, resolve_mission_config
 
     text = build_parser().format_help()
     assert "--fast" in text
     assert "golf_rough" in text
+    assert resolve_mission_config(None, fast=True) == "mission_tiny"
+    assert resolve_mission_config("golf_rough", fast=True) == "mission_tiny"
+    assert resolve_mission_config("golf_rough", fast=False) == "golf_rough"
