@@ -148,6 +148,7 @@ class TerrainPolicy:
         self._height_m = cfg.world.height_m
         self._resolution_m = cfg.world.resolution_m
         self._drain_cells = 0
+        self._hazard_replan_cool = 0
         self._occ_cells = 0
         self._geofence = GeofenceSpec()
         self._stop_streak = 0
@@ -179,6 +180,7 @@ class TerrainPolicy:
         self._last_omega = 0.0
         self.replans = 0
         self._reroute_cool = 0
+        self._hazard_replan_cool = 0
         self.last_advice = "ok"
         self._geofence = geofence_from_info(info, self.cfg)
         self._stop_streak = 0
@@ -469,9 +471,13 @@ class TerrainPolicy:
 
     def _maybe_replan_new_hazards(self, obs: dict[str, Any], pose: Pose) -> None:
         """Rebuild the coverage path when the vision map grows new lips/channels."""
+        if self._hazard_replan_cool > 0:
+            self._hazard_replan_cool -= 1
         n = _drain_cell_count(obs.get("hazard"))
-        if n >= self._drain_cells + 6 and self.replans < self.cfg.planner.max_replans:
+        grew = n >= self._drain_cells + 12
+        if grew and self._hazard_replan_cool <= 0 and self.replans < self.cfg.planner.max_replans:
             self._replan(obs, pose, extra_blocked=None)
+            self._hazard_replan_cool = 8
         self._drain_cells = max(self._drain_cells, n)
 
     def _handle_reroute(self, obs: dict[str, Any], pose: Pose) -> None:

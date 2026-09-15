@@ -47,19 +47,19 @@ def classify_terrain_rgb(image: np.ndarray) -> np.ndarray:
     # (DRAIN_RGB ≈ 58,42,28 plus extra darkening by depth). Lip is the
     # lighter brown (DRAIN_EDGE_RGB ≈ 86,62,40).
     brown = (
-        (r > g + 4)
+        (r > g + 2)
         & (g >= b - 4)
-        & (r > 32)
-        & (r < 118)
-        & (g < 88)
-        & (b < 72)
-        & (value < 250)
-        & (r - b > 16)
-        & (r - g > 10)
+        & (r > 30)
+        & (r < 124)
+        & (g < 94)
+        & (b < 78)
+        & (value < 260)
+        & (r - b > 12)
+        & (r - g > 6)
         & ~sky
         & ~hot
     )
-    channel = brown & (value < 175) & (r < 92) & (g < 68)
+    channel = brown & (value < 178) & (r < 94) & (g < 70)
     lip = brown & ~channel
 
     # Banks are olive: green-dominant but a higher R/G than uncut grass
@@ -241,7 +241,7 @@ def project_labels_to_maps(
         return 0
     rr, cc, lab, rng_v = rr[inb], cc[inb], lab[inb], rng_v[inb]
     # Far pixels cover more yard; stamp a disk that grows with range.
-    radii = np.clip(np.ceil((0.08 + 0.022 * rng_v) / max(resolution_m, 1e-6)), 1, 3).astype(np.int32)
+    radii = np.clip(np.ceil((0.10 + 0.028 * rng_v) / max(resolution_m, 1e-6)), 1, 5).astype(np.int32)
     lip_only = lab < HAZARD_DRAIN
     radii = np.where(lip_only, np.minimum(radii, 2), radii).astype(np.int32)
     # Collapse duplicate cells so a full frame is not a Python loop per pixel.
