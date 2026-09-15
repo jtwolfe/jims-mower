@@ -9,6 +9,7 @@ from typing import Optional
 import numpy as np
 
 from jims_mower.constants import (
+    ALL_KINDS,
     CUTTER_RISK_KINDS,
     DEFAULT_HEIGHTS,
     DEFAULT_RADII,
@@ -129,6 +130,36 @@ def _counts_from_mapping(counts: dict[str, int]) -> dict[str, int]:
     }
 
 
+def place_obstacle(
+    kind: str,
+    x: float,
+    y: float,
+    *,
+    radius: Optional[float] = None,
+    heading: float = 0.0,
+    name: str = "",
+    z: Optional[float] = None,
+) -> Obstacle:
+    """Place one authored obstacle (scenario DSL)."""
+    if kind not in ALL_KINDS:
+        raise ValueError(f"Unknown obstacle kind {kind!r}")
+    obst = Obstacle(
+        kind=kind,
+        x=float(x),
+        y=float(y),
+        radius=float(radius if radius is not None else DEFAULT_RADII[kind]),
+        z=float(z if z is not None else DEFAULT_HEIGHTS[kind]),
+        vx=0.0,
+        vy=0.0,
+        heading=float(heading),
+        name=name or kind,
+    )
+    if kind in CUTTER_RISK_KINDS:
+        obst.soft = True
+        obst.cutter_risk = True
+    return obst
+
+
 def spawn_yard(
     rng: np.random.Generator,
     width_m: float,
@@ -140,11 +171,15 @@ def spawn_yard(
     layout: str = "random",
     orchard_rows: int = 3,
     orchard_cols: int = 4,
+    explicit: Optional[list[Obstacle]] = None,
 ) -> Yard:
     yard = Yard(width_m=width_m, height_m=height_m)
     keepout = [robot_keepout]
     if extra_keepout:
         keepout.extend(extra_keepout)
+    for obst in explicit or []:
+        yard.obstacles.append(obst)
+        keepout.append((obst.x, obst.y, obst.radius))
     resolved = _counts_from_mapping(counts)
     if layout == "orchard":
         _place_orchard_trees(yard, keepout, orchard_rows, orchard_cols)

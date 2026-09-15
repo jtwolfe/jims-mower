@@ -1,0 +1,32 @@
+# Wet swale after rain — puddles as temporary hazards, wet-grass hint.
+world:
+  layout: swale
+  width_m: 13.0
+  height_m: 11.0
+  resolution_m: 0.10
+  n_people: 0
+  n_dogs: 1
+  n_cats: 0
+  n_birds: 0
+  n_trees: 2
+  n_furniture: 0
+  n_toys: 0
+  n_hoses: 1
+  n_cords: 0
+  n_puddles: 6
+  terrain:
+    enabled: true
+    n_drains: 1
+    n_banks: 0
+    drain_width_m: 0.75
+    drain_depth_m: 0.18
+    drain_length_m: 8.0
+    drain_side_slope: 1.2
+    puddle_radius_m: 0.50
+    puddle_depth_m: 0.045
+    noise_amp_m: 0.014
+weather:
+  pack: rain
+domain_randomization:
+  enabled: false
+  wet_specular: true

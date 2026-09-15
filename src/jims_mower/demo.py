@@ -11,11 +11,12 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
-from jims_mower.config import load_config
+from jims_mower.bev import render_bev
 from jims_mower.env import MowerEnv
 from jims_mower.kinematics import sit_on_terrain, trimmer_xy
 from jims_mower.planning import TerrainPolicy
 from jims_mower.renderer import render_camera, render_topdown
+from jims_mower.scenarios import load_source
 from jims_mower.types import Pose
 
 POLICIES = ("terrain", "scripted", "random")
@@ -107,7 +108,7 @@ def run_demo(
     name = (policy or "terrain").strip().lower()
     if name not in POLICIES:
         raise ValueError(f"policy must be one of {POLICIES}; got {policy!r}")
-    cfg = load_config(config)
+    cfg, scenario = load_source(config)
     if cameras is not None:
         cfg.sensors.camera_count = cameras
         cfg.sensors.cameras = []
@@ -118,7 +119,12 @@ def run_demo(
                 f"terrain_observer must be oracle|heuristic|blind; got {terrain_observer!r}"
             )
         cfg.perception.terrain_mode = key
-    env = MowerEnv(config=cfg, render_mode="rgb_array", hand_signals=hand_signals)
+    env = MowerEnv(
+        config=cfg,
+        scenario=scenario,
+        render_mode="rgb_array",
+        hand_signals=hand_signals,
+    )
     obs, info = env.reset(seed=seed)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +147,17 @@ def run_demo(
         if topdown is not None:
             _save_rgb(step_dir / "topdown.png", topdown)
         _save_rgb(step_dir / "plan_overlay.png", _plan_overlay(env, terrain_policy))
+        _save_rgb(
+            step_dir / "bev.png",
+            render_bev(
+                env,
+                obs,
+                waypoints=terrain_policy.waypoints if terrain_policy else [],
+                waypoint_index=terrain_policy.index if terrain_policy else 0,
+                costmap=terrain_policy.plan.costmap if terrain_policy and terrain_policy.plan else None,
+                cameras=obs["cameras"],
+            ),
+        )
         for layer, img in env.terrain_layer_images().items():
             _save_rgb(step_dir / f"{layer}.png", img)
         drain_view = _drain_camera_view(env)
@@ -221,6 +238,17 @@ def run_demo(
     if topdown is not None:
         _save_rgb(out_dir / "coverage_final.png", topdown)
     _save_rgb(out_dir / "plan_overlay_final.png", _plan_overlay(env, terrain_policy))
+    _save_rgb(
+        out_dir / "bev_final.png",
+        render_bev(
+            env,
+            obs,
+            waypoints=terrain_policy.waypoints if terrain_policy else [],
+            waypoint_index=terrain_policy.index if terrain_policy else 0,
+            costmap=terrain_policy.plan.costmap if terrain_policy and terrain_policy.plan else None,
+            cameras=obs.get("cameras"),
+        ),
+    )
     layers = env.terrain_layer_images()
     for layer, img in layers.items():
         _save_rgb(out_dir / f"{layer}_final.png", img)
@@ -265,7 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--cameras", type=int, default=None, help="4, 5, or 6")
     p.add_argument("--hand-signals", action="store_true")
-    p.add_argument("--config", type=str, default=None)
+    p.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Env YAML, scenario path, or bundled scenario name (suburban, …)",
+    )
     p.add_argument(
         "--policy",
         choices=POLICIES,

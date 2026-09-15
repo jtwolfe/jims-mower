@@ -1,4 +1,4 @@
-"""WAVE 1C scenario loaders and a couple of env resets."""
+"""WAVE 1C scenario loaders plus WAVE 1A DSL (geofence, weather, extras)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,21 @@ import pytest
 from jims_mower.config import ConfigError, load_config
 from jims_mower.constants import WORLD_LAYOUTS
 from jims_mower.env import MowerEnv
-from jims_mower.scenarios import list_scenarios, load_scenario, scenario_path
+from jims_mower.safety import in_yard, point_in_polygon
+from jims_mower.scenarios import (
+    ScenarioError,
+    list_scenarios,
+    load_dsl_scenario,
+    load_scenario,
+    load_source,
+    looks_like_scenario,
+    parse_scenario,
+    scenario_path,
+)
+from jims_mower.types import Pose
 
+ROOT = Path(__file__).resolve().parents[1]
+SCENARIO_DIR = ROOT / "configs" / "scenarios"
 
 REQUIRED = (
     "suburban",
@@ -23,6 +36,8 @@ REQUIRED = (
     "wet_swale",
     "night_porch",
 )
+
+DSL_EXTRAS = ("paddock", "night_dawn", "wet_slope")
 
 
 def _shrink(cfg):
@@ -37,6 +52,9 @@ def test_at_least_six_named_scenarios() -> None:
     names = list_scenarios()
     assert len(names) >= 6
     for name in REQUIRED:
+        assert name in names
+        assert scenario_path(name).is_file()
+    for name in DSL_EXTRAS:
         assert name in names
         assert scenario_path(name).is_file()
 
@@ -109,3 +127,139 @@ def test_terrace_and_kerb_structured_terrain() -> None:
     assert info["n_drains"] >= 1
     assert any(d.kind == "gutter" for d in kerb._terrain.drains)
     kerb.close()
+
+
+def test_bundled_dsl_scenarios_registered() -> None:
+    names = set(list_scenarios())
+    assert set(DSL_EXTRAS) <= names
+    assert "schema" not in names
+
+
+def test_each_dsl_scenario_loads() -> None:
+    for name in DSL_EXTRAS:
+        scn = load_dsl_scenario(name)
+        assert scn.name == name
+        assert scn.config.world.width_m > 0
+        env = MowerEnv(config=scn, render_mode=None)
+        obs, info = env.reset(seed=0)
+        assert "cameras" in obs
+        assert info["scenario"] == name
+        assert "weather" in info
+        env.close()
+
+
+def test_looks_like_scenario_vs_env_yaml() -> None:
+    assert looks_like_scenario({"kind": "scenario", "name": "x"})
+    assert looks_like_scenario({"name": "x", "weather": {"wet": True}})
+    assert not looks_like_scenario({"dt": 0.1, "sensors": {"camera_count": 4}})
+
+
+def test_load_source_env_yaml_unchanged() -> None:
+    cfg, scn = load_source(ROOT / "configs" / "steep_yard.yaml")
+    assert scn is None
+    assert cfg.world.terrain.n_drains >= 1
+
+
+def test_load_source_1c_suburban_is_envconfig() -> None:
+    cfg, scn = load_source("suburban")
+    assert scn is None
+    assert cfg.world.layout == "suburban"
+
+
+def test_explicit_drain_is_carved() -> None:
+    scn = load_dsl_scenario("paddock")
+    env = MowerEnv(config=scn, render_mode=None)
+    env.reset(seed=1)
+    assert len(env._terrain.drains) >= 1
+    labels = env.oracle_labels()
+    assert int((labels["hazard"] >= 2).sum()) > 0
+    env.close()
+
+
+def test_paddock_places_authored_trees() -> None:
+    scn = load_dsl_scenario("paddock")
+    trees = [o for o in scn.obstacles if o.kind == "tree"]
+    assert len(trees) >= 2
+    env = MowerEnv(config=scn, render_mode=None)
+    env.reset(seed=2)
+    kinds = [o.kind for o in env._yard.obstacles]
+    assert kinds.count("tree") >= 2
+    env.close()
+
+
+def test_rejects_bad_weather() -> None:
+    with pytest.raises(ScenarioError):
+        parse_scenario({"name": "x", "weather": {"lighting": "noon"}})
+    with pytest.raises(ScenarioError):
+        parse_scenario({"name": "x", "weather": {"night": True, "dawn": True}})
+
+
+def test_rejects_short_geofence() -> None:
+    with pytest.raises(ScenarioError):
+        parse_scenario({"name": "x", "geofence": [[0, 0], [1, 0]]})
+
+
+def test_rejects_unknown_obstacle() -> None:
+    with pytest.raises(ScenarioError):
+        parse_scenario({"name": "x", "obstacles": [{"kind": "dragon", "x": 1, "y": 1}]})
+
+
+def test_missing_name() -> None:
+    with pytest.raises(ScenarioError):
+        parse_scenario({"kind": "scenario", "weather": {"wet": True}})
+
+
+def test_geofence_point_in_polygon() -> None:
+    square = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    assert point_in_polygon(2.0, 2.0, square)
+    assert not point_in_polygon(5.0, 2.0, square)
+    pose = Pose(2.0, 2.0, 0.0)
+    assert in_yard(pose, 8.0, 8.0, 0.2, geofence=square)
+    assert not in_yard(Pose(6.0, 6.0, 0.0), 8.0, 8.0, 0.2, geofence=square)
+
+
+def test_dawn_cameras_darker_than_day() -> None:
+    base = {
+        "kind": "scenario",
+        "name": "lit",
+        "world": {
+            "width_m": 8.0,
+            "height_m": 8.0,
+            "resolution_m": 0.25,
+            "n_people": 0,
+            "n_dogs": 0,
+            "n_cats": 0,
+            "n_birds": 0,
+            "n_trees": 0,
+            "n_furniture": 0,
+            "n_toys": 0,
+            "terrain": {"enabled": False},
+        },
+        "sensors": {"width": 32, "height": 24, "camera_count": 4},
+    }
+    day = parse_scenario({**base, "weather": {"lighting": "day"}})
+    dawn = parse_scenario({**base, "weather": {"lighting": "dawn"}})
+    env_day = MowerEnv(config=day, render_mode=None)
+    env_dawn = MowerEnv(config=dawn, render_mode=None)
+    obs_day, _ = env_day.reset(seed=4)
+    obs_dawn, info_dawn = env_dawn.reset(seed=4)
+    assert info_dawn["weather"]["dawn"] is True
+    mean_day = float(np.mean(obs_day["cameras"]["front"]))
+    mean_dawn = float(np.mean(obs_dawn["cameras"]["front"]))
+    assert mean_dawn < mean_day * 0.85
+    env_day.close()
+    env_dawn.close()
+
+
+def test_wet_slope_flag() -> None:
+    scn = load_dsl_scenario("wet_slope")
+    assert scn.weather.wet is True
+    assert len(scn.banks) >= 1
+    _, info = MowerEnv(config=scn).reset(seed=3)
+    assert info["weather"]["wet"] is True
+
+
+def test_scenario_yaml_files_exist() -> None:
+    for name in list(REQUIRED) + list(DSL_EXTRAS):
+        assert (SCENARIO_DIR / f"{name}.yaml").is_file()
+    assert (SCENARIO_DIR / "schema.yaml").is_file()

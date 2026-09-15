@@ -1,0 +1,33 @@
+# jims-mower scenario DSL (WAVE 1A). Not loaded as a yard — documentation only.
+# Loader: jims_mower.scenarios.load_scenario / MowerEnv(config=<this file>)
+#
+# kind: scenario          required for detection (or name + weather/geofence/...)
+# name: <id>              required, used by the farm registry
+# description: <text>
+# base: default | steep_yard | path.yaml
+# weather:
+#   lighting: day | dawn | night     # or booleans night / dawn
+#   wet: false                       # surface flag (visual only in WAVE 1A)
+# geofence: [[x, y], ...]            # ≥3 vertices; omit for rectangular yard
+# drains:                            # explicit channels (metres)
+#   - {x0, y0, x1, y1, width_m, depth_m, side_slope}
+# banks:
+#   - {x0, y0, x1, y1, width_m, height_m}
+# obstacles:
+#   - {kind: tree|person|dog|cat|bird|furniture|toy, x, y, radius?, heading?}
+# world / robot / sensors / planner / perception / reward / env:
+#   same keys as EnvConfig (merged onto `base`)
+#
+# Random spawn counts still apply (world.n_trees, …) after explicit obstacles.
+# Set those counts to 0 when the authored list should be the only objects.
+
+kind: scenario
+name: _schema
+description: Annotated template — skipped by list_scenarios()
+weather:
+  lighting: day
+  wet: false
+geofence: []
+drains: []
+banks: []
+obstacles: []

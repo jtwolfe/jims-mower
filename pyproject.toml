@@ -35,6 +35,8 @@ dev = [
 
 [project.scripts]
 jims-mower-demo = "jims_mower.demo:main"
+jims-mower-export = "jims_mower.export:main"
+jims-mower-farm = "jims_mower.farm:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"
@@ -44,7 +46,7 @@ Repository = "https://github.com/jtwolfe/jims-mower"
 where = ["src"]
 
 [tool.setuptools.package-data]
-jims_mower = ["py.typed", "data/default.yaml"]
+jims_mower = ["py.typed", "data/default.yaml", "data/scenarios/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

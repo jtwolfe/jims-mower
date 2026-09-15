@@ -1,0 +1,45 @@
+kind: scenario
+name: wet_slope
+description: Wet-surface flag on a steeper banked yard with two drains.
+base: steep_yard
+weather:
+  lighting: day
+  wet: true
+geofence:
+  - [0.7, 0.7]
+  - [11.3, 0.7]
+  - [11.3, 11.3]
+  - [0.7, 11.3]
+world:
+  width_m: 12.0
+  height_m: 12.0
+  resolution_m: 0.10
+  n_people: 0
+  n_dogs: 0
+  n_cats: 0
+  n_birds: 0
+  n_trees: 1
+  n_furniture: 0
+  n_toys: 0
+  terrain:
+    enabled: true
+    n_drains: 0
+    n_banks: 0
+    max_slope_rad: 0.50
+    noise_amp_m: 0.018
+    keepout_m: 1.8
+drains:
+  - {x0: 2.5, y0: 3.0, x1: 8.5, y1: 3.8, width_m: 0.45, depth_m: 0.20, side_slope: 1.8}
+  - {x0: 4.0, y0: 8.0, x1: 10.0, y1: 8.4, width_m: 0.40, depth_m: 0.16, side_slope: 1.6}
+banks:
+  - {x0: 2.8, y0: 5.5, x1: 7.5, y1: 6.4, width_m: 1.7, height_m: 0.46}
+  - {x0: 6.0, y0: 9.5, x1: 10.2, y1: 10.2, width_m: 1.5, height_m: 0.40}
+obstacles:
+  - {kind: tree, x: 2.2, y: 10.2}
+perception:
+  terrain_mode: heuristic
+planner:
+  max_climb_slope_rad: 0.30
+  drain_clearance_m: 0.48
+  slow_speed_factor: 0.28
+  cruise_speed: 0.45

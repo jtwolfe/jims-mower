@@ -1,0 +1,42 @@
+kind: scenario
+name: paddock
+description: Open paddock — long irrigation swales, few trees, no toys.
+base: default
+weather:
+  lighting: day
+  wet: false
+geofence:
+  - [0.8, 0.8]
+  - [19.2, 0.8]
+  - [19.2, 15.2]
+  - [0.8, 15.2]
+world:
+  width_m: 20.0
+  height_m: 16.0
+  resolution_m: 0.12
+  n_people: 0
+  n_dogs: 0
+  n_cats: 0
+  n_birds: 0
+  n_trees: 2
+  n_furniture: 0
+  n_toys: 0
+  terrain:
+    enabled: true
+    n_drains: 0
+    n_banks: 0
+    noise_amp_m: 0.010
+    keepout_m: 1.8
+drains:
+  - {x0: 3.0, y0: 5.0, x1: 16.0, y1: 5.4, width_m: 0.45, depth_m: 0.18, side_slope: 1.6}
+  - {x0: 4.0, y0: 11.0, x1: 15.5, y1: 11.5, width_m: 0.40, depth_m: 0.14, side_slope: 1.4}
+banks:
+  - {x0: 6.0, y0: 2.5, x1: 12.0, y1: 3.2, width_m: 1.7, height_m: 0.28}
+obstacles:
+  - {kind: tree, x: 2.5, y: 13.5}
+  - {kind: tree, x: 17.5, y: 2.8}
+perception:
+  terrain_mode: heuristic
+planner:
+  strip_spacing_m: 0.32
+  cruise_speed: 0.58

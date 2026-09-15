@@ -131,16 +131,42 @@ def first_collision(
     return None
 
 
+def point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) -> bool:
+    """Ray-cast test. Vertices are (x, y) in metres. Degenerate poly → False."""
+    n = len(polygon)
+    if n < 3:
+        return False
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        intersects = ((yi > y) != (yj > y)) and (
+            x < (xj - xi) * (y - yi) / ((yj - yi) + 1e-12) + xi
+        )
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
 def in_yard(
     pose: Pose,
     width_m: float,
     height_m: float,
     collision_radius_m: float,
+    geofence: Optional[list[tuple[float, float]]] = None,
 ) -> bool:
-    return (
+    """True when the body center is inside the yard (and geofence, if given)."""
+    in_rect = (
         collision_radius_m <= pose.x <= width_m - collision_radius_m
         and collision_radius_m <= pose.y <= height_m - collision_radius_m
     )
+    if not in_rect:
+        return False
+    if geofence and len(geofence) >= 3:
+        return point_in_polygon(pose.x, pose.y, geofence)
+    return True
 
 
 @dataclass(frozen=True)
