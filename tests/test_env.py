@@ -11,12 +11,32 @@ from jims_mower.env import MowerEnv, encode_detections
 from jims_mower.perception import BlindDetector
 from jims_mower.types import Detection
 
-from tests.conftest import tiny_config_dict
+
+def _tiny_config() -> dict:
+    return {
+        "dt": 0.1,
+        "max_steps": 40,
+        "sensors": {"width": 32, "height": 24, "camera_count": 4, "fov_deg": 70.0},
+        "world": {
+            "width_m": 8.0,
+            "height_m": 8.0,
+            "resolution_m": 0.20,
+            "n_people": 1,
+            "n_dogs": 1,
+            "n_cats": 0,
+            "n_birds": 0,
+            "n_trees": 1,
+            "n_furniture": 0,
+            "n_toys": 1,
+        },
+        "robot": {
+            "trimmer": {"safety_radius_m": 1.2, "offset_m": 0.32, "radius_m": 0.16}
+        },
+    }
 
 
 def _env(**kwargs) -> MowerEnv:
-    cfg = tiny_config_dict()
-    return MowerEnv(config=cfg, **kwargs)
+    return MowerEnv(config=_tiny_config(), **kwargs)
 
 
 def test_reset_returns_obs_and_info() -> None:
@@ -92,7 +112,7 @@ def test_six_camera_default_config() -> None:
 def test_registered_gym_id() -> None:
     import gymnasium as gym
 
-    env = gym.make("jims_mower/Mower-v0", config=tiny_config_dict())
+    env = gym.make("jims_mower/Mower-v0", config=_tiny_config())
     obs, _ = env.reset(seed=4)
     assert "cameras" in obs
     env.close()
