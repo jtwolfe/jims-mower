@@ -22,8 +22,15 @@ git clone https://github.com/jtwolfe/jims-mower.git
 cd jims-mower
 python -m pip install -e ".[dev]"
 
-# Terrain-aware coverage (default). Writes PNG frames, maps, and a plan overlay.
+# Terrain-aware coverage (default). Heuristic CV maps, not god-view.
+# Writes PNG frames, observer maps, and a plan overlay.
 jims-mower-demo --steps 40 --out demo_out
+
+# Same path, explicit observer (YAML default is already heuristic):
+python -m jims_mower.demo --terrain-observer heuristic --out demo_cv
+
+# God-view maps for training / eval only:
+python -m jims_mower.demo --terrain-observer oracle --out demo_oracle
 
 # Steeper yard (more drains / banks):
 python -m jims_mower.demo --config configs/steep_yard.yaml --out demo_steep
@@ -81,8 +88,10 @@ These are **class recommendations**, not a shopping cart with fake benchmarks.
 
 **Do not** drop a full VIO/SLAM stack into this repo. On the robot, run your
 own fusion behind `TerrainObserver` (and a real `Detector`). The gym ships
-`OracleTerrainObserver` for training, `HeuristicTerrainObserver` (IMU + local
-blob + brown-pixel hint), and `BlindTerrainObserver`.
+`HeuristicTerrainObserver` (RGB colour + ground-plane back-projection + ToF
++ IMU; demo default), `OracleTerrainObserver` for training, and
+`BlindTerrainObserver` as the empty swap-in for a real segmentation / depth
+net.
 
 ## Terrain and recommended behaviour
 
@@ -108,13 +117,14 @@ Policy should treat `info["terrain_advice"]` as:
 | `stop` | Tip-over risk or a wheel already in the channel |
 
 Maps in the observation (`elevation`, `slope`, `hazard`) come from the
-pluggable terrain observer. Physics and reward always use the **true** height
-field.
+pluggable terrain observer. The demo default is the **heuristic CV**
+observer — not the god-view field. Physics and reward always use the
+**true** height field.
 
 The default demo policy (`--policy terrain`) **accounts for** those maps: it
 builds a costmap, plans a coverage path around channels / bank lips, and the
 controller slows, reroutes, or stops instead of applying scripted wheel
-speeds.
+speeds. When the heuristic map grows new lips, the planner replans.
 
 ## From detection to a wheel command
 
@@ -131,8 +141,11 @@ flowchart LR
 ```
 
 1. **Detect / estimate** — `TerrainObserver` fills `elevation`, `slope`, and
-   `hazard` (`0` free, `1` steep, `2` drain lip, `3` channel). Oracle in sim;
-   heuristic / your TensorRT head on the robot.
+   `hazard` (`0` free, `1` steep, `2` drain lip, `3` channel). Demo default
+   is the RGB+ToF heuristic (colour/geometry cues from the renderer’s ditch
+   shading, back-projected onto a ground plane). Oracle is training-only.
+   On the robot, replace the classifier + back-project with your
+   segmentation / depth head.
 2. **Costmap** — free = 1; steep below `planner.max_climb_slope_rad` = slow
    corridor; steeper than that, drain lips, and channels are blocked. Channels
    and lips are inflated by `planner.drain_clearance_m`. Occupancy (trees /
@@ -204,8 +217,10 @@ flowchart LR
   field; ground is shaded by slope (Lambert) and drain/bank labels so a CV
   hook can tell a ditch from flat grass. No OpenGL, no GUI.
 - **Perception** — `Detector` / `GrassObserver` / `TerrainObserver`
-  protocols. Sim default is `MockDetector` plus `OracleTerrainObserver`.
-  `BlindDetector` / `BlindTerrainObserver` are working empty stubs.
+  protocols. Sim default is `MockDetector` plus `HeuristicTerrainObserver`
+  (RGB drain/bank cues + ToF + IMU). `OracleTerrainObserver` is the
+  training god-view. `BlindDetector` / `BlindTerrainObserver` are working
+  empty stubs.
 - **Hand signals** — optional curriculum labels `stop`, `go`, `follow`,
   `back` on people. Off by default.
 
@@ -259,7 +274,9 @@ Terrain generation (`world.terrain`):
 Sensor noise (`sensors.imu` / `sensors.gps` / `sensors.tof`): white noise
 stds, IMU accel bias (drawn once per episode), GPS dropout probability.
 
-`perception.terrain_mode`: `oracle` (training), `heuristic`, or `blind`.
+`perception.terrain_mode`: `heuristic` (demo default), `oracle` (training
+god-view), or `blind` (empty stub). Override from the CLI with
+`--terrain-observer`.
 
 Coverage planner (`planner`):
 
@@ -304,6 +321,37 @@ and ignore `context.obstacles` (that field is sim-only). A real terrain head
 should implement `estimate(images, imu, gps, context) -> TerrainEstimate` and
 ignore `context.terrain` (also sim-only).
 
+## Camera → terrain maps → planner on an Orin Nano
+
+The gym already uses the same split you want on the robot. Swap the *heads*,
+keep the numpy maps and planner.
+
+```
+CSI / USB RGB  ─┐
+                ├─► TerrainObserver.estimate(images, imu, gps, ctx)
+downward ToF  ─┤         │
+IMU + GNSS    ─┘         ▼
+                  elevation / slope / hazard   (yard rasters)
+                             │
+                             ▼
+                  Costmap → boustrophedon + A* → zero-turn tracker
+```
+
+| Gym piece | On the Orin, replace with |
+| --- | --- |
+| `classify_terrain_rgb` (brown / olive palette) | A segmentation head (drain / lip / bank / grass). TensorRT INT8 is the usual path. Do **not** ship the palette heuristic as the production detector. |
+| `ground_hits` flat-plane back-projection | Camera extrinsics in YAML + a depth net, stereo, or ToF cloud. Same output: world XY cells to stamp. |
+| `stamp_tof_corners` | Real VL53L1X (or similar) ranges at the wheel corners. Same hook. |
+| IMU slope disk | Keep; fuse with the complementary filter / your EKF. |
+| `OracleTerrainObserver` | Training / eval only. Never run on-box. |
+| `BlindTerrainObserver` | Empty stub while you wire the net. Same `estimate(...)` contract. |
+| Costmap + planner + controller | Keep in-process. The rasters are small. |
+
+`HeuristicTerrainObserver` is a **working sim stand-in**: it is good enough
+that the coverage planner still goes around drains on `steep_yard` for the
+fixed seeds in `tests/test_heuristic_planner.py`. It is not a published
+detector. There are no mAP / FPS numbers here.
+
 ## Jetson Orin Nano notes
 
 This package is the **training / eval gym**, not the robot runtime.
@@ -318,8 +366,8 @@ This package is the **training / eval gym**, not the robot runtime.
   still emits the noisy measurements.
 - The numpy renderer is for the gym only. It will not run as the robot’s
   perception.
-- Memory budget on-device is the model, not this env. The mock / oracle path
-  is for laptops and CI.
+- Memory budget on-device is the model, not this env. The heuristic / mock
+  path is for laptops and CI; oracle is for training loops.
 - Enable `hand_signals` only when you are actually labeling or synthesizing
   that curriculum — it is optional.
 
@@ -331,12 +379,15 @@ pytest
 
 Unit tests cover kinematics (including zero-turn and slope attitude), drain
 and tip-over hazards, IMU/GPS observation shapes, the trimmer interlock,
-maps, camera math, the mock detector, terrain observers, the costmap and
-coverage planner (channels forbidden), the controller (slows on steep /
-stops on tip), the GPS+IMU pose stub, reward, the renderer’s non-flat
-shading and plan overlay, and the Gymnasium env checker. GitHub Actions
-runs the same suite headless on Python 3.10–3.12 plus a short terrain-policy
-demo smoke.
+maps, camera math, the mock detector, RGB terrain classification and
+back-projection, terrain observers (oracle / heuristic / blind), the
+costmap and coverage planner (channels forbidden), the controller (slows
+on steep / stops on tip / replans when the vision map grows), the GPS+IMU
+pose stub, reward, the renderer’s non-flat shading and plan overlay, the
+Gymnasium env checker, and heuristic+planner episodes on `steep_yard`
+(fixed seeds: no channel entry; coverage vs oracle is reported without a
+fake mAP). GitHub Actions runs the same suite headless on Python 3.10–3.12
+plus a short terrain-policy demo smoke (heuristic default).
 
 ## Layout
 

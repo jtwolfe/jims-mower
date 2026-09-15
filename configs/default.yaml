@@ -90,8 +90,9 @@ curriculum:
   signal_hold_steps: 40
 
 perception:
-  # oracle: god-view maps for training. blind / heuristic are onboard stubs.
-  terrain_mode: oracle
+  # heuristic: RGB + ToF drain/bank maps (demo default). oracle: god-view
+  # for training. blind: empty stub for a real onboard net.
+  terrain_mode: heuristic
 
 planner:
   # Coverage planner + controller. Steep below max_climb is a slow corridor;

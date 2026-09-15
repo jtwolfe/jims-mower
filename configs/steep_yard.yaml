@@ -85,7 +85,7 @@ curriculum:
   signal_hold_steps: 40
 
 perception:
-  terrain_mode: oracle
+  terrain_mode: heuristic
 
 planner:
   max_climb_slope_rad: 0.30

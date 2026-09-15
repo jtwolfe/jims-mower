@@ -288,6 +288,9 @@ class MowerEnv(gym.Env):
         self._last_omega = 0.0
         self._accel_bias = sample_accel_bias(self.np_random, self.cfg.sensors.imu.accel_bias_std)
         self._signals.assign(self._yard.obstacles, self.np_random)
+        reset_obs = getattr(self.terrain_observer, "reset", None)
+        if callable(reset_obs):
+            reset_obs()
         obs, info = self._observe()
         return obs, info
 
@@ -433,18 +436,21 @@ class MowerEnv(gym.Env):
         return images
 
     def terrain_layer_images(self) -> dict[str, np.ndarray]:
-        """False-color elevation / slope / hazard rasters for the demo."""
-        if self._terrain.slope is None:
-            self._terrain.recompute_slope()
-        hazard = (
-            self._last_terrain_est.hazard
-            if self._last_terrain_est is not None
-            else self._terrain.hazard_map(self.cfg.robot.steep_slope_rad)
-        )
-        assert self._terrain.slope is not None
+        """False-color elevation / slope / hazard rasters the policy sees."""
+        if self._last_terrain_est is not None:
+            elev = self._last_terrain_est.elevation
+            slope = self._last_terrain_est.slope
+            hazard = self._last_terrain_est.hazard
+        else:
+            if self._terrain.slope is None:
+                self._terrain.recompute_slope()
+            assert self._terrain.slope is not None
+            elev = self._terrain.elevation
+            slope = self._terrain.slope
+            hazard = self._terrain.hazard_map(self.cfg.robot.steep_slope_rad)
         return {
-            "elevation": render_scalar_map(self._terrain.elevation, cmap="elev"),
-            "slope": render_scalar_map(self._terrain.slope, vmin=0.0, vmax=0.7, cmap="slope"),
+            "elevation": render_scalar_map(elev, cmap="elev"),
+            "slope": render_scalar_map(slope, vmin=0.0, vmax=0.7, cmap="slope"),
             "hazard": render_scalar_map(hazard, vmin=0.0, vmax=3.0, cmap="hazard"),
         }
 
@@ -504,6 +510,10 @@ class MowerEnv(gym.Env):
             resolution_m=self.cfg.world.resolution_m,
             world_size=(self.cfg.world.width_m, self.cfg.world.height_m),
             steep_slope_rad=self.cfg.robot.steep_slope_rad,
+            tof=tof,
+            length_m=self.cfg.robot.length_m,
+            track_m=self.cfg.robot.track_m,
+            chassis_hover_m=0.06,
         )
         detections = self.detector.detect(images, context)
         self._last_detections = detections

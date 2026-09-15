@@ -97,3 +97,7 @@ class PerceptionContext:
     resolution_m: float = 0.10
     world_size: tuple[float, float] = (12.0, 12.0)
     steep_slope_rad: float = 0.30
+    tof: Optional[object] = None
+    length_m: float = 0.50
+    track_m: float = 0.40
+    chassis_hover_m: float = 0.06

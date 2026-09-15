@@ -112,7 +112,7 @@ def test_default_has_terrain_and_imu() -> None:
     assert cfg.world.terrain.n_drains >= 1
     assert cfg.sensors.imu.enabled is True
     assert cfg.sensors.gps.enabled is True
-    assert cfg.perception.terrain_mode == "oracle"
+    assert cfg.perception.terrain_mode == "heuristic"
 
 
 def test_rejects_bad_terrain_mode() -> None:

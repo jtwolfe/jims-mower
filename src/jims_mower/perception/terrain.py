@@ -1,14 +1,19 @@
-"""Pluggable terrain observers. Oracle for training; stubs for real fusion."""
+"""Pluggable terrain observers. Oracle for training; CV heuristic / blind stubs."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 import numpy as np
 
-from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN, HAZARD_STEEP
+from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN_EDGE, HAZARD_STEEP
+from jims_mower.perception.cv_terrain import (
+    classify_terrain_rgb,
+    project_labels_to_maps,
+    stamp_tof_corners,
+)
 from jims_mower.terrain import HeightField
 from jims_mower.types import PerceptionContext, Pose
 
@@ -48,6 +53,9 @@ def _empty_maps(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray, np.ndar
 class BlindTerrainObserver:
     """Working stub: no elevation, slope, or drain knowledge."""
 
+    def reset(self) -> None:
+        return None
+
     def estimate(
         self,
         images: dict[str, np.ndarray],
@@ -62,6 +70,9 @@ class BlindTerrainObserver:
 
 class OracleTerrainObserver:
     """God-view copy of the height field. For training loops, like MockDetector."""
+
+    def reset(self) -> None:
+        return None
 
     def estimate(
         self,
@@ -95,11 +106,41 @@ def _attitude_from_accel(imu: np.ndarray) -> tuple[float, float]:
 
 
 class HeuristicTerrainObserver:
-    """Cheap IMU + local blob stub. Not SLAM / VIO — replace on the Orin."""
+    """RGB + ToF drain/bank heuristic. Not a learned net — replace on the Orin.
 
-    def __init__(self, radius_m: float = 1.2, steep_rad: float = 0.30) -> None:
+    Colour cues match the gym renderer's ditch/bank palette. Pixels are
+    back-projected onto a flat-yard plane (the onboard approximation; this
+    class ignores ``context.terrain``). Downward ToF stamps a local wheel
+    drop. IMU paints a slope disk under the chassis. Maps persist for the
+    episode so the planner can replan as new lips enter the cameras.
+    """
+
+    def __init__(
+        self,
+        radius_m: float = 1.2,
+        steep_rad: float = 0.30,
+        max_range_m: float = 9.0,
+    ) -> None:
         self.radius_m = radius_m
         self.steep_rad = steep_rad
+        self.max_range_m = max_range_m
+        self._elevation: Optional[np.ndarray] = None
+        self._slope: Optional[np.ndarray] = None
+        self._hazard: Optional[np.ndarray] = None
+
+    def reset(self) -> None:
+        self._elevation = None
+        self._slope = None
+        self._hazard = None
+
+    def _ensure_maps(self, shape: tuple[int, int]) -> None:
+        if (
+            self._elevation is None
+            or self._elevation.shape != shape
+            or self._slope is None
+            or self._hazard is None
+        ):
+            self._elevation, self._slope, self._hazard = _empty_maps(shape)
 
     def estimate(
         self,
@@ -108,13 +149,81 @@ class HeuristicTerrainObserver:
         gps: np.ndarray,
         context: PerceptionContext,
     ) -> TerrainEstimate:
-        elev, slope, hazard = _empty_maps(context.map_shape)
+        # Intentionally unused: god-view height field is training-only.
+        _ = context.terrain
+        self._ensure_maps(context.map_shape)
+        assert self._elevation is not None and self._slope is not None and self._hazard is not None
         pose: Pose = context.pose
+        prev_hazard = self._hazard.copy()
+        cams = {c.name: c for c in context.cameras}
+        for name, frame in images.items():
+            cam = cams.get(name)
+            if cam is None or frame.ndim != 3:
+                continue
+            labels = classify_terrain_rgb(frame)
+            project_labels_to_maps(
+                frame,
+                labels,
+                cam,
+                pose,
+                elevation=self._elevation,
+                slope=self._slope,
+                hazard=self._hazard,
+                resolution_m=context.resolution_m,
+                world_size=context.world_size,
+                ground_z=0.0,
+                max_range_m=self.max_range_m,
+                steep_rad=max(self.steep_rad, context.steep_slope_rad),
+            )
+        self._grow_drain_gaps(prev_hazard)
+        tof = _tof_from_context(context)
+        if tof is not None:
+            stamp_tof_corners(
+                tof,
+                pose,
+                hazard=self._hazard,
+                elevation=self._elevation,
+                slope=self._slope,
+                resolution_m=context.resolution_m,
+                length_m=context.length_m,
+                track_m=context.track_m,
+                hover_m=context.chassis_hover_m,
+                steep_rad=max(self.steep_rad, context.steep_slope_rad),
+            )
+        self._paint_local_imu(imu, gps, context)
+        return TerrainEstimate(
+            self._elevation.copy(),
+            self._slope.copy(),
+            self._hazard.copy(),
+            source="heuristic",
+        )
+
+    def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
+        """One-cell grow on *new* lip/channel stamps so a broken stripe blocks."""
+        assert self._hazard is not None
+        fresh = (self._hazard >= HAZARD_DRAIN_EDGE) & (prev_hazard < HAZARD_DRAIN_EDGE)
+        if not np.any(fresh):
+            return
+        grown = fresh.copy()
+        grown[1:, :] |= fresh[:-1, :]
+        grown[:-1, :] |= fresh[1:, :]
+        grown[:, 1:] |= fresh[:, :-1]
+        grown[:, :-1] |= fresh[:, 1:]
+        promote = grown & (self._hazard < HAZARD_DRAIN_EDGE)
+        self._hazard[promote] = HAZARD_DRAIN_EDGE
+
+    def _paint_local_imu(
+        self,
+        imu: np.ndarray,
+        gps: np.ndarray,
+        context: PerceptionContext,
+    ) -> None:
+        assert self._elevation is not None and self._slope is not None and self._hazard is not None
+        pose = context.pose
         roll, pitch = _attitude_from_accel(np.asarray(imu, dtype=np.float32))
         slope_est = math.hypot(roll, pitch)
         rows, cols = context.map_shape
         res = context.resolution_m
-        # Local disk under the robot; GPS XY is used when the fix is valid.
         cx, cy = pose.x, pose.y
         if gps.size >= 4 and float(gps[3]) > 0.5:
             cx, cy = float(gps[0]), float(gps[1])
@@ -130,34 +239,27 @@ class HeuristicTerrainObserver:
                 wx = (col + 0.5) * res
                 if (wx - cx) ** 2 + (wy - cy) ** 2 > r2:
                     continue
-                slope[row, col] = slope_est
-                elev[row, col] = pose.z
+                self._slope[row, col] = max(float(self._slope[row, col]), slope_est)
+                if abs(float(self._elevation[row, col])) < 1e-6:
+                    self._elevation[row, col] = pose.z
                 if slope_est >= self.steep_rad:
-                    hazard[row, col] = HAZARD_STEEP
-        # Brown pixels in the cameras are a drain-lip hint, not a map.
-        if any(_looks_like_drain(frame) for frame in images.values()):
-            cell = (
-                int(np.clip(cy / res, 0, rows - 1)),
-                int(np.clip(cx / res, 0, cols - 1)),
-            )
-            hazard[cell] = max(float(hazard[cell]), float(HAZARD_DRAIN))
-        return TerrainEstimate(elev, slope, hazard, source="heuristic")
+                    self._hazard[row, col] = max(float(self._hazard[row, col]), float(HAZARD_STEEP))
 
 
-def _looks_like_drain(image: np.ndarray) -> bool:
-    if image.ndim != 3:
-        return False
-    r = image[:, :, 0].astype(np.int16)
-    g = image[:, :, 1].astype(np.int16)
-    b = image[:, :, 2].astype(np.int16)
-    brown = (r > 40) & (r < 110) & (g < r) & (b < g) & ((g + b) < 140)
-    return bool(brown.mean() > 0.04)
+def _tof_from_context(context: PerceptionContext) -> Optional[np.ndarray]:
+    raw = context.tof
+    if raw is None:
+        return None
+    arr = np.asarray(raw, dtype=np.float32).reshape(-1)
+    if arr.size < 4:
+        return None
+    return arr
 
 
 def terrain_observer_from_mode(mode: str) -> TerrainObserver:
-    key = (mode or "oracle").strip().lower()
+    key = (mode or "heuristic").strip().lower()
     if key == "blind":
         return BlindTerrainObserver()
-    if key == "heuristic":
-        return HeuristicTerrainObserver()
-    return OracleTerrainObserver()
+    if key == "oracle":
+        return OracleTerrainObserver()
+    return HeuristicTerrainObserver()
