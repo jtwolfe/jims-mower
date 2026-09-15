@@ -37,7 +37,15 @@ REQUIRED = (
     "night_porch",
 )
 
-DSL_EXTRAS = ("paddock", "night_dawn", "wet_slope", "gradient_yard", "golf_rough", "golf_fairway_snip")
+DSL_EXTRAS = (
+    "paddock",
+    "night_dawn",
+    "wet_slope",
+    "gradient_yard",
+    "golf_rough",
+    "golf_fairway_snip",
+    "mission_tiny",
+)
 
 
 def _shrink(cfg):

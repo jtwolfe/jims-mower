@@ -108,6 +108,31 @@ def test_mowable_mask_skips_non_grass() -> None:
     assert rows <= {4, 5} or any(r in {4, 5} for r in rows)
 
 
+def test_coverage_metrics_count_unreachable() -> None:
+    n = 20
+    res = 0.25
+    hazard = np.zeros((n, n), dtype=np.float32)
+    hazard[10, :] = HAZARD_DRAIN
+    cm = build_costmap(
+        hazard,
+        np.zeros_like(hazard),
+        resolution_m=res,
+        width_m=n * res,
+        height_m=n * res,
+        max_climb_slope_rad=0.3,
+        drain_clearance_m=0.25,
+        margin_m=0.25,
+    )
+    plan = plan_coverage(cm, (0.8, 0.8), strip_spacing_m=0.5, waypoint_stride_m=0.5)
+    metrics = plan.as_metrics()
+    assert metrics["planned_mowable_cells"] > 0
+    assert metrics["unreachable_mowable_cells"] > 0
+    assert (
+        metrics["reachable_mowable_cells"] + metrics["unreachable_mowable_cells"]
+        == metrics["planned_mowable_cells"]
+    )
+
+
 def test_empty_map_returns_start_only() -> None:
     hazard = np.ones((8, 8), dtype=np.float32) * HAZARD_DRAIN
     cm = build_costmap(

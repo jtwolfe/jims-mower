@@ -24,8 +24,17 @@
       <div class="chip muted" title="placeholder">health —</div>
       <div class="chip muted" title="placeholder">radio —</div>
       <div class="chip" id="mesh-chip">mesh —</div>
+      <div class="chip" id="phase-chip">phase —</div>
     </div>
   </header>
+  <div id="phase-bar" aria-label="mission phases">
+    <div class="phase-seg" data-phase="calibrate_boundary">CALIBRATE</div>
+    <div class="phase-seg" data-phase="explore">EXPLORE</div>
+    <div class="phase-seg" data-phase="review">MAP READY</div>
+    <div class="phase-seg" data-phase="mow">MOW</div>
+    <div class="phase-seg" data-phase="return_home">RETURN</div>
+    <div class="phase-seg" data-phase="complete">DONE</div>
+  </div>
 
   <main>
     <section id="stage">
@@ -45,11 +54,16 @@
       <label><input type="checkbox" id="tog-coverage"/> coverage paint</label>
       <label><input type="checkbox" id="tog-hazard"/> hazard</label>
       <label><input type="checkbox" id="tog-occupancy"/> occupancy</label>
+      <label><input type="checkbox" id="tog-observed" checked/> observed map (grows)</label>
       <label><input type="checkbox" id="tog-plan" checked/> plan overlay</label>
+      <label><input type="checkbox" id="tog-explore" checked/> explore route</label>
       <label><input type="checkbox" id="tog-pose" checked/> live / scrub pose</label>
       <label><input type="checkbox" id="tog-fence" checked/> geofence</label>
       <label><input type="checkbox" id="tog-trail"/> teach trail</label>
       <label><input type="checkbox" id="tog-error"/> observer vs true elev</label>
+
+      <h2>Mission</h2>
+      <div id="mission-metrics" class="metrics">map — · reachable — · cut —</div>
 
       <h2>Scrub</h2>
       <input type="range" id="scrub" min="0" max="0" value="0"/>

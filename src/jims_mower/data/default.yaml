@@ -145,6 +145,18 @@ planner:
   path_cost: 8.0
   bunker_cost: 12.0
 
+mission:
+  observe_confidence: 0.35
+  explore_complete: 0.80
+  explore_no_frontier: 0.55
+  stamp_radius_m: 1.35
+  camera_range_m: 6.0
+  max_calibrate_steps: 900
+  max_explore_steps: 2800
+  max_mow_steps: 5500
+  max_return_steps: 500
+  snapshot_stride: 25
+
 runtime:
   enabled: false
   battery:
