@@ -29,6 +29,8 @@ def test_viewer_static_assets_present() -> None:
     js = (root / "app.js").read_text(encoding="utf-8")
     assert "coverage" in js
     assert "keep_in" in js
+    # Viewer-only Y lift so a property-scale grade reads on a 12 m yard.
+    assert "scale.y" in js
 
 
 def test_demo_writes_viewer_bundle(tmp_path: Path) -> None:

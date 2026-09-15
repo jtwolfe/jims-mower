@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -117,6 +118,28 @@ class SensorsConfig:
 
 
 @dataclass
+class BaseGradientConfig:
+    """Yard-scale planar grade plus optional long-wavelength undulation.
+
+    ``slope_rad`` is the planar grade (atan of rise/run). ``yaw_rad`` is
+    the direction of *ascent* (elevation increases along this heading).
+    ``undulation_m`` is a gentle sine roll plus a weak quadratic dish.
+    ``slope_pct`` is an optional percent-grade alias (5.0 → ~5%); when
+    set it overrides ``slope_rad``.
+    """
+
+    slope_rad: float = 0.05
+    yaw_rad: float = 0.55
+    undulation_m: float = 0.04
+    slope_pct: Optional[float] = None
+
+    def effective_slope_rad(self) -> float:
+        if self.slope_pct is not None:
+            return math.atan(float(self.slope_pct) / 100.0)
+        return float(self.slope_rad)
+
+
+@dataclass
 class TerrainConfig:
     enabled: bool = True
     n_drains: int = 2
@@ -133,6 +156,7 @@ class TerrainConfig:
     keepout_m: float = 1.6
     puddle_radius_m: float = 0.45
     puddle_depth_m: float = 0.04
+    base_gradient: BaseGradientConfig = field(default_factory=BaseGradientConfig)
 
 
 @dataclass
@@ -526,6 +550,13 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("noise_amp_m must be >= 0")
     if terr.puddle_radius_m <= 0 or terr.puddle_depth_m < 0:
         raise ConfigError("puddle_radius_m must be > 0 and puddle_depth_m >= 0")
+    grad = terr.base_gradient
+    if not 0.0 <= float(grad.slope_rad) < 0.5 * math.pi:
+        raise ConfigError("base_gradient.slope_rad must be in [0, π/2)")
+    if float(grad.undulation_m) < 0:
+        raise ConfigError("base_gradient.undulation_m must be >= 0")
+    if grad.slope_pct is not None and float(grad.slope_pct) < 0:
+        raise ConfigError("base_gradient.slope_pct must be >= 0")
     if cfg.world.n_hoses < 0 or cfg.world.n_cords < 0 or cfg.world.n_puddles < 0:
         raise ConfigError("hose/cord/puddle counts must be >= 0")
     if cfg.world.layout not in WORLD_LAYOUTS:

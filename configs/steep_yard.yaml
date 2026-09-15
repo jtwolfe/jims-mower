@@ -67,6 +67,10 @@ world:
     max_slope_rad: 0.50
     noise_amp_m: 0.02
     keepout_m: 1.8
+    base_gradient:
+      slope_rad: 0.10
+      yaw_rad: 0.70
+      undulation_m: 0.06
 
 reward:
   coverage_scale: 1.0

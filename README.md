@@ -10,10 +10,11 @@ optional downward **ToF** array. v1 uses a lightweight geometric renderer and
 stubs you can replace on a Jetson Orin Nano. There are no claimed mAP / FPS
 numbers here.
 
-The yard is **not flat**. Configurable **steep banks** and **small earth
-drains** (shallow open drains / swales / drainage ditches) are first-class
-world features. The mower must not drop a wheel into a channel or tip on a
-bank.
+The yard is **not flat**. Default yards carry a mild **whole-property
+gradient** (planar slope plus optional undulation). Configurable **steep
+banks** and **small earth drains** (shallow open drains / swales / drainage
+ditches) are carved on top of that base. The mower must not drop a wheel
+into a channel or tip on a bank.
 
 ## Quickstart
 
@@ -24,7 +25,10 @@ python -m pip install -e ".[dev]"
 
 # Terrain-aware coverage (default). Heuristic CV maps, not god-view.
 # Writes PNG frames, observer maps, and a plan overlay.
-jims-mower-demo --steps 40 --out demo_out
+# Default --steps is 160 so the World Viewer has a real trail to scrub.
+# Camera folders are dumped every ~8 steps on long runs (--dump-stride).
+jims-mower-demo --out demo_out
+jims-mower-demo --steps 160 --dump-stride 8 --out demo_out
 
 # Same path, explicit observer (YAML default is already heuristic):
 python -m jims_mower.demo --terrain-observer heuristic --out demo_cv
@@ -32,8 +36,11 @@ python -m jims_mower.demo --terrain-observer heuristic --out demo_cv
 # God-view maps for training / eval only:
 python -m jims_mower.demo --terrain-observer oracle --out demo_oracle
 
-# Steeper yard (more drains / banks):
+# Steeper yard (stronger property grade + more drains / banks):
 python -m jims_mower.demo --config configs/steep_yard.yaml --out demo_steep
+
+# Whole-yard slope with a drain crossing the grade:
+python -m jims_mower.demo --config gradient_yard --out demo_gradient
 
 # Keep the old scripted creep or random wheels:
 python -m jims_mower.demo --policy scripted --out demo_scripted
@@ -53,7 +60,7 @@ jims-mower-replay /tmp/jm-ep --mode env
 python -m jims_mower.demo --cameras 6 --hand-signals --out demo_out
 
 # WAVE 1A — scenario yard, dataset dump, farm dry-run (BEV is in demo_out)
-python -m jims_mower.demo --config suburban --steps 12 --out demo_out
+python -m jims_mower.demo --config suburban --steps 160 --out demo_out
 python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --out dataset_out
 python -m jims_mower.farm --dry-run --out farm_out
 
@@ -71,7 +78,7 @@ jims-mower-study --kind pitch --dry-run --out study_pitch
 python -m jims_mower.demo --config narrow_gate --steps 12 --out demo_gate
 
 # WAVE UX-A — World Viewer + teach a geofence (no mAP / FPS)
-jims-mower-demo --steps 40 --out demo_out
+jims-mower-demo --steps 160 --out demo_out
 jims-mower-viewer --episode demo_out
 jims-mower-teach --steps 80 --out teach_out
 jims-mower-demo --profile teach_out/profile.json --out demo_taught
@@ -310,18 +317,27 @@ into a drain**, plus a per-step steep-slope cost and a completion bonus.
 ## Config
 
 Edit `configs/default.yaml` or pass a dict / path into `MowerEnv(config=...)`.
-`configs/steep_yard.yaml` is a louder drain/bank scenario.
+`configs/steep_yard.yaml` is a louder drain/bank scenario with a stronger
+property-scale grade. `configs/scenarios/gradient_yard.yaml` is a clear
+whole-yard slope plus one drain that crosses it.
 
 Terrain generation (`world.terrain`):
 
 | Key | Role |
 | --- | --- |
+| `base_gradient.slope_rad` | Planar grade (rad). Alias: `slope_pct` (percent). Default ~0.05 (~5%) |
+| `base_gradient.yaw_rad` | Direction of *ascent* (elevation increases along this heading) |
+| `base_gradient.undulation_m` | Gentle sine roll + weak quadratic dish (metres) |
 | `n_drains` / `n_banks` | Feature counts (kept off the robot spawn) |
 | `drain_width_m` / `drain_depth_m` / `drain_length_m` | Channel geometry |
 | `drain_side_slope` | Rise/run of the ditch sides |
 | `bank_height_m` / `bank_width_m` / `bank_length_m` | Berm geometry |
 | `max_slope_rad` | Cap on generated bank faces |
 | `noise_amp_m` | Low-amplitude grass rumble |
+
+The base gradient is applied first and centered on the yard. Drains and
+banks carve on top of that tilted surface. The curriculum `flat` scenario
+zeros the gradient. `steep_yard` uses a stronger grade (~0.10 rad).
 
 Sensor noise (`sensors.imu` / `sensors.gps` / `sensors.tof`): white noise
 stds, IMU accel bias (drawn once per episode), GPS dropout probability.
@@ -559,8 +575,8 @@ jims-mower-selftest
 ```
 ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
-configs/steep_yard.yaml       louder drain / bank demo
-configs/scenarios/            WAVE 1A/1C/2A yards (suburban, geofence_movers, …)
+configs/steep_yard.yaml       louder drain / bank demo + stronger yard grade
+configs/scenarios/            WAVE 1A/1C/2A yards (suburban, gradient_yard, …)
 docs/                         WAVE notes + UX.md / UX_B.md + JETSON + runtime contract
 docker/Dockerfile.aarch64     Orin / aarch64 packaging notes (not CI)
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety

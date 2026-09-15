@@ -215,14 +215,17 @@ def write_viewer_bundle(
     return manifest
 
 
-def _extract_episode_cameras(episode_dir: Path, reader: Any, *, every: int = 4) -> None:
+def _extract_episode_cameras(episode_dir: Path, reader: Any, *, every: Optional[int] = None) -> None:
+    from jims_mower.demo import camera_dump_indices
+
     if reader.reset_obs and reader.reset_obs.get("cameras"):
         dump_step_frames(episode_dir / "step_000", reader.reset_obs)
     if not reader.steps:
         return
-    picks = {0, len(reader.steps) // 2, len(reader.steps) - 1}
+    n = len(reader.steps)
+    picks = camera_dump_indices(n, every)
     for i, rec in enumerate(reader.steps):
-        if i in picks or (every and i % every == 0):
+        if i in picks:
             obs = rec.get("obs") or {}
             if obs.get("cameras"):
                 dump_step_frames(episode_dir / f"step_{i:03d}", obs)

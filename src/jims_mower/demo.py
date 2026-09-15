@@ -24,6 +24,36 @@ from jims_mower.types import Pose
 from jims_mower.viewer import write_viewer_bundle
 
 POLICIES = ("terrain", "scripted", "random", "bc", "teach")
+DEFAULT_DEMO_STEPS = 160
+
+
+def camera_dump_stride(steps: int, requested: Optional[int] = None) -> int:
+    """How often to write camera PiP folders so long runs stay scrubbable.
+
+    Short smoke dumps stay dense. Episodes of ~120–200 steps use every 8
+    steps (in the 5–10 band) so the viewer has more than three frames.
+    """
+    if requested is not None:
+        return max(1, int(requested))
+    n = max(0, int(steps))
+    if n <= 16:
+        return 1
+    if n <= 40:
+        return 2
+    if n <= 80:
+        return 5
+    return 8
+
+
+def camera_dump_indices(steps: int, stride: Optional[int] = None) -> set[int]:
+    n = max(0, int(steps))
+    if n <= 0:
+        return {0}
+    every = camera_dump_stride(n, stride)
+    picks = set(range(0, n, every))
+    picks.add(0)
+    picks.add(n - 1)
+    return picks
 
 
 def _save_rgb(path: Path, image: np.ndarray) -> None:
@@ -101,7 +131,8 @@ def _random_action(env: MowerEnv, rng: np.random.Generator) -> np.ndarray:
 def run_demo(
     out_dir: Path,
     *,
-    steps: int = 40,
+    steps: int = DEFAULT_DEMO_STEPS,
+    dump_stride: Optional[int] = None,
     seed: int = 7,
     cameras: Optional[int] = None,
     hand_signals: bool = False,
@@ -168,7 +199,7 @@ def run_demo(
     names = list(obs["cameras"].keys())
     records: list[dict] = []
     poses: list[dict] = [info.get("pose") or {}]
-    dump_steps = {0, max(0, steps // 2), max(0, steps - 1)}
+    dump_steps = camera_dump_indices(steps, dump_stride)
     overlay_policy = teach_policy or terrain_policy
 
     def _dump_step(step_dir: Path, obs: dict, info: dict) -> None:
@@ -398,7 +429,18 @@ def run_demo(
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Dump Jim's Mower camera frames + detections")
     p.add_argument("--out", type=Path, default=Path("demo_out"))
-    p.add_argument("--steps", type=int, default=40)
+    p.add_argument(
+        "--steps",
+        type=int,
+        default=DEFAULT_DEMO_STEPS,
+        help="episode length (default 160 — long enough to inspect in the viewer)",
+    )
+    p.add_argument(
+        "--dump-stride",
+        type=int,
+        default=None,
+        help="write camera folders every N steps (default: 1/2/5/8 by length; ~8 for long runs)",
+    )
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--cameras", type=int, default=None, help="4, 5, or 6")
     p.add_argument("--hand-signals", action="store_true")
@@ -458,6 +500,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     summary = run_demo(
         args.out,
         steps=args.steps,
+        dump_stride=args.dump_stride,
         seed=args.seed,
         cameras=args.cameras,
         hand_signals=args.hand_signals,

@@ -73,6 +73,12 @@ world:
     max_slope_rad: 0.45
     noise_amp_m: 0.015
     keepout_m: 1.6
+    # Whole-yard planar grade (not a flat pad). Drains/banks carve on top.
+    # 0.05 rad ≈ 5% / 2.9°. yaw_rad is the direction of ascent.
+    base_gradient:
+      slope_rad: 0.05
+      yaw_rad: 0.55
+      undulation_m: 0.04
 
 reward:
   coverage_scale: 1.0

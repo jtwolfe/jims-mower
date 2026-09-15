@@ -124,6 +124,33 @@ def test_default_has_terrain_and_imu() -> None:
     assert cfg.sensors.imu.enabled is True
     assert cfg.sensors.gps.enabled is True
     assert cfg.perception.terrain_mode == "heuristic"
+    assert cfg.world.terrain.base_gradient.effective_slope_rad() > 0.0
+    assert cfg.world.terrain.base_gradient.undulation_m > 0.0
+
+
+def test_steep_yard_has_stronger_gradient() -> None:
+    root = Path(__file__).resolve().parents[1]
+    default = load_config()
+    steep = load_config(root / "configs" / "steep_yard.yaml")
+    assert steep.world.terrain.base_gradient.effective_slope_rad() > (
+        default.world.terrain.base_gradient.effective_slope_rad() + 0.02
+    )
+
+
+def test_rejects_negative_base_gradient() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"world": {"terrain": {"base_gradient": {"slope_rad": -0.1}}}})
+    with pytest.raises(ConfigError):
+        load_config({"world": {"terrain": {"base_gradient": {"undulation_m": -0.01}}}})
+
+
+def test_slope_pct_overrides_slope_rad() -> None:
+    cfg = load_config({"world": {"terrain": {"base_gradient": {"slope_pct": 10.0}}}})
+    import math
+
+    assert cfg.world.terrain.base_gradient.effective_slope_rad() == pytest.approx(
+        math.atan(0.10), abs=1e-9
+    )
 
 
 def test_rejects_bad_terrain_mode() -> None:
@@ -140,6 +167,11 @@ def test_accepts_learned_terrain_mode() -> None:
 def test_rejects_bad_gps_dropout() -> None:
     with pytest.raises(ConfigError):
         load_config({"sensors": {"gps": {"dropout_prob": 1.5}}})
+
+
+def test_suburban_inherits_mild_gradient() -> None:
+    cfg = load_config(Path(__file__).resolve().parents[1] / "configs" / "scenarios" / "suburban.yaml")
+    assert cfg.world.terrain.base_gradient.effective_slope_rad() > 0.03
 
 
 def test_rejects_bad_drain_width() -> None:

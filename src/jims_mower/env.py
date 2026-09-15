@@ -340,6 +340,7 @@ class MowerEnv(gym.Env):
         keepout_r = max(1.4, self.cfg.robot.trimmer.safety_radius_m * 0.7)
         terr_cfg = self.cfg.world.terrain
         robot_keep = (self._pose.x, self._pose.y, max(keepout_r, terr_cfg.keepout_m))
+        grad = terr_cfg.base_gradient
         self._terrain = generate_terrain(
             self.np_random,
             self.cfg.world.width_m,
@@ -364,6 +365,9 @@ class MowerEnv(gym.Env):
             puddle_depth_m=terr_cfg.puddle_depth_m,
             explicit_drains=list(self.scenario.drains) if self.scenario else None,
             explicit_banks=list(self.scenario.banks) if self.scenario else None,
+            gradient_slope_rad=grad.effective_slope_rad(),
+            gradient_yaw_rad=grad.yaw_rad,
+            gradient_undulation_m=grad.undulation_m,
         )
         self._yard = spawn_yard(
             self.np_random,
