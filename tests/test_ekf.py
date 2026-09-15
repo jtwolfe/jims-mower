@@ -33,8 +33,11 @@ def test_dead_reckon_matches_commanded_odom() -> None:
 
 
 def test_xy_covariance_grows_without_gps() -> None:
-    ekf = EkfPoseFilter()
+    ekf = EkfPoseFilter(EkfNoise(q_xy=0.25, q_odom=0.20))
     ekf.reset(0.0, 0.0, 0.0)
+    # Start certain so process noise (no GPS) is the observability story.
+    ekf._P[0, 0] = 0.04
+    ekf._P[1, 1] = 0.04
     p0 = float(ekf.covariance()[0, 0])
     gps = np.array([0.0, 0.0, 0.0, 0.0], dtype=np.float32)
     for _ in range(40):
