@@ -117,6 +117,10 @@ class EnvConfig:
         if self.sensors.cameras:
             cams = list(self.sensors.cameras)
         else:
+            if self.sensors.camera_count not in _COUNT_NAMES:
+                raise ConfigError(
+                    f"camera_count must be 4, 5, or 6; got {self.sensors.camera_count}"
+                )
             names = _COUNT_NAMES[self.sensors.camera_count]
             by_name = {c.name: c for c in _DEFAULT_RIG}
             cams = [by_name[n] for n in names]

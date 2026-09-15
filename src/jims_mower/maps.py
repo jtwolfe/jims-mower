@@ -28,6 +28,8 @@ class GrassCoverageMap:
         self.grass.fill(True)
 
     def world_to_cell(self, x: float, y: float) -> Optional[tuple[int, int]]:
+        if x < 0.0 or y < 0.0 or x >= self.width_m or y >= self.height_m:
+            return None
         col = int(x / self.resolution_m)
         row = int(y / self.resolution_m)
         if 0 <= row < self.rows and 0 <= col < self.cols:

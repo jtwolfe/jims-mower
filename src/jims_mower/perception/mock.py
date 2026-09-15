@@ -30,7 +30,7 @@ def detection_from_obstacle(
     min_pixels: float = 2.0,
 ) -> Optional[Detection]:
     world_cam = camera_world_pose(pose, cam)
-    proj = project_point(obst.x, obst.y, obst.z, world_cam, width, height)
+    proj = project_point(obst.x, obst.y, obst.visual_z, world_cam, width, height)
     if proj is None:
         return None
     u, v, depth = proj

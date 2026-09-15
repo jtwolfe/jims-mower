@@ -41,6 +41,13 @@ class Obstacle:
     def xy(self) -> tuple[float, float]:
         return (self.x, self.y)
 
+    @property
+    def visual_z(self) -> float:
+        """Height used for the projected blob. Birds stay airborne."""
+        if self.kind == "bird":
+            return self.z
+        return 0.5 * self.z
+
 
 @dataclass(frozen=True)
 class Detection:

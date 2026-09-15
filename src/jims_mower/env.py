@@ -108,8 +108,8 @@ class MowerEnv(gym.Env):
                 "coverage": spaces.Box(-1.0, 1.0, shape=cov_shape, dtype=np.float32),
                 "occupancy": spaces.Box(0.0, 1.0, shape=cov_shape, dtype=np.float32),
                 "detections": spaces.Box(
-                    -np.inf,
-                    np.inf,
+                    -1.0e6,
+                    1.0e6,
                     shape=(MAX_DETECTIONS, DET_FEATURES),
                     dtype=np.float32,
                 ),

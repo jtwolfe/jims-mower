@@ -59,7 +59,7 @@ def render_camera(
     # Painter's algorithm: far objects first.
     drawn: list[tuple[float, Obstacle]] = []
     for obst in obstacles:
-        proj = project_point(obst.x, obst.y, obst.z, world_cam, width, height)
+        proj = project_point(obst.x, obst.y, obst.visual_z, world_cam, width, height)
         if proj is None:
             continue
         _, _, depth = proj
@@ -68,7 +68,7 @@ def render_camera(
 
     fx = 0.5 * width / math.tan(math.radians(world_cam.fov_deg) * 0.5)
     for depth, obst in drawn:
-        proj = project_point(obst.x, obst.y, obst.z, world_cam, width, height)
+        proj = project_point(obst.x, obst.y, obst.visual_z, world_cam, width, height)
         if proj is None:
             continue
         u, v, _ = proj
