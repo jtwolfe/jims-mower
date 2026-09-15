@@ -162,10 +162,10 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
             path = parsed.path.rstrip("/") or "/"
             try:
                 if path == "/api/profile":
-                profile = yard_profile_from_dict(self._read_json())
-                saved = backend.put_yard(profile)
-                self._send_json(200, {"ok": True, "path": "profile.json", "profile": saved})
-                return
+                    profile = yard_profile_from_dict(self._read_json())
+                    saved = backend.put_yard(profile)
+                    self._send_json(200, {"ok": True, "path": "profile.json", "profile": saved})
+                    return
                 if path != "/command":
                     self._send_json(404, {"error": "not found"})
                     return
