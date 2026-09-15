@@ -14,6 +14,7 @@ from jims_mower.constants import (
     APP_STATUS_SCHEMA,
     COVERAGE_MAP_SCHEMA,
     MESH_SCHEMA,
+    RADIO_SCHEMA,
     SAFE_MODES,
     VIEWER_SCHEMA,
 )
@@ -88,6 +89,55 @@ def _radio_status(radio: Any, *, rssi: int = -88) -> dict[str, Any]:
             "ok": bool(radio.lora_enabled),
         },
     }
+
+
+_SIM_LINK = {"wifi": "wifi", "bt": "bluetooth", "lora": "lora"}
+
+
+def _radio_sim_from_info(info: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """UX-B RadioSim fields are flattened onto env ``info``."""
+    if not isinstance(info, dict):
+        return None
+    if "radio_enabled" not in info and "radio_channel" not in info and info.get("schema") != RADIO_SCHEMA:
+        return None
+    return {
+        "schema": str(info.get("schema") or RADIO_SCHEMA),
+        "radio_enabled": bool(info.get("radio_enabled")),
+        "radio_channel": info.get("radio_channel"),
+        "radio_lost": bool(info.get("radio_lost")),
+        "radio_on_loss": info.get("radio_on_loss"),
+        "radio_distance_m": info.get("radio_distance_m"),
+        "not_rf_hardware": True,
+    }
+
+
+def _overlay_radio_sim(status_radio: dict[str, Any], sim: Optional[dict[str, Any]]) -> dict[str, Any]:
+    if not isinstance(sim, dict):
+        return status_radio
+    out = dict(status_radio)
+    out["sim"] = sim
+    if sim.get("radio_lost"):
+        out["link"] = "none"
+        out["ok"] = False
+    elif sim.get("radio_enabled") and sim.get("radio_channel"):
+        out["link"] = _SIM_LINK.get(str(sim["radio_channel"]), str(sim["radio_channel"]))
+    return out
+
+
+def _ux_b_faults(info: Optional[dict[str, Any]], extra: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    faults = [dict(item) for item in extra]
+    blob = (info or {}).get("fault") if isinstance(info, dict) else None
+    if isinstance(blob, dict):
+        code = str(blob.get("code") or "ok")
+        if code and code != "ok" and not any(f.get("code") == code for f in faults):
+            faults.append(
+                {
+                    "code": code,
+                    "detail": str(blob.get("reason") or blob.get("component") or code),
+                    "retrieve": bool(blob.get("retrieve")),
+                }
+            )
+    return faults
 
 
 def _downsample(grid: np.ndarray, max_side: int = 48) -> np.ndarray:
@@ -414,6 +464,7 @@ class SimBackend:
             faults.append({"code": "TIP", "detail": "tip-over advice"})
         if self._info.get("drain_drop"):
             faults.append({"code": "DRAIN", "detail": "wheel in channel"})
+        faults = _ux_b_faults(self._info, faults)
         return {
             "schema": APP_STATUS_SCHEMA,
             "pose": self._pose(),
@@ -426,7 +477,7 @@ class SimBackend:
                 "terrain_advice": self._info.get("terrain_advice"),
                 "living_advice": self._info.get("living_advice"),
             },
-            "radio": _radio_status(self.yard.radio),
+            "radio": _overlay_radio_sim(_radio_status(self.yard.radio), _radio_sim_from_info(self._info)),
             "faults": faults,
             "coverage_pct": 100.0 * float(self._info.get("coverage_fraction") or 0.0),
             "hours_mowed": float(self.hours_mowed),
@@ -603,8 +654,8 @@ class EpisodeBackend:
                 "reason": self.safe.last_reason,
                 "terrain_advice": info.get("terrain_advice"),
             },
-            "radio": _radio_status(self.yard.radio),
-            "faults": list(self.faults),
+            "radio": _overlay_radio_sim(_radio_status(self.yard.radio), _radio_sim_from_info(info)),
+            "faults": _ux_b_faults(info, list(self.faults)),
             "coverage_pct": 100.0 * float(info.get("coverage_fraction") or 0.0),
             "hours_mowed": float(self.hours_mowed),
             "yard": self.yard.name,

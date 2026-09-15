@@ -192,6 +192,25 @@ def test_cli_parser_and_make_backend() -> None:
     backend.close()
 
 
+def test_ux_b_fault_and_radio_overlay() -> None:
+    from jims_mower.app.backend import _overlay_radio_sim, _radio_sim_from_info, _ux_b_faults
+
+    info = {
+        "radio_enabled": True,
+        "radio_channel": "bt",
+        "radio_lost": False,
+        "fault": {"code": "FAULT_IMMOBILISED", "component": "drive_left", "retrieve": True},
+    }
+    radio = _overlay_radio_sim({"link": "lora", "ok": True}, _radio_sim_from_info(info))
+    assert radio["link"] == "bluetooth"
+    assert radio["sim"]["radio_channel"] == "bt"
+    faults = _ux_b_faults(info, [])
+    assert faults[0]["code"] == "FAULT_IMMOBILISED"
+    assert faults[0]["retrieve"] is True
+    lost = _overlay_radio_sim({"link": "lora", "ok": True}, _radio_sim_from_info({**info, "radio_lost": True}))
+    assert lost["link"] == "none"
+
+
 def test_make_backend_rejects_unknown() -> None:
     from jims_mower.yard_profile import YardProfileError
 

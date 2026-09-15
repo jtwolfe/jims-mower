@@ -27,6 +27,7 @@ Later items stay unchecked until they land. No claimed mAP / FPS.
 - [x] Buy→mow checklist (BT required, Wi-Fi optional, LoRa long-range)
 - [x] `jims-mower-app` serves API+UI against sim env or recorded episode
 - [x] Reuse UX-A `viewer_static` + `mesh_to_payload` (no second three.js stack)
+- [x] Surface UX-B FaultBus / RadioSim on `/status` (no second radio stack)
 - [x] YardProfile + API smoke tests
 - [x] ROADMAP checkboxes for the items above
 

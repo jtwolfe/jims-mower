@@ -87,12 +87,15 @@ World Viewer is **UX-A** (`viewer_static/` + `mesh_to_payload`). The
 owner app serves those same assets at `/viewer` and `/data/yard.json`.
 Do not add a second WebGL stack.
 
-## Reuse UX-A
+## Reuse UX-A + UX-B
 
 - `GET /viewer` — rewritten `viewer_static/index.html` (CDN three.js)
 - `GET /api/manifest`, `GET|POST /api/profile`, `GET /data/yard.json`
 - `GET /map/mesh` — `jims_mower.mesh.v1` payload (`ux_a_href: /viewer`)
 - Map page link: “Open UX-A mesh viewer”
+- `GET /status` surfaces UX-B `info["fault"]` (SOS `retrieve`) and RadioSim
+  (`radio.sim`) when the sim / episode backend has them. YardProfile radio
+  prefs stay the owner preference document.
 
 ## CLI
 
