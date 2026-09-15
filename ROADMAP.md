@@ -5,10 +5,36 @@ Hardware bring-up (wiring, JetPack flash, field calibration) lives elsewhere.
 There are no claimed mAP / FPS numbers on this list.
 
 WAVE **1A** is the foundation package. WAVE **1C** expanded yards / renderer.
-WAVE **1B** (EKF / record-replay) and WAVE **2A** (movers, geofences,
-recovery, hand-signal hooks, mission resume) are on `main`. WAVE **2B**
-(this wave) is the sim-only perception pipeline: exporter → numpy terrain
-stub, multi-camera BEV fuse, temporal filters. No claimed mAP / FPS.
+WAVE **1B** (EKF / record-replay), WAVE **2A** (movers, geofences,
+recovery, hand-signal hooks, mission resume), and WAVE **2B** (sim-only
+perception: exporter → numpy terrain stub, BEV fuse, temporal filters)
+are on `main`. WAVE **3A** (this PR) is learning + ops tooling:
+behaviour cloning, an RL scaffold, incident / telemetry / ESTOP, and a
+phone overlay stub. Later waves stay unchecked until they land.
+
+## WAVE 3A — learning + ops tooling (done)
+
+- [x] Behaviour cloning hook — log (obs→action) from terrain-policy demos;
+      train a tiny numpy MLP stub; `jims-mower-demo --policy bc` loads
+      weights if present
+- [x] RL fine-tune scaffold — numpy REINFORCE / random-search plus optional
+      `[rl]` extra (SB3/torch); 1-episode CPU smoke; hazard action mask
+- [x] Incident replay viewer — `jims-mower-incident` scrubs cameras +
+      hazard + advice from a recorded episode
+- [x] Telemetry summary JSON — coverage, tip rate, drain entries, living
+      near-misses (`jims-mower-telemetry`)
+- [x] ESTOP / limp / safe-state machine used by the controller; ICD
+      software e-stop contract
+- [x] Owner UX stub — phone-sized HTML overlay of yard + geofence + plan
+- [x] ROADMAP checkboxes for the items above
+
+## WAVE 2B — sim perception pipeline (done, on main)
+
+- [x] Exporter → numpy terrain stub (`LearnedTerrainObserver`, no claimed accuracy)
+- [x] Multi-camera BEV fuse for hazard stamps
+- [x] Temporal hysteresis / decay on hazard + person/dog tracklets stub
+- [x] `jims-mower-train-terrain` / `scripts/train_terrain_seg.py`
+- [x] Optional `[torch]` extra (not used in CI)
 
 ## WAVE 2A — dynamic world + behaviour (done)
 
@@ -75,9 +101,9 @@ stub, multi-camera BEV fuse, temporal filters. No claimed mAP / FPS.
 
 ## Learning
 
-- [ ] Offline behaviour cloning from [`export.py`](src/jims_mower/export.py) wheel logs
-- [ ] Offline RL / replay on frozen seeds (scorecard as reward log)
-- [ ] Imitation of `TerrainPolicy` as a baseline, not a claimed SOTA
+- [x] Offline behaviour cloning from terrain-policy demos / episode logs (WAVE 3A)
+- [x] RL scaffold on the Gymnasium env (REINFORCE / random-search; optional SB3) (WAVE 3A)
+- [x] Imitation of `TerrainPolicy` as a baseline, not a claimed SOTA (WAVE 3A)
 - [ ] Sim-to-real protocol: same ICD obs keys, no gym renderer on-box
 - [ ] Curriculum: flat → suburban → wet_slope → night_dawn
 
@@ -102,10 +128,10 @@ stub, multi-camera BEV fuse, temporal filters. No claimed mAP / FPS.
 ## Safety / ops
 
 - [x] Scorecard gates (tip / drain counts) + farm thresholds (WAVE 1A)
-- [ ] E-stop contract in the ICD (software + hardware)
-- [ ] Black-box log: IMU, GPS valid bit, advice, wheel commands
+- [x] E-stop contract in the ICD (software latch; hardware is still field) (WAVE 3A)
+- [x] Black-box log: IMU, GPS valid bit, advice, wheel commands (WAVE 1B record + WAVE 3A incident)
 - [x] Geofence violation → `stop` (already OOB terminate; pre-touch slow) (WAVE 2A)
-- [ ] Trimmer interlock telemetry dashboard (headless JSON is enough)
+- [x] Trimmer / living / tip telemetry JSON (headless) (WAVE 3A)
 - [ ] Farm flake budget / quarantine a scenario instead of silent skip
 
 ## Data tooling
@@ -115,8 +141,8 @@ stub, multi-camera BEV fuse, temporal filters. No claimed mAP / FPS.
 - [x] Overnight farm + dry-run (WAVE 1A)
 - [x] BEV debugger composites in demo output (WAVE 1A)
 - [x] Train stub from export (`scripts/train_terrain_seg.py` / `python -m jims_mower.perception.train`) — WAVE 2B
-- [ ] Replay a `frames/*.json` folder without re-simulating
-- [ ] Label review: overlay hazard PNG on top-down
+- [x] Replay a recorded episode without re-simulating (WAVE 1B offline + WAVE 3A incident scrubber)
+- [x] Label / hazard overlay on the incident viewer (WAVE 3A)
 - [ ] Dataset versioning (schema field already `jims_mower.dataset.v1`)
 
 ## Design studies
@@ -145,4 +171,14 @@ python -m jims_mower.demo --config geofence_movers --steps 16 --out demo_fence
 python -m jims_mower.demo --hand-signals --steps 12 --out demo_signals
 python -m jims_mower.demo --steps 16 --save-mission /tmp/mission.npz --out demo_save
 python -m jims_mower.mission resume --in /tmp/mission.npz --steps 8 --out demo_resume
+
+# WAVE 3A
+jims-mower-bc collect --steps 16 --cameras 4 --out bc_logs
+jims-mower-bc train --in bc_logs --out bc_weights.npz
+jims-mower-demo --policy bc --bc-weights bc_weights.npz --steps 12 --out demo_bc
+jims-mower-rl --smoke --algo reinforce --episodes 1 --steps 4
+jims-mower-record --out /tmp/ep --steps 8 --cameras 4
+jims-mower-incident /tmp/ep --out /tmp/incident
+jims-mower-telemetry /tmp/ep --out /tmp/telemetry.json
+jims-mower-owner --config geofence_movers --out owner_overlay.html
 ```

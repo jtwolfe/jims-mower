@@ -128,3 +128,8 @@ planner:
   geofence_inflate_m: 0.30
   recovery_trigger: 3
   max_recoveries: 2
+  safe_state:
+    limp_after_stops: 8
+    safe_after_limp_steps: 12
+    limp_scale: 0.35
+    recover_ok_steps: 4

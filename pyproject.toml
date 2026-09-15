@@ -35,6 +35,10 @@ dev = [
 torch = [
     "torch>=2.1",
 ]
+rl = [
+    "stable-baselines3>=2.3",
+    "torch>=2.1",
+]
 
 [project.scripts]
 jims-mower-demo = "jims_mower.demo:main"
@@ -44,6 +48,11 @@ jims-mower-farm = "jims_mower.farm:main"
 jims-mower-record = "jims_mower.record_cli:main"
 jims-mower-replay = "jims_mower.replay_cli:main"
 jims-mower-mission = "jims_mower.mission:main"
+jims-mower-bc = "jims_mower.bc_cli:main"
+jims-mower-rl = "jims_mower.rl_cli:main"
+jims-mower-incident = "jims_mower.incident_cli:main"
+jims-mower-telemetry = "jims_mower.telemetry_cli:main"
+jims-mower-owner = "jims_mower.owner_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"

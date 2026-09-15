@@ -5,6 +5,7 @@ from jims_mower.planning.controller import (
     observed_hand_signal,
     tracking_action,
 )
+from jims_mower.safe_state import SafeStateMachine
 from jims_mower.planning.costmap import Costmap, build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage, shortest_path
 from jims_mower.planning.fusion import (
@@ -21,6 +22,7 @@ __all__ = [
     "CoveragePlan",
     "EkfNoise",
     "EkfPoseFilter",
+    "SafeStateMachine",
     "TerrainPolicy",
     "attitude_from_accel",
     "build_costmap",

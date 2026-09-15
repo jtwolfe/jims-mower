@@ -13,6 +13,7 @@ from jims_mower.contract import (
     GpsFix,
     ImuSample,
     Plan,
+    SafeState,
     TerrainMaps,
     TofArray,
     WheelCommand,
@@ -65,6 +66,9 @@ def test_imu_gps_tof_plan_command() -> None:
     assert dets.detections[0].label == "person"
     validate_payload("WheelCommand", cmd.to_dict())
     validate_payload("GpsFix", gps.to_dict())
+    safe = SafeState(mode="estop", hold=True, trimmer_allowed=False)
+    assert safe.version == CONTRACT_VERSION
+    validate_payload("SafeState", safe.to_dict())
 
 
 def test_missing_version_rejected() -> None:
