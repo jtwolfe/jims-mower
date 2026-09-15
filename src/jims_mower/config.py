@@ -205,6 +205,32 @@ class PerceptionConfig:
 
 
 @dataclass
+class EkfConfig:
+    """Process / measurement noise for ``EkfPoseFilter`` (metres, radians)."""
+
+    q_xy: float = 0.04
+    q_z: float = 0.08
+    q_yaw: float = 0.03
+    q_tilt: float = 0.04
+    q_odom: float = 0.06
+    r_gps_xy: float = 1.2
+    r_gps_z: float = 2.0
+    r_tilt: float = 0.10
+    use_gps_z: bool = True
+    gps_gate_m: float = 5.0
+    gyro_yaw_mix: float = 0.30
+
+
+@dataclass
+class UncertaintyConfig:
+    """Costmap inflation when hazard/slope confidence is low."""
+
+    inflate: float = 1.5
+    hazard_boost: float = 4.0
+    confidence_floor: float = 0.25
+
+
+@dataclass
 class PlannerConfig:
     """Coverage planner + controller knobs (max climb, drain clearance, slow)."""
 
@@ -222,6 +248,9 @@ class PlannerConfig:
     accel_blend: float = 0.10
     max_replans: int = 8
     occupancy_inflate_m: float = 0.20
+    pose_filter: str = "ekf"  # ekf | complementary
+    ekf: EkfConfig = field(default_factory=EkfConfig)
+    uncertainty: UncertaintyConfig = field(default_factory=UncertaintyConfig)
 
 
 @dataclass
@@ -401,6 +430,30 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner gps_blend/accel_blend must be in [0, 1]")
     if not 0.0 < plan.imu_slow_frac <= plan.imu_stop_frac:
         raise ConfigError("planner imu_slow_frac must be in (0, imu_stop_frac]")
+    kind = str(plan.pose_filter or "").strip().lower()
+    if kind not in {"ekf", "complementary", "comp", "stub"}:
+        raise ConfigError("planner.pose_filter must be ekf|complementary")
+    ekf = plan.ekf
+    for name in (
+        "q_xy",
+        "q_z",
+        "q_yaw",
+        "q_tilt",
+        "q_odom",
+        "r_gps_xy",
+        "r_gps_z",
+        "r_tilt",
+        "gps_gate_m",
+    ):
+        if float(getattr(ekf, name)) < 0.0:
+            raise ConfigError(f"planner.ekf.{name} must be >= 0")
+    if not 0.0 <= float(ekf.gyro_yaw_mix) <= 1.0:
+        raise ConfigError("planner.ekf.gyro_yaw_mix must be in [0, 1]")
+    unc = plan.uncertainty
+    if unc.inflate < 0.0 or unc.hazard_boost < 0.0:
+        raise ConfigError("planner.uncertainty inflate/hazard_boost must be >= 0")
+    if not 0.0 <= unc.confidence_floor <= 1.0:
+        raise ConfigError("planner.uncertainty.confidence_floor must be in [0, 1]")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

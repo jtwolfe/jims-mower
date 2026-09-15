@@ -190,3 +190,65 @@ def test_rejects_shape_mismatch() -> None:
 
 def test_free_label_constant() -> None:
     assert HAZARD_NONE == 0
+
+
+def test_low_confidence_inflates_free_cost() -> None:
+    hazard, slope = _empty(16)
+    conf = np.ones((16, 16), dtype=np.float32)
+    conf[8, 8] = 0.10
+    cm = build_costmap(
+        hazard,
+        slope,
+        resolution_m=0.2,
+        width_m=3.2,
+        height_m=3.2,
+        max_climb_slope_rad=0.32,
+        drain_clearance_m=0.0,
+        margin_m=0.0,
+        confidence=conf,
+        uncertainty_inflate=2.0,
+        uncertain_hazard_boost=0.0,
+    )
+    assert not cm.blocked[8, 8]
+    assert cm.cost[8, 8] == pytest.approx(1.0 * (1.0 + 2.0 * 0.90))
+    assert cm.cost[8, 9] == pytest.approx(1.0)
+    assert cm.confidence is not None
+    assert cm.confidence[8, 8] == pytest.approx(0.10)
+
+
+def test_uncertain_steep_hint_gets_boost() -> None:
+    hazard, slope = _empty(16)
+    hazard[6, 6] = HAZARD_STEEP
+    slope[6, 6] = 0.20
+    conf = np.ones((16, 16), dtype=np.float32)
+    conf[6, 6] = 0.10
+    cm = build_costmap(
+        hazard,
+        slope,
+        resolution_m=0.2,
+        width_m=3.2,
+        height_m=3.2,
+        max_climb_slope_rad=0.32,
+        drain_clearance_m=0.0,
+        margin_m=0.0,
+        confidence=conf,
+        uncertainty_inflate=0.0,
+        uncertain_hazard_boost=4.0,
+        uncertain_confidence_floor=0.25,
+    )
+    assert not cm.blocked[6, 6]
+    assert cm.cost[6, 6] > STEEP_COST
+
+
+def test_confidence_shape_mismatch() -> None:
+    hazard, slope = _empty(8)
+    with pytest.raises(ValueError):
+        build_costmap(
+            hazard,
+            slope,
+            resolution_m=0.2,
+            width_m=1.6,
+            height_m=1.6,
+            max_climb_slope_rad=0.3,
+            confidence=np.ones((7, 8), dtype=np.float32),
+        )

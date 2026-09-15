@@ -26,6 +26,7 @@ class TerrainEstimate:
     slope: np.ndarray
     hazard: np.ndarray
     source: str
+    confidence: Optional[np.ndarray] = None
 
 
 @runtime_checkable
@@ -65,7 +66,8 @@ class BlindTerrainObserver:
     ) -> TerrainEstimate:
         del images, imu, gps
         elev, slope, hazard = _empty_maps(context.map_shape)
-        return TerrainEstimate(elev, slope, hazard, source="blind")
+        conf = np.zeros(context.map_shape, dtype=np.float32)
+        return TerrainEstimate(elev, slope, hazard, source="blind", confidence=conf)
 
 
 class OracleTerrainObserver:
@@ -85,15 +87,23 @@ class OracleTerrainObserver:
         terrain = context.terrain
         if not isinstance(terrain, HeightField):
             elev, slope, hazard = _empty_maps(context.map_shape)
-            return TerrainEstimate(elev, slope, hazard, source="oracle")
+            return TerrainEstimate(
+                elev,
+                slope,
+                hazard,
+                source="oracle",
+                confidence=np.ones(context.map_shape, dtype=np.float32),
+            )
         if terrain.slope is None:
             terrain.recompute_slope()
         assert terrain.slope is not None
+        hazard = terrain.hazard_map(steep_slope_rad=context.steep_slope_rad)
         return TerrainEstimate(
             elevation=terrain.elevation.astype(np.float32).copy(),
             slope=terrain.slope.astype(np.float32).copy(),
-            hazard=terrain.hazard_map(steep_slope_rad=context.steep_slope_rad),
+            hazard=hazard,
             source="oracle",
+            confidence=np.ones_like(hazard, dtype=np.float32),
         )
 
 
@@ -127,11 +137,13 @@ class HeuristicTerrainObserver:
         self._elevation: Optional[np.ndarray] = None
         self._slope: Optional[np.ndarray] = None
         self._hazard: Optional[np.ndarray] = None
+        self._confidence: Optional[np.ndarray] = None
 
     def reset(self) -> None:
         self._elevation = None
         self._slope = None
         self._hazard = None
+        self._confidence = None
 
     def _ensure_maps(self, shape: tuple[int, int]) -> None:
         if (
@@ -139,8 +151,11 @@ class HeuristicTerrainObserver:
             or self._elevation.shape != shape
             or self._slope is None
             or self._hazard is None
+            or self._confidence is None
         ):
             self._elevation, self._slope, self._hazard = _empty_maps(shape)
+            # Unobserved cells stay cheap-but-uncertain (not a hard block).
+            self._confidence = np.full(shape, 0.08, dtype=np.float32)
 
     def estimate(
         self,
@@ -152,7 +167,12 @@ class HeuristicTerrainObserver:
         # Intentionally unused: god-view height field is training-only.
         _ = context.terrain
         self._ensure_maps(context.map_shape)
-        assert self._elevation is not None and self._slope is not None and self._hazard is not None
+        assert (
+            self._elevation is not None
+            and self._slope is not None
+            and self._hazard is not None
+            and self._confidence is not None
+        )
         pose: Pose = context.pose
         prev_hazard = self._hazard.copy()
         cams = {c.name: c for c in context.cameras}
@@ -176,8 +196,10 @@ class HeuristicTerrainObserver:
                 steep_rad=max(self.steep_rad, context.steep_slope_rad),
             )
         self._grow_drain_gaps(prev_hazard)
+        self._raise_confidence(self._hazard > 0.0, 0.72)
         tof = _tof_from_context(context)
         if tof is not None:
+            before = self._hazard.copy()
             stamp_tof_corners(
                 tof,
                 pose,
@@ -190,13 +212,22 @@ class HeuristicTerrainObserver:
                 hover_m=context.chassis_hover_m,
                 steep_rad=max(self.steep_rad, context.steep_slope_rad),
             )
+            self._raise_confidence(self._hazard > before, 0.68)
         self._paint_local_imu(imu, gps, context)
         return TerrainEstimate(
             self._elevation.copy(),
             self._slope.copy(),
             self._hazard.copy(),
             source="heuristic",
+            confidence=self._confidence.copy(),
         )
+
+    def _raise_confidence(self, mask: np.ndarray, value: float) -> None:
+        assert self._confidence is not None
+        hit = np.asarray(mask, dtype=bool)
+        if hit.shape != self._confidence.shape or not np.any(hit):
+            return
+        self._confidence[hit] = np.maximum(self._confidence[hit], np.float32(value))
 
     def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
         """One-cell grow on *new* lip/channel stamps so a broken stripe blocks."""
@@ -211,6 +242,7 @@ class HeuristicTerrainObserver:
         grown[:, :-1] |= fresh[:, 1:]
         promote = grown & (self._hazard < HAZARD_DRAIN_EDGE)
         self._hazard[promote] = HAZARD_DRAIN_EDGE
+        self._raise_confidence(promote, 0.55)
 
     def _paint_local_imu(
         self,
@@ -218,7 +250,12 @@ class HeuristicTerrainObserver:
         gps: np.ndarray,
         context: PerceptionContext,
     ) -> None:
-        assert self._elevation is not None and self._slope is not None and self._hazard is not None
+        assert (
+            self._elevation is not None
+            and self._slope is not None
+            and self._hazard is not None
+            and self._confidence is not None
+        )
         pose = context.pose
         roll, pitch = _attitude_from_accel(np.asarray(imu, dtype=np.float32))
         slope_est = math.hypot(roll, pitch)
@@ -244,6 +281,7 @@ class HeuristicTerrainObserver:
                     self._elevation[row, col] = pose.z
                 if slope_est >= self.steep_rad:
                     self._hazard[row, col] = max(float(self._hazard[row, col]), float(HAZARD_STEEP))
+                self._confidence[row, col] = max(float(self._confidence[row, col]), 0.42)
 
 
 def _tof_from_context(context: PerceptionContext) -> Optional[np.ndarray]:

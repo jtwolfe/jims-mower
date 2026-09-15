@@ -92,7 +92,7 @@ class MowerEnv(gym.Env):
         imu: (ax, ay, az, gx, gy, gz) body-frame specific force + gyro
         gps: (x, y, z, valid)
         tof: downward ranges at FL, FR, RL, RR
-        elevation / slope / hazard: terrain maps (oracle, heuristic, or blind)
+        elevation / slope / hazard / confidence: terrain maps (oracle, heuristic, or blind)
         trimmer_enabled: {0, 1}
         hand_signal: 0=none, 1=stop, 2=go, 3=follow, 4=back
     """
@@ -197,6 +197,7 @@ class MowerEnv(gym.Env):
                 "elevation": spaces.Box(-5.0, 5.0, shape=cov_shape, dtype=np.float32),
                 "slope": spaces.Box(0.0, np.pi / 2, shape=cov_shape, dtype=np.float32),
                 "hazard": spaces.Box(0.0, 3.0, shape=cov_shape, dtype=np.float32),
+                "confidence": spaces.Box(0.0, 1.0, shape=cov_shape, dtype=np.float32),
                 "trimmer_enabled": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
                 "hand_signal": spaces.Discrete(1 + len(HAND_SIGNALS)),
             }
@@ -686,6 +687,7 @@ class MowerEnv(gym.Env):
             "elevation": terrain_est.elevation.astype(np.float32),
             "slope": terrain_est.slope.astype(np.float32),
             "hazard": terrain_est.hazard.astype(np.float32),
+            "confidence": _terrain_confidence(terrain_est),
             "trimmer_enabled": np.array(
                 [1.0 if self._trimmer_on else 0.0], dtype=np.float32
             ),
@@ -737,6 +739,14 @@ def _weather_dict(scenario: Optional[Scenario]) -> dict[str, Any]:
         return {"night": False, "dawn": False, "wet": False, "lighting": "day"}
     w = scenario.weather
     return {"night": w.night, "dawn": w.dawn, "wet": w.wet, "lighting": w.lighting}
+
+
+def _terrain_confidence(est: Any) -> np.ndarray:
+    raw = getattr(est, "confidence", None)
+    if raw is None:
+        fill = 1.0 if getattr(est, "source", "") == "oracle" else 0.0
+        return np.full(np.asarray(est.hazard).shape, fill, dtype=np.float32)
+    return np.clip(np.asarray(raw, dtype=np.float32), 0.0, 1.0)
 
 
 def _cam_pose_dict(pose: Pose, cam: CameraSpec) -> dict[str, Any]:

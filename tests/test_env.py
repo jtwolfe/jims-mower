@@ -55,6 +55,7 @@ def test_reset_returns_obs_and_info() -> None:
         "elevation",
         "slope",
         "hazard",
+        "confidence",
         "trimmer_enabled",
         "hand_signal",
     }
