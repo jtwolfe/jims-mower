@@ -13,9 +13,12 @@ from PIL import Image
 
 from jims_mower.config import load_config
 from jims_mower.env import MowerEnv
-from jims_mower.kinematics import sit_on_terrain
-from jims_mower.renderer import render_camera
+from jims_mower.kinematics import sit_on_terrain, trimmer_xy
+from jims_mower.planning import TerrainPolicy
+from jims_mower.renderer import render_camera, render_topdown
 from jims_mower.types import Pose
+
+POLICIES = ("terrain", "scripted", "random")
 
 
 def _save_rgb(path: Path, image: np.ndarray) -> None:
@@ -61,6 +64,34 @@ def _montage(images: dict[str, np.ndarray], order: list[str]) -> np.ndarray:
     return canvas
 
 
+def _plan_overlay(env: MowerEnv, policy: Optional[TerrainPolicy]) -> np.ndarray:
+    waypoints = policy.waypoints if policy is not None else []
+    index = policy.index if policy is not None else 0
+    return render_topdown(
+        env._pose,
+        env._coverage,
+        env._yard.obstacles,
+        trimmer_xy=trimmer_xy(env._pose, env.cfg.robot.trimmer.offset_m),
+        trimmer_on=env._trimmer_on,
+        terrain=env._terrain,
+        waypoints=waypoints,
+        waypoint_index=index,
+    )
+
+
+def _scripted_action() -> np.ndarray:
+    return np.array([0.55, 0.50, 1.0], dtype=np.float32)
+
+
+def _random_action(env: MowerEnv, rng: np.random.Generator) -> np.ndarray:
+    action = rng.uniform(
+        env.action_space.low,
+        env.action_space.high,
+    ).astype(np.float32)
+    action[2] = 1.0
+    return action
+
+
 def run_demo(
     out_dir: Path,
     *,
@@ -69,7 +100,11 @@ def run_demo(
     cameras: Optional[int] = None,
     hand_signals: bool = False,
     config: Optional[str] = None,
+    policy: str = "terrain",
 ) -> dict:
+    name = (policy or "terrain").strip().lower()
+    if name not in POLICIES:
+        raise ValueError(f"policy must be one of {POLICIES}; got {policy!r}")
     cfg = load_config(config)
     if cameras is not None:
         cfg.sensors.camera_count = cameras
@@ -78,18 +113,25 @@ def run_demo(
     obs, info = env.reset(seed=seed)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    terrain_policy: Optional[TerrainPolicy] = None
+    rng = np.random.default_rng(seed)
+    if name == "terrain":
+        terrain_policy = TerrainPolicy(env.cfg)
+        terrain_policy.reset(obs, info)
+
     names = list(obs["cameras"].keys())
     records: list[dict] = []
     dump_steps = {0, max(0, steps // 2), max(0, steps - 1)}
 
     def _dump_step(step_dir: Path, obs: dict, info: dict) -> None:
         step_dir.mkdir(parents=True, exist_ok=True)
-        for name, frame in obs["cameras"].items():
-            _save_rgb(step_dir / f"cam_{name}.png", frame)
+        for cam_name, frame in obs["cameras"].items():
+            _save_rgb(step_dir / f"cam_{cam_name}.png", frame)
         _save_rgb(step_dir / "montage.png", _montage(obs["cameras"], names))
         topdown = env.render()
         if topdown is not None:
             _save_rgb(step_dir / "topdown.png", topdown)
+        _save_rgb(step_dir / "plan_overlay.png", _plan_overlay(env, terrain_policy))
         for layer, img in env.terrain_layer_images().items():
             _save_rgb(step_dir / f"{layer}.png", img)
         drain_view = _drain_camera_view(env)
@@ -99,6 +141,17 @@ def run_demo(
             json.dumps(info["detections"], indent=2),
             encoding="utf-8",
         )
+        fused = None
+        if terrain_policy is not None:
+            fp = terrain_policy.fusion.pose()
+            fused = {
+                "x": fp.x,
+                "y": fp.y,
+                "theta": fp.theta,
+                "z": fp.z,
+                "pitch": fp.pitch,
+                "roll": fp.roll,
+            }
         (step_dir / "sensors.json").write_text(
             json.dumps(
                 {
@@ -106,10 +159,14 @@ def run_demo(
                     "gps": info.get("gps"),
                     "tof": info.get("tof"),
                     "pose": info.get("pose"),
+                    "fused_pose": fused,
                     "n_drains": info.get("n_drains"),
                     "n_banks": info.get("n_banks"),
                     "terrain_source": info.get("terrain_source"),
                     "terrain_advice": info.get("terrain_advice"),
+                    "policy": name,
+                    "waypoint_index": terrain_policy.index if terrain_policy else None,
+                    "n_waypoints": len(terrain_policy.waypoints) if terrain_policy else 0,
                 },
                 indent=2,
             ),
@@ -120,8 +177,13 @@ def run_demo(
         if t in dump_steps:
             _dump_step(out_dir / f"step_{t:03d}", obs, info)
 
-        # Slow forward creep with the trimmer requested.
-        action = np.array([0.55, 0.50, 1.0], dtype=np.float32)
+        if name == "scripted":
+            action = _scripted_action()
+        elif name == "random":
+            action = _random_action(env, rng)
+        else:
+            assert terrain_policy is not None
+            action = terrain_policy.act(obs, info)
         obs, reward, terminated, truncated, info = env.step(action)
         records.append(
             {
@@ -137,6 +199,7 @@ def run_demo(
                 "drain_drop": info.get("drain_drop"),
                 "steep": info.get("steep"),
                 "terrain_advice": info.get("terrain_advice"),
+                "policy_advice": terrain_policy.last_advice if terrain_policy else None,
                 "imu": info.get("imu"),
                 "gps": info.get("gps"),
             }
@@ -147,12 +210,24 @@ def run_demo(
     topdown = env.render()
     if topdown is not None:
         _save_rgb(out_dir / "coverage_final.png", topdown)
+    _save_rgb(out_dir / "plan_overlay_final.png", _plan_overlay(env, terrain_policy))
     layers = env.terrain_layer_images()
     for layer, img in layers.items():
         _save_rgb(out_dir / f"{layer}_final.png", img)
+    plan_payload = {
+        "policy": name,
+        "waypoints": [
+            {"x": x, "y": y} for x, y in (terrain_policy.waypoints if terrain_policy else [])
+        ],
+        "index": terrain_policy.index if terrain_policy else 0,
+        "n_segments": terrain_policy.plan.n_segments if terrain_policy and terrain_policy.plan else 0,
+        "replans": terrain_policy.replans if terrain_policy else 0,
+    }
+    (out_dir / "plan.json").write_text(json.dumps(plan_payload, indent=2), encoding="utf-8")
     summary = {
         "steps_run": len(records),
         "cameras": names,
+        "policy": name,
         "final_coverage_fraction": records[-1]["coverage_fraction"] if records else 0.0,
         "final_detections": info["detections"],
         "hand_signals_enabled": hand_signals,
@@ -161,6 +236,9 @@ def run_demo(
         "final_pose": info.get("pose"),
         "final_imu": info.get("imu"),
         "final_gps": info.get("gps"),
+        "n_waypoints": len(plan_payload["waypoints"]),
+        "terminated_drain_drop": bool(info.get("drain_drop")),
+        "terminated_tipover": bool(info.get("tipover")),
         "log": records,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -176,6 +254,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cameras", type=int, default=None, help="4, 5, or 6")
     p.add_argument("--hand-signals", action="store_true")
     p.add_argument("--config", type=str, default=None)
+    p.add_argument(
+        "--policy",
+        choices=POLICIES,
+        default="terrain",
+        help="terrain (default coverage planner), scripted creep, or random wheels",
+    )
     return p
 
 
@@ -188,12 +272,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         cameras=args.cameras,
         hand_signals=args.hand_signals,
         config=args.config,
+        policy=args.policy,
     )
     print(
-        f"Wrote {summary['steps_run']} steps, cameras={summary['cameras']} → {args.out}"
+        f"Wrote {summary['steps_run']} steps, policy={summary['policy']}, "
+        f"cameras={summary['cameras']} → {args.out}"
     )
     print(f"Final coverage: {summary['final_coverage_fraction']:.4f}")
     print(f"Detections on last step: {len(summary['final_detections'])}")
+    print(f"Plan waypoints: {summary['n_waypoints']}")
 
 
 if __name__ == "__main__":

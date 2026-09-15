@@ -159,6 +159,8 @@ def render_topdown(
     trimmer_on: bool = False,
     image_size: int = 240,
     terrain: Optional[HeightField] = None,
+    waypoints: Optional[list[tuple[float, float]]] = None,
+    waypoint_index: int = 0,
 ) -> np.ndarray:
     """Orthographic yard map for ``render_mode='rgb_array'``."""
     w_m = coverage.width_m
@@ -218,6 +220,18 @@ def render_topdown(
     hy = pose.y + 0.28 * math.sin(pose.theta)
     hu, hv = to_px(hx, hy)
     _stamp_disk(image, hu, hv, max(2.0, 0.08 * scale_x), (230, 230, 230))
+
+    if waypoints:
+        path_r = max(1.2, 0.045 * scale_x)
+        for i, (wx, wy) in enumerate(waypoints):
+            u, v = to_px(wx, wy)
+            if i < waypoint_index:
+                color = (30, 80, 100)
+            elif i == waypoint_index:
+                color = (250, 240, 80)
+            else:
+                color = (40, 210, 230)
+            _stamp_disk(image, u, v, path_r, color)
 
     if trimmer_xy is not None:
         tu, tv = to_px(*trimmer_xy)

@@ -162,6 +162,26 @@ class PerceptionConfig:
 
 
 @dataclass
+class PlannerConfig:
+    """Coverage planner + controller knobs (max climb, drain clearance, slow)."""
+
+    max_climb_slope_rad: float = 0.32
+    drain_clearance_m: float = 0.40
+    slow_speed_factor: float = 0.35
+    strip_spacing_m: float = 0.28
+    waypoint_stride_m: float = 0.32
+    arrive_radius_m: float = 0.20
+    turn_in_place_rad: float = 0.70
+    cruise_speed: float = 0.55
+    imu_slow_frac: float = 0.55
+    imu_stop_frac: float = 0.85
+    gps_blend: float = 0.08
+    accel_blend: float = 0.10
+    max_replans: int = 8
+    occupancy_inflate_m: float = 0.20
+
+
+@dataclass
 class EnvConfig:
     dt: float = 0.10
     max_steps: int = 500
@@ -171,6 +191,7 @@ class EnvConfig:
     reward: RewardConfig = field(default_factory=RewardConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
+    planner: PlannerConfig = field(default_factory=PlannerConfig)
 
     def resolved_cameras(self) -> list[CameraSpec]:
         """Return the 4–6 camera rig, applying the default FOV when needed."""
@@ -285,6 +306,25 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     mode = cfg.perception.terrain_mode
     if mode not in {"oracle", "blind", "heuristic"}:
         raise ConfigError(f"perception.terrain_mode must be oracle|blind|heuristic; got {mode!r}")
+    plan = cfg.planner
+    if plan.max_climb_slope_rad <= 0:
+        raise ConfigError("planner.max_climb_slope_rad must be positive")
+    if plan.drain_clearance_m < 0:
+        raise ConfigError("planner.drain_clearance_m must be >= 0")
+    if not 0.0 < plan.slow_speed_factor <= 1.0:
+        raise ConfigError("planner.slow_speed_factor must be in (0, 1]")
+    if plan.strip_spacing_m <= 0 or plan.waypoint_stride_m <= 0:
+        raise ConfigError("planner strip/waypoint spacing must be positive")
+    if plan.arrive_radius_m <= 0:
+        raise ConfigError("planner.arrive_radius_m must be positive")
+    if plan.cruise_speed <= 0:
+        raise ConfigError("planner.cruise_speed must be positive")
+    if plan.max_replans < 0:
+        raise ConfigError("planner.max_replans must be >= 0")
+    if not 0.0 <= plan.gps_blend <= 1.0 or not 0.0 <= plan.accel_blend <= 1.0:
+        raise ConfigError("planner gps_blend/accel_blend must be in [0, 1]")
+    if not 0.0 < plan.imu_slow_frac <= plan.imu_stop_frac:
+        raise ConfigError("planner imu_slow_frac must be in (0, imu_stop_frac]")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

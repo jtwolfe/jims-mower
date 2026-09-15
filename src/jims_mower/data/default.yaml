@@ -92,3 +92,13 @@ curriculum:
 perception:
   # oracle: god-view maps for training. blind / heuristic are onboard stubs.
   terrain_mode: oracle
+
+planner:
+  # Coverage planner + controller. Steep below max_climb is a slow corridor;
+  # above it (and drain channels / lips) are blocked after drain_clearance_m.
+  max_climb_slope_rad: 0.32
+  drain_clearance_m: 0.40
+  slow_speed_factor: 0.35
+  strip_spacing_m: 0.28
+  waypoint_stride_m: 0.32
+  cruise_speed: 0.55

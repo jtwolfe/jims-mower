@@ -86,3 +86,11 @@ curriculum:
 
 perception:
   terrain_mode: oracle
+
+planner:
+  max_climb_slope_rad: 0.30
+  drain_clearance_m: 0.45
+  slow_speed_factor: 0.30
+  strip_spacing_m: 0.28
+  waypoint_stride_m: 0.32
+  cruise_speed: 0.50

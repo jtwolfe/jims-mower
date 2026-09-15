@@ -22,4 +22,4 @@ jobs:
       - name: Unit tests
         run: pytest
       - name: Headless demo smoke
-        run: jims-mower-demo --steps 4 --out /tmp/jims-mower-ci-demo --cameras 4
+        run: jims-mower-demo --steps 4 --out /tmp/jims-mower-ci-demo --cameras 4 --policy terrain
