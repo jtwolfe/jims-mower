@@ -68,7 +68,8 @@ line; use `paths` / `buildings` for hard surfaces inside the yard.
 ```bash
 jims-mower-demo --config golf_rough --steps 80 --out demo_golf
 jims-mower-demo --config golf_fairway_snip --out demo_fairway
-jims-mower-viewer --episode demo_golf
+jims-mower-mission-demo --config golf_rough --out mission_out
+jims-mower-viewer --episode mission_out
 jims-mower-mesh --out golf.glb --config golf_rough --seed 3
 ```
 

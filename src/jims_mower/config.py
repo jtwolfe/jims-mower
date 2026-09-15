@@ -341,6 +341,25 @@ class PlannerConfig:
 
 
 @dataclass
+class MissionConfig:
+    """Calibrate → explore → review → mow. Unknown is not assumed mowable."""
+
+    observe_confidence: float = 0.35
+    explore_complete: float = 0.80
+    explore_no_frontier: float = 0.55
+    stamp_radius_m: float = 1.35
+    camera_range_m: float = 6.0
+    max_calibrate_steps: int = 900
+    max_explore_steps: int = 2800
+    max_mow_steps: int = 5500
+    max_return_steps: int = 500
+    snapshot_stride: int = 25
+    review_min_closure_m: float = 0.80
+    explore_cruise: float = 0.80
+    mow_cruise: float = 0.55
+
+
+@dataclass
 class BatteryConfig:
     """Orin-class pack stub (watt-hours / watts are class-scale, not measured)."""
 
@@ -431,6 +450,7 @@ class EnvConfig:
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     planner: PlannerConfig = field(default_factory=PlannerConfig)
+    mission: MissionConfig = field(default_factory=MissionConfig)
     weather: WeatherConfig = field(default_factory=WeatherConfig)
     domain_randomization: DomainRandomizationConfig = field(
         default_factory=DomainRandomizationConfig
@@ -756,6 +776,28 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner.elevation_prior_weight must be in [0, 1]")
     if float(plan.path_cost) < 0.0 or float(plan.bunker_cost) < 0.0:
         raise ConfigError("planner path_cost/bunker_cost must be >= 0")
+    mission = cfg.mission
+    if not 0.0 <= mission.observe_confidence <= 1.0:
+        raise ConfigError("mission.observe_confidence must be in [0, 1]")
+    if not 0.0 <= mission.explore_complete <= 1.0:
+        raise ConfigError("mission.explore_complete must be in [0, 1]")
+    if not 0.0 <= mission.explore_no_frontier <= 1.0:
+        raise ConfigError("mission.explore_no_frontier must be in [0, 1]")
+    if mission.stamp_radius_m <= 0.0 or mission.camera_range_m <= 0.0:
+        raise ConfigError("mission stamp/camera range must be positive")
+    for name in (
+        "max_calibrate_steps",
+        "max_explore_steps",
+        "max_mow_steps",
+        "max_return_steps",
+        "snapshot_stride",
+    ):
+        if int(getattr(mission, name)) < 1:
+            raise ConfigError(f"mission.{name} must be >= 1")
+    if mission.review_min_closure_m < 0.0:
+        raise ConfigError("mission.review_min_closure_m must be >= 0")
+    if mission.explore_cruise <= 0.0 or mission.mow_cruise <= 0.0:
+        raise ConfigError("mission cruise speeds must be positive")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

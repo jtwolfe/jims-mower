@@ -112,6 +112,17 @@ GRAVITY_MPS2 = 9.80665
 
 TERRAIN_ADVICE = ("ok", "slow", "stop", "reroute")
 MISSION_SCHEMA = "jims_mower.mission.v1"
+MISSION_FLOW_SCHEMA = "jims_mower.mission_flow.v1"
+MISSION_PHASES = (
+    "calibrate_boundary",
+    "explore",
+    "review",
+    "mow",
+    "return_home",
+    "complete",
+    "fault",
+    "safe",
+)
 SAFE_MODES = ("run", "limp", "estop", "safe")
 BC_SCHEMA = "jims_mower.bc.v1"
 TELEMETRY_SCHEMA = "jims_mower.telemetry.v1"

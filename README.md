@@ -45,6 +45,12 @@ python -m jims_mower.demo --config gradient_yard --out demo_gradient
 # Uneven golf snip (cart path + bunker + shed):
 python -m jims_mower.demo --config golf_rough --out demo_golf
 
+# Full mission: guided perimeter → explore/map → review → global mow
+# Default --steps is 6000. --fast uses mission_tiny for CI smoke.
+jims-mower-mission-demo --config golf_rough --out mission_out
+jims-mower-mission-demo --fast --out mission_fast
+jims-mower-viewer --episode mission_out
+
 # Keep the old scripted creep or random wheels:
 python -m jims_mower.demo --policy scripted --out demo_scripted
 python -m jims_mower.demo --policy random --out demo_random
@@ -181,6 +187,12 @@ The default demo policy (`--policy terrain`) **accounts for** those maps: it
 builds a costmap, plans a coverage path around channels / bank lips, and the
 controller slows, reroutes, or stops instead of applying scripted wheel
 speeds. When the heuristic map grows new lips, the planner replans.
+
+That policy still plans from the **current** observer raster, so a 160-step
+clip only covers a few metres. For a visual yard job use
+`jims-mower-mission-demo`: calibrate the keep-in, explore unknown space,
+freeze the map, then mow every reachable mowable cell. Unknown cells are
+not assumed safe. See [`docs/MISSION_FLOW.md`](docs/MISSION_FLOW.md).
 
 ## From detection to a wheel command
 

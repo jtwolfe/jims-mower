@@ -46,6 +46,8 @@ def test_golf_rough_has_uneven_mesh_and_path() -> None:
     assert scn.paths
     assert scn.bunkers
     assert scn.buildings
+    assert scn.greens
+    assert scn.garden_beds
     scn.config.sensors.width = 16
     scn.config.sensors.height = 12
     scn.config.sensors.camera_count = 4

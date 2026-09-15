@@ -7,8 +7,10 @@ const $ = (id) => document.getElementById(id);
 const state = {
   manifest: null,
   profile: null,
+  mission: null,
   poses: [],
   plan: [],
+  explore: [],
   trail: [],
   index: 0,
   playing: false,
@@ -22,6 +24,8 @@ const state = {
   fenceGroup: null,
   poseMarker: null,
   planLine: null,
+  exploreLine: null,
+  frontierGroup: null,
   trailLine: null,
   handles: [],
   drag: null,
@@ -174,6 +178,7 @@ async function loadTerrain(manifest) {
   await mkOverlay("hazard", maps.hazard, 0xffffff);
   await mkOverlay("occupancy", maps.occupancy, 0xffffff);
   await mkOverlay("error", maps.elevation_error, 0xffffff);
+  await mkOverlay("observed", maps.observed, 0xffffff);
   return group;
 }
 
@@ -182,7 +187,16 @@ function setOverlayVis() {
   if (state.overlays.hazard) state.overlays.hazard.visible = $("tog-hazard").checked;
   if (state.overlays.occupancy) state.overlays.occupancy.visible = $("tog-occupancy").checked;
   if (state.overlays.error) state.overlays.error.visible = $("tog-error") && $("tog-error").checked;
+  if (state.overlays.observed) {
+    state.overlays.observed.visible = $("tog-observed") ? $("tog-observed").checked : false;
+  }
   if (state.planLine) state.planLine.visible = $("tog-plan").checked;
+  if (state.exploreLine) {
+    state.exploreLine.visible = $("tog-explore") ? $("tog-explore").checked : false;
+  }
+  if (state.frontierGroup) {
+    state.frontierGroup.visible = $("tog-explore") ? $("tog-explore").checked : true;
+  }
   if (state.poseMarker) state.poseMarker.visible = $("tog-pose").checked;
   if (state.fenceGroup) state.fenceGroup.visible = $("tog-fence").checked;
   if (state.trailLine) state.trailLine.visible = $("tog-trail").checked;
@@ -230,6 +244,72 @@ function poseAt(i) {
   return state.poses[Math.max(0, Math.min(i, state.poses.length - 1))];
 }
 
+function phaseAt(i) {
+  const p = poseAt(i);
+  if (p.phase) return p.phase;
+  const ranges = (state.mission && state.mission.phase_ranges) || [];
+  for (const row of ranges) {
+    const start = row.start || 0;
+    const end = row.end == null ? Infinity : row.end;
+    if (i >= start && i <= end) return row.phase;
+  }
+  return "";
+}
+
+function nearestSnapshot(step) {
+  const snaps = (state.mission && state.mission.snapshots) || [];
+  if (!snaps.length) return null;
+  return snaps.reduce((best, cur) =>
+    Math.abs((cur.step || 0) - step) < Math.abs((best.step || 0) - step) ? cur : best
+  );
+}
+
+function setPhaseBar(phase) {
+  document.querySelectorAll(".phase-seg").forEach((el) => {
+    el.classList.toggle("active", el.dataset.phase === phase);
+  });
+  const chip = $("phase-chip");
+  if (chip) chip.textContent = `phase ${phase || "—"}`;
+}
+
+function setMissionMetrics(i) {
+  const el = $("mission-metrics");
+  if (!el) return;
+  const snap = nearestSnapshot(i);
+  const metrics = (state.mission && state.mission.metrics) || {};
+  const pose = poseAt(i);
+  const completion = pose.map_completion != null
+    ? pose.map_completion
+    : (snap && snap.map_completion) || metrics.map_completion || 0;
+  const cut = pose.actual_coverage_fraction != null
+    ? pose.actual_coverage_fraction
+    : (snap && snap.actual_coverage_fraction) || metrics.actual_coverage_fraction || 0;
+  const planned = metrics.planned_coverage_fraction || 0;
+  const reach = metrics.reachable_mowable_cells || 0;
+  const unreach = metrics.unreachable_mowable_cells || 0;
+  const denom = reach + unreach;
+  const reachPct = denom ? (100 * reach / denom) : 0;
+  const unreachPct = denom ? (100 * unreach / denom) : 0;
+  el.textContent =
+    `map ${(100 * completion).toFixed(1)}%\n` +
+    `reachable mowable ${reachPct.toFixed(1)}%  unreachable ${unreachPct.toFixed(1)}%\n` +
+    `planned ${(100 * planned).toFixed(1)}%  cut ${(100 * cut).toFixed(1)}%`;
+}
+
+function updateObservedOverlay(i) {
+  const plane = state.overlays.observed;
+  const snap = nearestSnapshot(i);
+  if (!plane || !snap || !snap.file) return;
+  const loader = new THREE.TextureLoader();
+  loader.load(`/data/${snap.file}`, (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.flipY = true;
+    if (plane.material.map) plane.material.map.dispose();
+    plane.material.map = tex;
+    plane.material.needsUpdate = true;
+  });
+}
+
 function updatePose(i) {
   state.index = i;
   const p = poseAt(i);
@@ -238,7 +318,17 @@ function updatePose(i) {
     state.poseMarker.rotation.y = -(p.theta || 0);
   }
   $("scrub").value = String(i);
-  $("scrub-label").textContent = `step ${i} / ${Math.max(0, state.poses.length - 1)}`;
+  const phase = phaseAt(i);
+  $("scrub-label").textContent = `step ${i} / ${Math.max(0, state.poses.length - 1)} · ${phase || ""}`;
+  setPhaseBar(phase);
+  setMissionMetrics(i);
+  updateObservedOverlay(i);
+  const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
+  if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
+  if (state.exploreLine) {
+    const exploreOn = $("tog-explore") ? $("tog-explore").checked : true;
+    state.exploreLine.visible = exploreOn && (phase === "explore" || phase === "calibrate_boundary");
+  }
   updatePip(i);
 }
 
@@ -362,7 +452,7 @@ $("btn-save").addEventListener("click", async () => {
   }
 });
 
-["tog-coverage", "tog-hazard", "tog-occupancy", "tog-plan", "tog-pose", "tog-fence", "tog-trail", "tog-error"].forEach(
+["tog-coverage", "tog-hazard", "tog-occupancy", "tog-observed", "tog-plan", "tog-explore", "tog-pose", "tog-fence", "tog-trail", "tog-error"].forEach(
   (id) => $(id) && $(id).addEventListener("change", setOverlayVis)
 );
 
@@ -417,6 +507,13 @@ async function boot() {
     const pack = await fetch(`/data/${manifest.poses}`).then((r) => r.json());
     state.poses = pack.poses || [];
   }
+  if (manifest.mission) {
+    try {
+      state.mission = await fetch(`/data/${manifest.mission}`).then((r) => r.json());
+    } catch (err) {
+      console.warn("mission json failed", err);
+    }
+  }
   if (manifest.plan) {
     const plan = await fetch(`/data/${manifest.plan}`).then((r) => r.json());
     state.plan = (plan.waypoints || []).map((p) => [p.x, p.y, p.z]);
@@ -424,6 +521,25 @@ async function boot() {
       state.planLine = lineFromXY(state.plan, 0x2ad4e6, false);
       scene.add(state.planLine);
     }
+    const explore = plan.explore || (state.mission && state.mission.explore_route) || [];
+    state.explore = explore.map((p) => [p.x, p.y, p.z]);
+    if (state.explore.length >= 2) {
+      state.exploreLine = lineFromXY(state.explore, 0xf0a030, false);
+      scene.add(state.exploreLine);
+    }
+  }
+  if (state.mission && state.mission.frontiers && state.mission.frontiers.length) {
+    const g = new THREE.Group();
+    state.mission.frontiers.forEach((pt) => {
+      const sph = new THREE.Mesh(
+        new THREE.SphereGeometry(0.08, 8, 8),
+        new THREE.MeshLambertMaterial({ color: 0x42c4dc })
+      );
+      sph.position.copy(worldToScene(pt.x, pt.y, 0.12));
+      g.add(sph);
+    });
+    scene.add(g);
+    state.frontierGroup = g;
   }
   if (manifest.profile) {
     state.profile = await fetch(`/data/${manifest.profile}`).then((r) => r.json());

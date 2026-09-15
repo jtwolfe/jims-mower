@@ -44,6 +44,7 @@ ENV_OVERLAY_KEYS = frozenset(
         "curriculum",
         "perception",
         "planner",
+        "mission",
         "domain_randomization",
         "runtime",
     }

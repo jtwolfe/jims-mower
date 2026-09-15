@@ -34,6 +34,10 @@ def test_viewer_static_assets_present() -> None:
     assert "sampleElev" in js
     assert "tog-error" in html
     assert "relief" in js
+    assert "phase-bar" in html
+    assert "CALIBRATE" in html
+    assert "mission-metrics" in html
+    assert "tog-observed" in html
 
 
 def test_demo_writes_viewer_bundle(tmp_path: Path) -> None:

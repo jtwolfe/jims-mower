@@ -23,8 +23,10 @@
 # obstacles:
 #   - {kind: tree|person|dog|cat|bird|furniture|toy, x, y, radius?, heading?,
 #      trajectory?: {mode: wander|patrol|loop|line, waypoints: [[x,y],...], speed_mps?}}
-# world / robot / sensors / planner / perception / reward / env:
+# world / robot / sensors / planner / mission / perception / reward / env:
 #   same keys as EnvConfig (merged onto `base`)
+# mission:
+#   explore_complete, stamp_radius_m, max_*_steps — calibrate→explore→mow
 # world.terrain.base_gradient:
 #   slope_rad / slope_pct, yaw_rad (ascent heading), undulation_m
 #   Default yards are a mild planar grade, not a flat pad. The curriculum

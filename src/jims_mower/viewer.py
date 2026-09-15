@@ -104,6 +104,7 @@ def write_viewer_bundle(
     cameras: Optional[list[str]] = None,
     policy: str = "",
     stride: int = 2,
+    mission: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Write mesh + rasters + viewer.json so the HTTP UI can open this run."""
     dest = Path(out_dir)
@@ -204,6 +205,8 @@ def write_viewer_bundle(
         (dest / "plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     if profile is not None:
         (dest / "profile.json").write_text(json.dumps(profile, indent=2), encoding="utf-8")
+    if mission is not None:
+        (dest / "mission.json").write_text(json.dumps(mission, indent=2), encoding="utf-8")
 
     cam_steps = _scan_camera_steps(dest)
     manifest = {
@@ -222,11 +225,14 @@ def write_viewer_bundle(
             "elevation_error": "maps/elevation_error.png"
             if (maps_dir / "elevation_error.png").is_file()
             else None,
+            "observed": "maps/observed.png" if (maps_dir / "observed.png").is_file() else None,
         },
         "relief_scale": 4.0,
         "poses": "poses.json" if pose_rows else None,
         "plan": "plan.json" if (dest / "plan.json").is_file() else None,
         "profile": "profile.json" if (dest / "profile.json").is_file() else None,
+        "mission": "mission.json" if (dest / "mission.json").is_file() else None,
+        "observed": "maps/observed.png" if (maps_dir / "observed.png").is_file() else None,
         "cameras": cameras or (cam_steps[0]["cameras"] if cam_steps else []),
         "camera_steps": cam_steps,
         "n_poses": len(pose_rows),
@@ -266,6 +272,7 @@ def prepare_viewer_dir(source: Union[str, Path], *, stride: int = 2) -> dict[str
     poses: list[Any] = []
     plan = None
     profile = None
+    mission = None
     env = None
     policy = ""
 
@@ -276,6 +283,8 @@ def prepare_viewer_dir(source: Union[str, Path], *, stride: int = 2) -> dict[str
         plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
     if (root / "profile.json").is_file():
         profile = json.loads((root / "profile.json").read_text(encoding="utf-8"))
+    if (root / "mission.json").is_file():
+        mission = json.loads((root / "mission.json").read_text(encoding="utf-8"))
     if (root / "summary.json").is_file():
         summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
         policy = str(summary.get("policy") or "")
@@ -338,6 +347,7 @@ def prepare_viewer_dir(source: Union[str, Path], *, stride: int = 2) -> dict[str
         profile=profile,
         policy=policy,
         stride=stride,
+        mission=mission,
     )
     return manifest
 
