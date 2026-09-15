@@ -240,6 +240,31 @@ def test_uncertain_steep_hint_gets_boost() -> None:
     assert cm.cost[6, 6] > STEEP_COST
 
 
+def test_elevation_prior_floors_flat_observer_slope() -> None:
+    hazard, slope = _empty(20)
+    # Observer left slope at 0; prior is a 0.14 rad grade along +x.
+    yy = (np.arange(20) + 0.5) * 0.2
+    xx = (np.arange(20) + 0.5) * 0.2
+    gx, gy = np.meshgrid(xx, yy)
+    prior = (0.14 * (gx - 2.0)).astype(np.float32)
+    cm = build_costmap(
+        hazard,
+        slope,
+        resolution_m=0.2,
+        width_m=4.0,
+        height_m=4.0,
+        max_climb_slope_rad=0.40,
+        drain_clearance_m=0.0,
+        margin_m=0.0,
+        elevation_prior=prior,
+        prior_blend=1.0,
+    )
+    assert float(np.mean(cm.cost)) >= 1.0
+    # Grade is below the climb cap, so the yard stays free (not the old
+    # "almost-flat observer vs sloped physics" fight).
+    assert not bool(cm.blocked[10, 10])
+
+
 def test_confidence_shape_mismatch() -> None:
     hazard, slope = _empty(8)
     with pytest.raises(ValueError):

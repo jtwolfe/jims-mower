@@ -20,9 +20,11 @@ from jims_mower.constants import (
     HAND_SIGNALS,
     LABEL_TO_ID,
     MAX_DETECTIONS,
+    SEMANTIC_NAMES,
     SIGNAL_TO_ID,
-    TERRAIN_DRAIN,
+    STRUCTURE_NAMES,
 )
+from jims_mower.structures import layer_from_terrain_labels, no_mow_from_labels
 from jims_mower.kinematics import (
     integrate_pose,
     sit_on_terrain,
@@ -227,8 +229,10 @@ class MowerEnv(gym.Env):
                     dtype=np.float32,
                 ),
                 "elevation": spaces.Box(-5.0, 5.0, shape=cov_shape, dtype=np.float32),
+                "elevation_prior": spaces.Box(-5.0, 5.0, shape=cov_shape, dtype=np.float32),
                 "slope": spaces.Box(0.0, np.pi / 2, shape=cov_shape, dtype=np.float32),
                 "hazard": spaces.Box(0.0, 3.0, shape=cov_shape, dtype=np.float32),
+                "structure": spaces.Box(0.0, 8.0, shape=cov_shape, dtype=np.float32),
                 "confidence": spaces.Box(0.0, 1.0, shape=cov_shape, dtype=np.float32),
                 "trimmer_enabled": spaces.Box(0.0, 1.0, shape=(1,), dtype=np.float32),
                 "hand_signal": spaces.Discrete(1 + len(HAND_SIGNALS)),
@@ -247,6 +251,12 @@ class MowerEnv(gym.Env):
             self.cfg.world.resolution_m,
         )
         self._terrain = HeightField.empty(
+            self.cfg.world.width_m,
+            self.cfg.world.height_m,
+            self.cfg.world.resolution_m,
+        )
+        self._structure = layer_from_terrain_labels(
+            self._terrain.labels,
             self.cfg.world.width_m,
             self.cfg.world.height_m,
             self.cfg.world.resolution_m,
@@ -368,6 +378,23 @@ class MowerEnv(gym.Env):
             gradient_slope_rad=grad.effective_slope_rad(),
             gradient_yaw_rad=grad.yaw_rad,
             gradient_undulation_m=grad.undulation_m,
+            multi_scale_amp_m=terr_cfg.multi_scale_amp_m,
+            swale_amp_m=terr_cfg.swale_amp_m,
+            dem_path=terr_cfg.dem_path,
+            paths=list(self.scenario.paths) if self.scenario else None,
+            buildings=(
+                list(self.scenario.buildings) + list(self.scenario.greens)
+                if self.scenario
+                else None
+            ),
+            bunkers=list(self.scenario.bunkers) if self.scenario else None,
+            garden_beds=list(self.scenario.garden_beds) if self.scenario else None,
+        )
+        self._structure = layer_from_terrain_labels(
+            self._terrain.labels,
+            self.cfg.world.width_m,
+            self.cfg.world.height_m,
+            self.cfg.world.resolution_m,
         )
         self._yard = spawn_yard(
             self.np_random,
@@ -387,7 +414,7 @@ class MowerEnv(gym.Env):
         for obst in self._yard.static():
             if obst.kind in {"tree", "furniture"}:
                 self._coverage.exclude_circle(obst.x, obst.y, obst.radius)
-        self._coverage.exclude_mask(self._terrain.labels != TERRAIN_DRAIN)
+        self._coverage.exclude_mask(~no_mow_from_labels(self._terrain.labels))
         loaded = False
         mission_pose = None
         if mission_load and Path(mission_load).is_file():
@@ -400,7 +427,7 @@ class MowerEnv(gym.Env):
             for obst in self._yard.static():
                 if obst.kind in {"tree", "furniture"}:
                     self._coverage.exclude_circle(obst.x, obst.y, obst.radius)
-            self._coverage.exclude_mask(self._terrain.labels != TERRAIN_DRAIN)
+            self._coverage.exclude_mask(~no_mow_from_labels(self._terrain.labels))
             loaded = True
         elif previous_cut is not None:
             self._coverage.cut = previous_cut & self._coverage.grass
@@ -833,6 +860,9 @@ class MowerEnv(gym.Env):
                 length_m=self.cfg.robot.length_m,
                 track_m=self.cfg.robot.track_m,
                 elevation=self._fused_elev,
+                prior=terrain_est.elevation_prior
+                if terrain_est.elevation_prior is not None
+                else terrain_est.elevation,
             )
         if self.cfg.curriculum.hand_signal_classifier:
             signal_name = _nearest_detection_signal(detections, (self._pose.x, self._pose.y))
@@ -841,6 +871,7 @@ class MowerEnv(gym.Env):
                 self._yard.obstacles, (self._pose.x, self._pose.y)
             )
         signal_id = SIGNAL_TO_ID.get(signal_name or "", 0)
+        structure = _merge_structure(self._structure.grid, terrain_est.structure)
         self._last_topdown = self._topdown()
         hx, hy, hz = trimmer_xyz(
             self._pose,
@@ -894,8 +925,14 @@ class MowerEnv(gym.Env):
             "gps": gps,
             "tof": tof,
             "elevation": terrain_est.elevation.astype(np.float32),
+            "elevation_prior": (
+                terrain_est.elevation_prior.astype(np.float32)
+                if terrain_est.elevation_prior is not None
+                else terrain_est.elevation.astype(np.float32)
+            ),
             "slope": terrain_est.slope.astype(np.float32),
             "hazard": terrain_est.hazard.astype(np.float32),
+            "structure": structure,
             "confidence": _terrain_confidence(terrain_est),
             "trimmer_enabled": np.array(
                 [1.0 if self._trimmer_on else 0.0], dtype=np.float32
@@ -943,6 +980,8 @@ class MowerEnv(gym.Env):
             "geofence": [list(p) for p in spec.keep_in],
             "geofence_spec": spec.as_info(),
             "geofence_advice": fence_advice,
+            "structure": structure.copy(),
+            "structure_names": STRUCTURE_NAMES,
             "living_advice": living.advice,
             "living_reason": living.reason,
             **self.budget.as_info(),
@@ -953,17 +992,15 @@ class MowerEnv(gym.Env):
             self._pose, gnss_dropped=float(gps[3]) < 0.5
         )
         if self.cfg.perception.semantic:
-            sem = semantic_raster(self._coverage.as_float(), terrain_est.hazard, occupancy)
+            sem = semantic_raster(
+                self._coverage.as_float(),
+                terrain_est.hazard,
+                occupancy,
+                structure,
+            )
             self._last_semantic = sem
             info["semantic"] = sem
-            info["semantic_names"] = (
-                "free",
-                "grass",
-                "non_grass",
-                "drain",
-                "bank",
-                "static",
-            )
+            info["semantic_names"] = SEMANTIC_NAMES
         if self.cfg.perception.height_fusion and self._fused_elev is not None:
             info["height_fused"] = self._fused_elev
             info["height_fusion_stub"] = True
@@ -1009,6 +1046,16 @@ def _weather_dict(scenario: Optional[Scenario]) -> dict[str, Any]:
         return {"night": False, "dawn": False, "wet": False, "lighting": "day"}
     w = scenario.weather
     return {"night": w.night, "dawn": w.dawn, "wet": w.wet, "lighting": w.lighting}
+
+
+def _merge_structure(authored: np.ndarray, observed: Optional[np.ndarray]) -> np.ndarray:
+    base = np.asarray(authored, dtype=np.float32)
+    if observed is None:
+        return base
+    extra = np.asarray(observed, dtype=np.float32)
+    if extra.shape != base.shape:
+        return base
+    return np.maximum(base, extra)
 
 
 def _terrain_confidence(est: Any) -> np.ndarray:

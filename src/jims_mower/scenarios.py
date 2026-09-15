@@ -28,6 +28,7 @@ from jims_mower.config import (
 )
 from jims_mower.constants import TRAJECTORY_MODES
 from jims_mower.geofence import GeofenceSpec
+from jims_mower.structures import BunkerFeature, PathFeature, PolygonFeature
 from jims_mower.terrain import BankFeature, DrainFeature
 from jims_mower.types import Obstacle, Trajectory
 from jims_mower.world import place_obstacle
@@ -49,7 +50,21 @@ ENV_OVERLAY_KEYS = frozenset(
 )
 
 SCENARIO_HINT_KEYS = frozenset(
-    {"weather", "geofence", "keepout", "drains", "banks", "obstacles", "env", "base"}
+    {
+        "weather",
+        "geofence",
+        "keepout",
+        "drains",
+        "banks",
+        "obstacles",
+        "env",
+        "base",
+        "paths",
+        "buildings",
+        "bunkers",
+        "garden_beds",
+        "greens",
+    }
 )
 
 LIGHTING_FLAGS = frozenset({"night", "dawn", "day"})
@@ -90,6 +105,11 @@ class Scenario:
     drains: list[DrainFeature] = field(default_factory=list)
     banks: list[BankFeature] = field(default_factory=list)
     obstacles: list[Obstacle] = field(default_factory=list)
+    paths: list[PathFeature] = field(default_factory=list)
+    buildings: list[PolygonFeature] = field(default_factory=list)
+    bunkers: list[BunkerFeature] = field(default_factory=list)
+    garden_beds: list[PolygonFeature] = field(default_factory=list)
+    greens: list[PolygonFeature] = field(default_factory=list)
     config: EnvConfig = field(default_factory=EnvConfig)
     path: Optional[Path] = None
 
@@ -328,6 +348,59 @@ def _parse_bank(item: Any) -> BankFeature:
     )
 
 
+def _parse_path(item: Any) -> PathFeature:
+    if not isinstance(item, dict):
+        raise ScenarioError("Each path must be a mapping")
+    raw = item.get("vertices") or item.get("polyline") or item.get("points")
+    if not raw:
+        raise ScenarioError("path needs vertices: [[x, y], ...]")
+    verts = [_xy_pair(p, field="path.vertices") for p in raw]
+    if len(verts) < 2:
+        raise ScenarioError("path.vertices needs at least 2 points")
+    extra = set(item) - {"vertices", "polyline", "points", "width_m", "kind"}
+    if extra:
+        raise ScenarioError(f"Unknown path keys: {sorted(extra)}")
+    return PathFeature(
+        vertices=tuple(verts),
+        width_m=float(item.get("width_m", 1.2)),
+        kind=str(item.get("kind", "path_paved")),
+    )
+
+
+def _parse_polygon_feature(item: Any, *, field: str, default_kind: str) -> PolygonFeature:
+    if not isinstance(item, dict):
+        raise ScenarioError(f"Each {field} must be a mapping")
+    raw = item.get("vertices") or item.get("polygon")
+    if not raw:
+        raise ScenarioError(f"{field} needs vertices: [[x, y], ...]")
+    verts = _parse_polygon(raw, field=f"{field}.vertices")
+    extra = set(item) - {"vertices", "polygon", "kind", "height_m"}
+    if extra:
+        raise ScenarioError(f"Unknown {field} keys: {sorted(extra)}")
+    return PolygonFeature(
+        vertices=tuple(verts),
+        kind=str(item.get("kind", default_kind)),
+        height_m=float(item.get("height_m", 0.0)),
+    )
+
+
+def _parse_bunker(item: Any) -> BunkerFeature:
+    if not isinstance(item, dict):
+        raise ScenarioError("Each bunker must be a mapping")
+    if "x" not in item or "y" not in item:
+        raise ScenarioError("bunker needs x, y")
+    extra = set(item) - {"x", "y", "radius_m", "depth_m", "kind"}
+    if extra:
+        raise ScenarioError(f"Unknown bunker keys: {sorted(extra)}")
+    return BunkerFeature(
+        x=float(item["x"]),
+        y=float(item["y"]),
+        radius_m=float(item.get("radius_m", 1.4)),
+        depth_m=float(item.get("depth_m", 0.22)),
+        kind=str(item.get("kind", "bunker")),
+    )
+
+
 def _parse_obstacle(item: Any) -> Obstacle:
     if not isinstance(item, dict):
         raise ScenarioError("Each obstacle must be a mapping")
@@ -379,6 +452,20 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
     drains = [_parse_drain(d) for d in (data.get("drains") or [])]
     banks = [_parse_bank(b) for b in (data.get("banks") or [])]
     obstacles = [_parse_obstacle(o) for o in (data.get("obstacles") or [])]
+    paths = [_parse_path(p) for p in (data.get("paths") or [])]
+    buildings = [
+        _parse_polygon_feature(p, field="building", default_kind="building")
+        for p in (data.get("buildings") or [])
+    ]
+    bunkers = [_parse_bunker(b) for b in (data.get("bunkers") or [])]
+    garden_beds = [
+        _parse_polygon_feature(p, field="garden_bed", default_kind="garden_bed")
+        for p in (data.get("garden_beds") or [])
+    ]
+    greens = [
+        _parse_polygon_feature(p, field="green", default_kind="green")
+        for p in (data.get("greens") or [])
+    ]
     try:
         cfg = load_config(_resolve_base(data.get("base")))
         overlay = _env_overlay(data)
@@ -407,6 +494,11 @@ def parse_scenario(data: dict[str, Any], *, path: Optional[Path] = None) -> Scen
         drains=drains,
         banks=banks,
         obstacles=obstacles,
+        paths=paths,
+        buildings=buildings,
+        bunkers=bunkers,
+        garden_beds=garden_beds,
+        greens=greens,
         config=cfg,
         path=path,
     )

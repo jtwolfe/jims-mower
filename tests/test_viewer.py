@@ -31,6 +31,9 @@ def test_viewer_static_assets_present() -> None:
     assert "keep_in" in js
     # Viewer-only Y lift so a property-scale grade reads on a 12 m yard.
     assert "scale.y" in js
+    assert "sampleElev" in js
+    assert "tog-error" in html
+    assert "relief" in js
 
 
 def test_demo_writes_viewer_bundle(tmp_path: Path) -> None:

@@ -13,7 +13,12 @@ from jims_mower.perception.hand_signals import HandSignalCurriculum
 from jims_mower.perception.mock import MockDetector, detection_from_obstacle
 from jims_mower.perception.semantic import semantic_raster
 from jims_mower.perception.trt import TrtDetector, TrtTerrainObserver, tensorrt_available
-from jims_mower.perception.cv_terrain import classify_terrain_rgb, drain_pixel_fraction
+from jims_mower.perception.cv_terrain import (
+    classify_structure_rgb,
+    classify_terrain_rgb,
+    drain_pixel_fraction,
+)
+from jims_mower.perception.grade import PlanarGradeModel, gradients_from_attitude
 from jims_mower.perception.fuse import fuse_camera_labels, fuse_stamps
 from jims_mower.perception.learn import TerrainMLP, load_weights, save_weights
 from jims_mower.perception.temporal import DetectionTracklets, HazardHysteresis
@@ -48,7 +53,10 @@ __all__ = [
     "TerrainMLP",
     "TerrainObserver",
     "appearance_features",
+    "classify_structure_rgb",
     "classify_terrain_rgb",
+    "gradients_from_attitude",
+    "PlanarGradeModel",
     "detection_from_obstacle",
     "drain_pixel_fraction",
     "fuse_camera_labels",

@@ -14,11 +14,20 @@ from jims_mower.constants import (
     HAZARD_DRAIN_EDGE,
     HAZARD_STEEP,
     SEMANTIC_BANK,
+    SEMANTIC_BUILDING,
+    SEMANTIC_BUNKER,
     SEMANTIC_DRAIN,
     SEMANTIC_FREE,
+    SEMANTIC_GARDEN,
     SEMANTIC_GRASS,
     SEMANTIC_NON_GRASS,
+    SEMANTIC_PATH,
     SEMANTIC_STATIC,
+    STRUCTURE_BUILDING,
+    STRUCTURE_BUNKER,
+    STRUCTURE_GARDEN,
+    STRUCTURE_GREEN,
+    STRUCTURE_PATH,
 )
 
 
@@ -26,6 +35,7 @@ def semantic_raster(
     coverage: np.ndarray,
     hazard: np.ndarray,
     occupancy: Optional[np.ndarray] = None,
+    structure: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """uint8 layer aligned with the grass grid.
 
@@ -45,6 +55,14 @@ def semantic_raster(
     drain = haz >= HAZARD_DRAIN_EDGE
     # Channel / lip win over bank so a swale on a slope stays drain.
     out[drain] = SEMANTIC_DRAIN
+    if structure is not None:
+        struct = np.asarray(structure)
+        if struct.shape != cov.shape:
+            raise ValueError("structure shape must match coverage")
+        out[struct == STRUCTURE_PATH] = SEMANTIC_PATH
+        out[struct == STRUCTURE_BUNKER] = SEMANTIC_BUNKER
+        out[np.isin(struct, (STRUCTURE_GARDEN, STRUCTURE_GREEN))] = SEMANTIC_GARDEN
+        out[struct == STRUCTURE_BUILDING] = SEMANTIC_BUILDING
     if occupancy is not None:
         occ = np.asarray(occupancy, dtype=np.float32)
         if occ.shape != cov.shape:

@@ -133,6 +133,27 @@ def write_viewer_bundle(
             maps_dir / "hazard.png",
             render_scalar_map(hazard, vmin=0.0, vmax=3.0, cmap="hazard"),
         )
+        obs_elev = None
+        if getattr(env, "_last_terrain_est", None) is not None:
+            obs_elev = np.asarray(env._last_terrain_est.elevation, dtype=np.float32)
+            write_map_npy(maps_dir / "elevation_observer.npy", obs_elev)
+            err = np.abs(obs_elev - elev)
+            write_map_npy(maps_dir / "elevation_error.npy", err)
+            write_map_png(
+                maps_dir / "elevation_error.png",
+                render_scalar_map(err, vmin=0.0, vmax=max(0.25, float(err.max()) or 0.25), cmap="slope"),
+            )
+        (maps_dir / "elevation.json").write_text(
+            json.dumps(
+                {
+                    "rows": int(elev.shape[0]),
+                    "cols": int(elev.shape[1]),
+                    "resolution_m": resolution_m,
+                    "values": elev.astype(float).reshape(-1).tolist(),
+                }
+            ),
+            encoding="utf-8",
+        )
         if occupancy is not None:
             write_map_npy(maps_dir / "occupancy.npy", occupancy)
             write_map_png(maps_dir / "occupancy.png", occupancy_to_rgb(occupancy))
@@ -197,7 +218,12 @@ def write_viewer_bundle(
             "coverage": "maps/coverage.png" if (maps_dir / "coverage.png").is_file() else None,
             "hazard": "maps/hazard.png" if (maps_dir / "hazard.png").is_file() else None,
             "occupancy": "maps/occupancy.png" if (maps_dir / "occupancy.png").is_file() else None,
+            "elevation": "maps/elevation.json" if (maps_dir / "elevation.json").is_file() else None,
+            "elevation_error": "maps/elevation_error.png"
+            if (maps_dir / "elevation_error.png").is_file()
+            else None,
         },
+        "relief_scale": 4.0,
         "poses": "poses.json" if pose_rows else None,
         "plan": "plan.json" if (dest / "plan.json").is_file() else None,
         "profile": "profile.json" if (dest / "profile.json").is_file() else None,

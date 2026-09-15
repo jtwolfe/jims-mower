@@ -9,9 +9,15 @@ from typing import Optional, Protocol, Union, runtime_checkable
 
 import numpy as np
 
-from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN_EDGE, HAZARD_STEEP
-from jims_mower.perception.cv_terrain import classify_terrain_rgb, stamp_tof_corners
+from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_STEEP
+from jims_mower.perception.cv_terrain import (
+    classify_structure_rgb,
+    classify_terrain_rgb,
+    stamp_structure_labels,
+    stamp_tof_corners,
+)
 from jims_mower.perception.fuse import fuse_camera_labels, paint_geometry_from_hazard
+from jims_mower.perception.grade import PlanarGradeModel, paint_planar_grade
 from jims_mower.perception.learn import TerrainMLP, classify_image, load_weights
 from jims_mower.perception.temporal import HazardHysteresis
 from jims_mower.terrain import HeightField
@@ -27,6 +33,8 @@ class TerrainEstimate:
     hazard: np.ndarray
     source: str
     confidence: Optional[np.ndarray] = None
+    elevation_prior: Optional[np.ndarray] = None
+    structure: Optional[np.ndarray] = None
 
 
 @runtime_checkable
@@ -119,10 +127,13 @@ class HeuristicTerrainObserver:
     """RGB + ToF drain/bank heuristic. Not a learned net — replace on the Orin.
 
     Colour cues match the gym renderer's ditch/bank palette. Pixels are
-    back-projected onto a flat-yard plane (the onboard approximation; this
-    class ignores ``context.terrain``). Downward ToF stamps a local wheel
-    drop. IMU paints a slope disk under the chassis. Maps persist for the
-    episode so the planner can replan as new lips enter the cameras.
+    back-projected onto the seated tangent plane (the onboard approximation;
+    this class ignores ``context.terrain``). IMU pitch/roll + pose recover a
+    yard-scale planar grade so elevation/slope maps are not flattened.
+    Downward ToF stamps a local wheel drop. Isolated brown lips (dirt /
+    shade on a smooth grade) are gated unless they sit next to a channel.
+    Maps persist for the episode so the planner can replan as new lips enter
+    the cameras.
     """
 
     def __init__(
@@ -141,12 +152,18 @@ class HeuristicTerrainObserver:
         self._slope: Optional[np.ndarray] = None
         self._hazard: Optional[np.ndarray] = None
         self._confidence: Optional[np.ndarray] = None
+        self._prior: Optional[np.ndarray] = None
+        self._structure: Optional[np.ndarray] = None
+        self._grade = PlanarGradeModel()
 
     def reset(self) -> None:
         self._elevation = None
         self._slope = None
         self._hazard = None
         self._confidence = None
+        self._prior = None
+        self._structure = None
+        self._grade.reset()
         if self._filter is not None:
             self._filter.reset()
 
@@ -161,6 +178,7 @@ class HeuristicTerrainObserver:
             self._elevation, self._slope, self._hazard = _empty_maps(shape)
             # Unobserved cells stay cheap-but-uncertain (not a hard block).
             self._confidence = np.full(shape, 0.08, dtype=np.float32)
+            self._structure = np.zeros(shape, dtype=np.uint8)
 
     def estimate(
         self,
@@ -179,6 +197,14 @@ class HeuristicTerrainObserver:
             and self._confidence is not None
         )
         pose: Pose = context.pose
+        self._grade.update(pose, imu, gps)
+        self._prior = paint_planar_grade(
+            self._grade,
+            self._elevation,
+            self._slope,
+            resolution_m=context.resolution_m,
+            confidence=self._confidence,
+        )
         prev_hazard = self._hazard.copy()
         fused, conf = fuse_camera_labels(
             images,
@@ -223,6 +249,23 @@ class HeuristicTerrainObserver:
                 steep_rad=max(self.steep_rad, context.steep_slope_rad),
             )
             self._raise_confidence(self._hazard > before, 0.68)
+        if self._structure is None or self._structure.shape != context.map_shape:
+            self._structure = np.zeros(context.map_shape, dtype=np.uint8)
+        cams = {c.name: c for c in context.cameras}
+        for name, frame in images.items():
+            cam = cams.get(name)
+            if cam is None or frame.ndim != 3:
+                continue
+            stamp_structure_labels(
+                frame,
+                classify_structure_rgb(frame),
+                cam,
+                pose,
+                structure=self._structure,
+                resolution_m=context.resolution_m,
+                world_size=context.world_size,
+                max_range_m=self.max_range_m,
+            )
         self._paint_local_imu(imu, gps, context)
         return TerrainEstimate(
             self._elevation.copy(),
@@ -230,6 +273,8 @@ class HeuristicTerrainObserver:
             self._hazard.copy(),
             source="heuristic",
             confidence=self._confidence.copy(),
+            elevation_prior=None if self._prior is None else self._prior.copy(),
+            structure=self._structure.copy(),
         )
 
     def _raise_confidence(self, mask: np.ndarray, value: float) -> None:
@@ -242,7 +287,16 @@ class HeuristicTerrainObserver:
     def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
         """One-cell grow on *new* lip/channel stamps so a broken stripe blocks."""
         assert self._hazard is not None
+        channel = self._hazard >= HAZARD_DRAIN
         fresh = (self._hazard >= HAZARD_DRAIN_EDGE) & (prev_hazard < HAZARD_DRAIN_EDGE)
+        # Only grow lips that already touch a channel — do not invent a ditch.
+        if np.any(channel):
+            near = channel.copy()
+            near[1:, :] |= channel[:-1, :]
+            near[:-1, :] |= channel[1:, :]
+            near[:, 1:] |= channel[:, :-1]
+            near[:, :-1] |= channel[:, 1:]
+            fresh = fresh & near
         if not np.any(fresh):
             return
         grown = fresh.copy()
@@ -287,8 +341,6 @@ class HeuristicTerrainObserver:
                 if (wx - cx) ** 2 + (wy - cy) ** 2 > r2:
                     continue
                 self._slope[row, col] = max(float(self._slope[row, col]), slope_est)
-                if abs(float(self._elevation[row, col])) < 1e-6:
-                    self._elevation[row, col] = pose.z
                 if slope_est >= self.steep_rad:
                     self._hazard[row, col] = max(float(self._hazard[row, col]), float(HAZARD_STEEP))
                 self._confidence[row, col] = max(float(self._confidence[row, col]), 0.42)
@@ -324,12 +376,16 @@ class LearnedTerrainObserver:
         self._slope: Optional[np.ndarray] = None
         self._hazard: Optional[np.ndarray] = None
         self._confidence: Optional[np.ndarray] = None
+        self._prior: Optional[np.ndarray] = None
+        self._grade = PlanarGradeModel()
 
     def reset(self) -> None:
         self._elevation = None
         self._slope = None
         self._hazard = None
         self._confidence = None
+        self._prior = None
+        self._grade.reset()
         if self._filter is not None:
             self._filter.reset()
 
@@ -359,6 +415,14 @@ class LearnedTerrainObserver:
             and self._confidence is not None
         )
         pose: Pose = context.pose
+        self._grade.update(pose, imu, gps)
+        self._prior = paint_planar_grade(
+            self._grade,
+            self._elevation,
+            self._slope,
+            resolution_m=context.resolution_m,
+            confidence=self._confidence,
+        )
         prev_hazard = self._hazard.copy()
 
         def _label(frame: np.ndarray, cam) -> tuple[np.ndarray, np.ndarray]:
@@ -418,6 +482,7 @@ class LearnedTerrainObserver:
             self._hazard.copy(),
             source="learned",
             confidence=self._confidence.copy(),
+            elevation_prior=None if self._prior is None else self._prior.copy(),
         )
 
     def _grow_drain_gaps(self, prev_hazard: np.ndarray) -> None:
@@ -461,8 +526,6 @@ class LearnedTerrainObserver:
                 if (wx - cx) ** 2 + (wy - cy) ** 2 > r2:
                     continue
                 self._slope[row, col] = max(float(self._slope[row, col]), slope_est)
-                if abs(float(self._elevation[row, col])) < 1e-6:
-                    self._elevation[row, col] = pose.z
                 if slope_est >= self.steep_rad:
                     self._hazard[row, col] = max(float(self._hazard[row, col]), float(HAZARD_STEEP))
 

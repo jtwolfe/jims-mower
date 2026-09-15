@@ -116,6 +116,8 @@ def fuse_height_rgb_tof(
     track_m: float = 0.40,
     hover_m: float = 0.06,
     elevation: Optional[np.ndarray] = None,
+    prior: Optional[np.ndarray] = None,
+    prior_weight: float = 0.65,
 ) -> np.ndarray:
     """RGB ground-plane back-projection + downward ToF. Persistent-friendly.
 
@@ -170,6 +172,11 @@ def fuse_height_rgb_tof(
         track_m=track_m,
         hover_m=hover_m,
     )
+    if prior is not None:
+        plane = np.asarray(prior, dtype=np.float32)
+        if plane.shape == elev.shape:
+            w = float(np.clip(prior_weight, 0.0, 1.0))
+            elev = ((1.0 - w) * elev + w * plane).astype(np.float32)
     return elev
 
 

@@ -396,9 +396,25 @@ class TerrainPolicy:
         confidence = (
             np.asarray(obs["confidence"], dtype=np.float32) if "confidence" in obs else None
         )
+        structure = (
+            np.asarray(obs["structure"]) if "structure" in obs and obs["structure"] is not None else None
+        )
+        elevation = (
+            np.asarray(obs["elevation"], dtype=np.float32) if "elevation" in obs else None
+        )
+        elevation_prior = (
+            np.asarray(obs["elevation_prior"], dtype=np.float32)
+            if "elevation_prior" in obs and obs["elevation_prior"] is not None
+            else None
+        )
         unc = self.cfg.planner.uncertainty
         wet = bool(getattr(self, "_wet", False))
         soc = getattr(self, "_battery_soc", None)
+        blend = (
+            float(self.cfg.planner.elevation_prior_weight)
+            if bool(self.cfg.planner.blend_elevation_prior)
+            else 0.0
+        )
         costmap = build_costmap(
             hazard,
             slope,
@@ -419,6 +435,12 @@ class TerrainPolicy:
             geofence_inflate_m=self.cfg.planner.geofence_inflate_m,
             wet=wet,
             wet_slope_extra=self.cfg.planner.wet_slope_extra,
+            structure=structure,
+            path_cost=self.cfg.planner.path_cost,
+            bunker_cost=self.cfg.planner.bunker_cost,
+            elevation=elevation,
+            elevation_prior=elevation_prior,
+            prior_blend=blend,
         )
         mowable = _mowable_mask(coverage, costmap.blocked.shape)
         limp_soc = float(self.cfg.runtime.battery.limp_soc)

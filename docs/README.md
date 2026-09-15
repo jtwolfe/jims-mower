@@ -11,6 +11,7 @@ Wave notes and the on-box message contract live here.
 | [`WAVE3A.md`](WAVE3A.md) | BC stub, RL scaffold, ESTOP/limp, incident/telemetry, owner overlay |
 | [`WAVE3B.md`](WAVE3B.md) | Fake drivers, multiprocessing bridge, studies, Orin budget stub |
 | [`WAVE4.md`](WAVE4.md) | Appearance categories, persist occupancy, wet/energy plan, world/Orin hooks |
+| [`TERRAIN_MAPS.md`](TERRAIN_MAPS.md) | Observer-vs-physics grade, paths/structures, golf yards |
 | [`UX.md`](UX.md) | World Viewer + Teach Boundary (low-poly mesh, no mAP/FPS) |
 | [`UX_B.md`](UX_B.md) | FaultBus, dead-motor SOS, radio sim, `jims-mower-selftest` |
 | [`UX_C.md`](UX_C.md) | Thin owner app, YardProfile API, buy→mow (BT / optional Wi-Fi / LoRa) |

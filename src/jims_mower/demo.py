@@ -336,7 +336,12 @@ def run_demo(
     plan_payload = {
         "policy": name,
         "waypoints": [
-            {"x": x, "y": y} for x, y in (overlay_policy.waypoints if overlay_policy else [])
+            {
+                "x": x,
+                "y": y,
+                "z": float(env._terrain.sample(x, y)),
+            }
+            for x, y in (overlay_policy.waypoints if overlay_policy else [])
         ],
         "index": overlay_policy.index if overlay_policy else 0,
         "n_segments": terrain_policy.plan.n_segments if terrain_policy and terrain_policy.plan else 0,

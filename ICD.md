@@ -92,14 +92,18 @@ class TerrainObserver(Protocol):
 ```
 
 - Returns `TerrainEstimate(elevation, slope, hazard, source)` at `context.map_shape`.
+  Optional `elevation_prior` (yard-scale IMU plane) and `structure`.
 - A real head **must ignore** `context.terrain` (god-view `HeightField`).
-- Modes: `heuristic` (default, RGB+ToF, no `context.terrain`), `oracle`
+- Modes: `heuristic` (default, RGB+ToF+IMU plane, no `context.terrain`), `oracle`
   (training), `blind` (zeros), `learned` (exporter-trained numpy stub;
   weights via `perception.weights_path` or `LearnedTerrainObserver(...)`).
+- Heuristic isolated drain-lip stamps are gated unless they sit next to a
+  channel (or a ToF drop). Not a published detector score.
 - Optional `TerrainEstimate.confidence` is a **relative merge weight** from
   the multi-camera BEV fuse — not a published score.
 - `imu` is the 6-vector; `gps` is the 4-vector.
 - `info["tracklets"]` — person/dog association stub (`id`, `x`, `y`, `hits`).
+- `obs["structure"]` / `info["structure"]` — path / building / bunker / garden / green.
 
 ## GrassObserver
 
@@ -110,14 +114,15 @@ class GrassObserver(Protocol):
 
 Per-camera uncut-grass fraction. Default: `ColorGrassObserver`.
 `FeatureGrassObserver` (`perception.grass_mode: feature`) is a numpy stub.
-Optional `info["semantic"]` raster: grass / non-grass / drain / bank / static.
+Optional `info["semantic"]` raster: grass / non-grass / drain / bank / static
+plus path / building / bunker / garden when a structure layer is present.
 
 ## Planner / controller
 
 `TerrainPolicy` consumes **observation** maps (whatever the observer wrote),
 not the height field:
 
-1. `build_costmap(hazard, slope, occupancy, …)`
+1. `build_costmap(hazard, slope, occupancy, structure, elevation_prior, …)`
 2. Boustrophedon strips + A* (`plan_coverage`)
 3. Zero-turn tracker; `terrain_advice` + `living_advice` + `geofence_advice`
    + IMU tilt → slow / reroute / stop. Repeated tip / channel advice runs

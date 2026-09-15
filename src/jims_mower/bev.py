@@ -46,9 +46,19 @@ def costmap_from_obs(obs: dict, cfg, geofence=None) -> Costmap:
     slope = np.asarray(obs["slope"], dtype=np.float32)
     occupancy = np.asarray(obs["occupancy"], dtype=np.float32) if "occupancy" in obs else None
     confidence = np.asarray(obs["confidence"], dtype=np.float32) if "confidence" in obs else None
+    structure = np.asarray(obs["structure"]) if obs.get("structure") is not None else None
+    elevation = np.asarray(obs["elevation"], dtype=np.float32) if "elevation" in obs else None
+    elevation_prior = (
+        np.asarray(obs["elevation_prior"], dtype=np.float32) if obs.get("elevation_prior") is not None else None
+    )
     rows, cols = hazard.shape
     res = float(cfg.world.resolution_m)
     unc = getattr(cfg.planner, "uncertainty", None)
+    blend = (
+        float(getattr(cfg.planner, "elevation_prior_weight", 0.0))
+        if bool(getattr(cfg.planner, "blend_elevation_prior", False))
+        else 0.0
+    )
     fence = geofence
     if fence is None:
         raw = obs.get("geofence_spec") if isinstance(obs, dict) else None
@@ -75,6 +85,12 @@ def costmap_from_obs(obs: dict, cfg, geofence=None) -> Costmap:
         uncertain_confidence_floor=getattr(unc, "confidence_floor", 0.25) if unc is not None else 0.25,
         geofence=fence,
         geofence_inflate_m=cfg.planner.geofence_inflate_m,
+        structure=structure,
+        path_cost=getattr(cfg.planner, "path_cost", 8.0),
+        bunker_cost=getattr(cfg.planner, "bunker_cost", 12.0),
+        elevation=elevation,
+        elevation_prior=elevation_prior,
+        prior_blend=blend,
     )
 
 

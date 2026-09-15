@@ -24,6 +24,7 @@ from jims_mower.perception import (
     drain_pixel_fraction,
 )
 from jims_mower.perception.cv_terrain import project_labels_to_maps, stamp_tof_corners
+from jims_mower.perception.fuse import gate_isolated_lips
 from jims_mower.renderer import render_camera
 from jims_mower.terrain import HeightField
 from jims_mower.types import CameraSpec, PerceptionContext, Pose
@@ -149,6 +150,16 @@ def test_heuristic_ignores_god_view_terrain() -> None:
     assert float(est.elevation.max()) < 1.0
     oracle = OracleTerrainObserver().estimate(images, imu, gps, ctx)
     assert float(oracle.elevation.max()) == pytest.approx(3.0)
+
+
+def test_gate_isolated_lips_keeps_channel_neighbours() -> None:
+    haz = np.zeros((8, 8), dtype=np.float32)
+    haz[3:5, 3:5] = HAZARD_DRAIN
+    haz[2, 3] = HAZARD_DRAIN_EDGE
+    haz[0, 0] = HAZARD_DRAIN_EDGE  # isolated dirt
+    gated = gate_isolated_lips(haz, dilate_cells=2)
+    assert float(gated[2, 3]) == float(HAZARD_DRAIN_EDGE)
+    assert float(gated[0, 0]) == 0.0
 
 
 def test_heuristic_reset_clears_maps() -> None:

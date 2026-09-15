@@ -11,17 +11,27 @@ from jims_mower.appearance import Appearance
 from jims_mower.cameras import camera_world_pose, ground_hits, heightfield_hits, project_point
 from jims_mower.constants import (
     BANK_RGB,
+    BUILDING_RGB,
+    BUNKER_RGB,
     CUT_GRASS_RGB,
     DIRT_RGB,
     DRAIN_EDGE_RGB,
     DRAIN_RGB,
+    GARDEN_RGB,
+    GREEN_RGB,
     KIND_RGB,
     LONG_GRASS_RGB,
+    PATH_RGB,
     PUDDLE_RGB,
     SKY_RGB,
     TERRAIN_BANK,
+    TERRAIN_BUILDING,
+    TERRAIN_BUNKER,
     TERRAIN_DRAIN,
     TERRAIN_DRAIN_EDGE,
+    TERRAIN_GARDEN,
+    TERRAIN_GREEN,
+    TERRAIN_PATH,
     TERRAIN_PUDDLE,
     UNCUT_GRASS_RGB,
 )
@@ -54,6 +64,16 @@ def _terrain_base_color(
             return DRAIN_EDGE_RGB
         if label == TERRAIN_PUDDLE:
             return PUDDLE_RGB
+        if label == TERRAIN_PATH:
+            return PATH_RGB
+        if label == TERRAIN_BUNKER:
+            return BUNKER_RGB
+        if label == TERRAIN_BUILDING:
+            return BUILDING_RGB
+        if label == TERRAIN_GARDEN:
+            return GARDEN_RGB
+        if label == TERRAIN_GREEN:
+            return GREEN_RGB
     sample = coverage.sample_world(x, y)
     if sample < 0.0:
         return DIRT_RGB

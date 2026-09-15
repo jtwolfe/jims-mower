@@ -8,7 +8,18 @@ from typing import Optional
 
 import numpy as np
 
-from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_STEEP
+from jims_mower.constants import (
+    BUNKER_COST,
+    HAZARD_DRAIN,
+    HAZARD_DRAIN_EDGE,
+    HAZARD_STEEP,
+    PATH_COST,
+    STRUCTURE_BUILDING,
+    STRUCTURE_BUNKER,
+    STRUCTURE_GARDEN,
+    STRUCTURE_GREEN,
+    STRUCTURE_PATH,
+)
 from jims_mower.geofence import GeofenceSpec, rasterize_geofence
 
 FREE_COST = 1.0
@@ -123,6 +134,12 @@ def build_costmap(
     geofence_inflate_m: float = 0.30,
     wet: bool = False,
     wet_slope_extra: float = 3.0,
+    structure: Optional[np.ndarray] = None,
+    path_cost: float = PATH_COST,
+    bunker_cost: float = BUNKER_COST,
+    elevation: Optional[np.ndarray] = None,
+    elevation_prior: Optional[np.ndarray] = None,
+    prior_blend: float = 0.0,
 ) -> Costmap:
     """Build a traversal costmap.
 
@@ -144,9 +161,22 @@ def build_costmap(
     ``cost *= 1 + uncertainty_inflate * (1 - conf)``, plus
     ``uncertain_hazard_boost`` on steep/lip/channel hints. Uncertain free
     cells stay traversable so a blind map does not lock the planner.
+
+    ``structure`` (uint8 path/building/bunker/garden/green) blocks buildings
+    / beds / greens, heavy-costs paved ribbons and bunkers. ``elevation_prior``
+    is a low-frequency grade; when ``prior_blend > 0`` the climb check uses
+    ``max(observer_slope, blend * prior_slope)`` so a flattened CV map does
+    not fight physics.
     """
     hazard = np.asarray(hazard, dtype=np.float32)
     slope = np.asarray(slope, dtype=np.float32)
+    slope = _blend_slope_with_prior(
+        slope,
+        elevation=elevation,
+        elevation_prior=elevation_prior,
+        prior_blend=prior_blend,
+        resolution_m=resolution_m,
+    )
     if hazard.shape != slope.shape:
         raise ValueError("hazard and slope must have the same shape")
     rows, cols = hazard.shape
@@ -186,6 +216,22 @@ def build_costmap(
             raise ValueError("extra_blocked shape must match hazard")
         blocked[extra] = True
         cost[extra] = BLOCKED_COST
+
+    if structure is not None:
+        struct = np.asarray(structure)
+        if struct.shape != hazard.shape:
+            raise ValueError("structure shape must match hazard")
+        path = struct == STRUCTURE_PATH
+        bunker = struct == STRUCTURE_BUNKER
+        hard = np.isin(struct, (STRUCTURE_BUILDING, STRUCTURE_GARDEN, STRUCTURE_GREEN))
+        finite = np.isfinite(cost) & ~blocked
+        cost[finite & path] = np.maximum(cost[finite & path], float(path_cost))
+        cost[finite & bunker] = np.maximum(cost[finite & bunker], float(bunker_cost))
+        blocked[hard] = True
+        cost[hard] = BLOCKED_COST
+        # Bunkers are no-mow bowls — block rather than hope A* skirts them.
+        blocked[bunker] = True
+        cost[bunker] = BLOCKED_COST
 
     if geofence is not None and geofence.has_polygons():
         geo = rasterize_geofence(hazard.shape, resolution_m=resolution_m, spec=geofence)
@@ -234,3 +280,29 @@ def build_costmap(
         resolution_m=float(resolution_m),
         confidence=conf,
     )
+
+
+def _blend_slope_with_prior(
+    slope: np.ndarray,
+    *,
+    elevation: Optional[np.ndarray],
+    elevation_prior: Optional[np.ndarray],
+    prior_blend: float,
+    resolution_m: float,
+) -> np.ndarray:
+    """Floor observer slope with a low-frequency prior so grades stay visible."""
+    blend = float(np.clip(prior_blend, 0.0, 1.0))
+    if blend <= 0.0 or elevation_prior is None:
+        return slope
+    prior = np.asarray(elevation_prior, dtype=np.float32)
+    if prior.shape != slope.shape:
+        return slope
+    src = prior
+    if elevation is not None:
+        elev = np.asarray(elevation, dtype=np.float32)
+        if elev.shape == slope.shape:
+            src = (1.0 - blend) * elev + blend * prior
+    res = max(float(resolution_m), 1e-6)
+    dzdy, dzdx = np.gradient(src, res)
+    prior_slope = np.arctan(np.hypot(dzdx, dzdy)).astype(np.float32)
+    return np.maximum(slope, blend * prior_slope)

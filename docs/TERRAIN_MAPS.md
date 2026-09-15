@@ -1,0 +1,98 @@
+# Observer maps vs physics, paths, and golf yards
+
+No claimed mAP / FPS. This note is the routing / mapping contract.
+
+## Observer-vs-physics failure mode
+
+Physics (`HeightField`) is the true yard: a property-scale planar grade
+plus drains, banks, undulation, and authored structures. Wheels sit on
+that surface. The coverage planner does **not** see it.
+
+`HeuristicTerrainObserver` (demo default) builds the maps in `obs`:
+
+| Layer | What the robot is allowed to use |
+| --- | --- |
+| `elevation` / `slope` / `hazard` | RGB + ToF + IMU / pose. No god-view DEM. |
+| `elevation_prior` | Rolling yard-scale plane from IMU pitch/roll + pose (and a short XY fit). |
+| `structure` | Authored path / building / bunker / garden plus a colour stub. |
+
+**What went wrong on `gradient_yard`:** the heuristic used to stamp only a
+local disk of `pose.z` and treat brown-ish pixels as drain lips. On a
+~0.14 rad grade the true field is about ±0.85 m, but the observer map sat
+near `[-0.14, 0]` (MAE ≈ 0.43 m) and painted thousands of false lips.
+The costmap then blocked or detoured as if the yard were flat and pitted.
+The World Viewer mesh used **true** elevation while the plan overlay sat
+on z ≈ 0, so routing looked divorced from the sloping mesh.
+
+**Fix:**
+
+1. Recover a yard-scale plane from IMU + seated pose (optional rolling
+   least-squares as the robot moves). Paint that prior into elevation /
+   slope every step. Drain drops are residuals on the plane, not a flat
+   `pose.z`.
+2. Gate isolated lip stamps: a lip must sit next to a channel (or a ToF
+   drop). Tighten the brown heuristic so shaded grass / dirt is not a ditch.
+3. Optional `planner.blend_elevation_prior`: the costmap floors observer
+   slope with the low-frequency prior so a flattened CV map cannot fight
+   physics.
+4. Viewer: plan waypoints carry world `z` from the same height field as
+   the mesh; `relief_scale` is applied to both. Toggle **observer vs true
+   elev** for the error overlay.
+
+Oracle maps still copy the height field (training / eval only).
+
+## Paths and human structures
+
+First-class layers, not a second geofence:
+
+| Class | YAML | Coverage | Costmap |
+| --- | --- | --- | --- |
+| `path_paved` | `paths:` polyline + `width_m` | no-mow | heavy cost (`planner.path_cost`) |
+| `building` | `buildings:` polygon | no-mow | blocked |
+| `bunker` | `bunkers:` `x,y,radius_m,depth_m` | no-mow | blocked (sand bowl) |
+| `garden_bed` | `garden_beds:` polygon | no-mow | blocked |
+| `green` | `greens:` polygon | no-mow / no-trimmer | blocked |
+
+Rasters: `obs["structure"]` / `info["structure"]` (see `STRUCTURE_NAMES`).
+Semantic extras: `path_paved`, `building`, `bunker`, `garden_bed`.
+
+The heuristic CV stub paints grey ribbons (`PATH_RGB`) and sand
+(`BUNKER_RGB`) when those colours hit a camera. Authored YAML still wins
+for planning; the stub is the onboard stand-in.
+
+Fence / keep-out polygons stay on `geofence`. Use that for a property
+line; use `paths` / `buildings` for hard surfaces inside the yard.
+
+## Golf scenarios
+
+```bash
+jims-mower-demo --config golf_rough --steps 80 --out demo_golf
+jims-mower-demo --config golf_fairway_snip --out demo_fairway
+jims-mower-viewer --episode demo_golf
+jims-mower-mesh --out golf.glb --config golf_rough --seed 3
+```
+
+`golf_rough` is multi-scale undulation + swales, a cart-path polyline, a
+sand bunker bowl, a shed polygon, and a garden bed. `golf_fairway_snip`
+is a smaller clip with a gentler roll, a path, a bunker, and a no-mow
+green.
+
+Layouts `golf_rough` / `golf_fairway` turn off random drains/banks so the
+authored hard areas stay readable.
+
+### DEM hook (optional, not used in CI)
+
+`world.terrain.dem_path` loads a vendored `.npy` height patch, resamples
+it to the yard grid, mean-centers it, and **adds** it to the procedural
+field. There is no OpenTopography / ELVIS / SRTM download in CI.
+
+```yaml
+world:
+  terrain:
+    dem_path: configs/yards/dem/tiny_patch.npy   # 2-D float32, any size
+    multi_scale_amp_m: 0.08
+    swale_amp_m: 0.06
+```
+
+Ship a tiny fixture if you need one. Procedural golf yards are the
+default.

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from pathlib import Path
+from typing import Callable, Optional, Union
 
 import numpy as np
 
@@ -18,6 +19,14 @@ from jims_mower.constants import (
     TERRAIN_DRAIN_EDGE,
     TERRAIN_FLAT,
     TERRAIN_PUDDLE,
+)
+from jims_mower.structures import (
+    BunkerFeature,
+    PathFeature,
+    PolygonFeature,
+    apply_bunkers,
+    apply_paths,
+    apply_polygons,
 )
 
 
@@ -445,6 +454,13 @@ def generate_terrain(
     gradient_slope_rad: float = 0.0,
     gradient_yaw_rad: float = 0.0,
     gradient_undulation_m: float = 0.0,
+    multi_scale_amp_m: float = 0.0,
+    swale_amp_m: float = 0.0,
+    dem_path: Optional[str] = None,
+    paths: Optional[list[PathFeature]] = None,
+    buildings: Optional[list[PolygonFeature]] = None,
+    bunkers: Optional[list[BunkerFeature]] = None,
+    garden_beds: Optional[list[PolygonFeature]] = None,
 ) -> HeightField:
     """Procedural yard elevation. Disabled → a flat field (still labeled).
 
@@ -463,6 +479,13 @@ def generate_terrain(
             yaw_rad=float(gradient_yaw_rad),
             undulation_m=float(gradient_undulation_m),
         )
+        _apply_multi_scale(
+            hf,
+            rng,
+            amp_m=float(multi_scale_amp_m),
+        )
+        if dem_path:
+            apply_dem_npy(hf, dem_path)
     keep = list(keepout or [])
     # Cap berm height so generated bank faces stay under max_slope_rad.
     max_bank_h = math.tan(max(max_slope_rad, 1e-3)) * (0.5 * bank_width_m)
@@ -508,7 +531,7 @@ def generate_terrain(
 
     remaining_drains = max(0, int(n_drains) - len(hf.drains))
     remaining_banks = max(0, int(n_banks) - len(hf.banks))
-    if layout in {"terrace", "kerb_gutter", "swale"}:
+    if layout in {"terrace", "kerb_gutter", "swale", "golf_rough", "golf_fairway"}:
         remaining_drains = 0
         remaining_banks = 0
 
@@ -564,6 +587,17 @@ def generate_terrain(
         # Keep drain channels as designed — only rumble the grass/banks.
         grass = (hf.labels == TERRAIN_FLAT) | (hf.labels == TERRAIN_BANK)
         hf.elevation[grass] += noise[grass]
+
+    _apply_authored_structures(
+        hf,
+        paths=paths or [],
+        buildings=buildings or [],
+        bunkers=bunkers or [],
+        garden_beds=garden_beds or [],
+        swale_amp_m=float(swale_amp_m) if enabled else 0.0,
+        rng=rng,
+        layout=layout,
+    )
 
     hf.recompute_slope()
     return hf
@@ -633,6 +667,10 @@ def _apply_layout_features(
         hf.banks.append(kerb)
         keep.extend(hf.feature_keepouts())
         return
+    if layout in {"golf_rough", "golf_fairway"}:
+        # Multi-scale rumble + optional swale already applied; no extra walls.
+        _ = (rng, drain_length_m, bank_length_m)
+        return
     if layout == "swale":
         x0, x1 = margin + 0.3, width_m - margin - 0.3
         y = 0.5 * height_m
@@ -685,3 +723,108 @@ def _place_puddles(
             break
         if not placed:
             break
+
+
+def _apply_multi_scale(
+    hf: HeightField,
+    rng: np.random.Generator,
+    *,
+    amp_m: float,
+) -> None:
+    """Two-octave sine + smoothed noise so golf yards undulate, not just tilt."""
+    if amp_m <= 0.0:
+        return
+    yy = (np.arange(hf.rows) + 0.5) * hf.resolution_m
+    xx = (np.arange(hf.cols) + 0.5) * hf.resolution_m
+    grid_x, grid_y = np.meshgrid(xx, yy)
+    nx = grid_x / max(hf.width_m, 1e-6)
+    ny = grid_y / max(hf.height_m, 1e-6)
+    phase = float(rng.uniform(0.0, 2.0 * math.pi))
+    coarse = np.sin(2.0 * math.pi * nx + phase) * np.cos(1.6 * math.pi * ny)
+    fine = np.sin(4.4 * math.pi * nx + 0.7) * np.cos(3.2 * math.pi * ny + 1.1)
+    rumble = _smooth_noise(rng, hf.rows, hf.cols, 0.35 * amp_m)
+    hf.elevation += np.float32(amp_m) * (0.70 * coarse + 0.30 * fine).astype(np.float32)
+    hf.elevation += rumble
+
+
+def apply_dem_npy(hf: HeightField, path: Union[str, Path]) -> None:
+    """Add a vendored height patch. Resamples to the yard grid. No network."""
+    dest = Path(path)
+    if not dest.is_file():
+        raise FileNotFoundError(f"DEM fixture not found: {dest}")
+    patch = np.asarray(np.load(dest), dtype=np.float32)
+    if patch.ndim != 2:
+        raise ValueError("DEM .npy must be a 2-D height raster")
+    resampled = _resample_height(patch, hf.rows, hf.cols)
+    # Center so a raw SRTM crop does not lift the whole yard off spawn.
+    resampled = resampled - float(np.mean(resampled))
+    hf.elevation += resampled
+
+
+def _resample_height(src: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    if src.shape == (rows, cols):
+        return src.astype(np.float32, copy=True)
+    yy = np.linspace(0.0, src.shape[0] - 1.0, rows)
+    xx = np.linspace(0.0, src.shape[1] - 1.0, cols)
+    grid_y, grid_x = np.meshgrid(yy, xx, indexing="ij")
+    r0 = np.floor(grid_y).astype(int)
+    c0 = np.floor(grid_x).astype(int)
+    r1 = np.clip(r0 + 1, 0, src.shape[0] - 1)
+    c1 = np.clip(c0 + 1, 0, src.shape[1] - 1)
+    r0 = np.clip(r0, 0, src.shape[0] - 1)
+    c0 = np.clip(c0, 0, src.shape[1] - 1)
+    ty = grid_y - r0
+    tx = grid_x - c0
+    z00 = src[r0, c0]
+    z10 = src[r0, c1]
+    z01 = src[r1, c0]
+    z11 = src[r1, c1]
+    z = (1.0 - ty) * ((1.0 - tx) * z00 + tx * z10) + ty * ((1.0 - tx) * z01 + tx * z11)
+    return z.astype(np.float32)
+
+
+def _apply_authored_structures(
+    hf: HeightField,
+    *,
+    paths: list[PathFeature],
+    buildings: list[PolygonFeature],
+    bunkers: list[BunkerFeature],
+    garden_beds: list[PolygonFeature],
+    swale_amp_m: float,
+    rng: np.random.Generator,
+    layout: str,
+) -> None:
+    if swale_amp_m > 0.0 and layout in {"golf_rough", "golf_fairway", "random", "swale"}:
+        _carve_gentle_swales(hf, rng, amp_m=swale_amp_m, count=2 if layout == "golf_rough" else 1)
+    apply_paths(hf.labels, hf.elevation, hf.resolution_m, paths)
+    apply_polygons(hf.labels, hf.elevation, hf.resolution_m, buildings)
+    apply_polygons(hf.labels, hf.elevation, hf.resolution_m, garden_beds)
+    apply_bunkers(hf.labels, hf.elevation, hf.resolution_m, bunkers)
+
+
+def _carve_gentle_swales(
+    hf: HeightField,
+    rng: np.random.Generator,
+    *,
+    amp_m: float,
+    count: int,
+) -> None:
+    """Long, shallow bowls — not drain channels, just uneven ground."""
+    if amp_m <= 0.0 or count <= 0:
+        return
+    yy = (np.arange(hf.rows) + 0.5) * hf.resolution_m
+    xx = (np.arange(hf.cols) + 0.5) * hf.resolution_m
+    grid_x, grid_y = np.meshgrid(xx, yy)
+    for _ in range(int(count)):
+        cx = float(rng.uniform(0.25 * hf.width_m, 0.75 * hf.width_m))
+        cy = float(rng.uniform(0.25 * hf.height_m, 0.75 * hf.height_m))
+        rx = float(rng.uniform(1.8, 3.4))
+        ry = float(rng.uniform(1.1, 2.2))
+        yaw = float(rng.uniform(-0.6, 0.6))
+        c, s = math.cos(yaw), math.sin(yaw)
+        dx, dy = grid_x - cx, grid_y - cy
+        lx = dx * c + dy * s
+        ly = -dx * s + dy * c
+        bowl = np.exp(-0.5 * ((lx / rx) ** 2 + (ly / ry) ** 2))
+        writable = hf.labels == TERRAIN_FLAT
+        hf.elevation[writable] -= np.float32(amp_m) * bowl[writable].astype(np.float32)
