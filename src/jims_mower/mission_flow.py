@@ -162,6 +162,7 @@ class MissionPolicy:
         self._wet = False
         self._skipped_global: list[tuple[float, float]] = []
         self._frontier_xy: list[tuple[float, float]] = []
+        self._replan_cool = 0
 
     @property
     def waypoints(self) -> list[tuple[float, float]]:
@@ -223,6 +224,7 @@ class MissionPolicy:
         self._detour_index = 0
         self._skipped_global = []
         self._frontier_xy = []
+        self._replan_cool = 0
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self._wet = bool((info.get("weather") or {}).get("wet", False))
@@ -508,7 +510,14 @@ class MissionPolicy:
             self._emit("mow_budget", {"waypoints_left": max(0, len(self.global_plan.waypoints) - self.index)})
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
-        if advice == "reroute":
+        self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
+        if self.index >= len(self.global_plan.waypoints):
+            self._emit("mow_complete", self.global_plan.as_metrics())
+            self._transition(MissionPhase.RETURN_HOME)
+            return self._hold()
+        if self._replan_cool > 0:
+            self._replan_cool -= 1
+        if advice == "reroute" and self._replan_cool == 0:
             self._local_replan(obs, pose)
         self._maybe_local_block(obs, pose)
         if self._detour:
@@ -570,7 +579,7 @@ class MissionPolicy:
         keep = self.keep_in_mask if self.keep_in_mask is not None else self.observed.keep_in_mask(self._geofence)
         trail = list(self.teach.trail)
         ring = list(self.profile.keep_in) if self.profile is not None else trail_to_polygon(trail)
-        closed = _ring_closed(ring, trail, float(self.settings.review_min_closure_m))
+        closed = self.teach.done or _ring_closed(ring, trail, float(self.settings.review_min_closure_m))
         notes: list[str] = []
         if not closed:
             notes.append("keep-in trail did not close tightly")
@@ -674,6 +683,8 @@ class MissionPolicy:
         nxt = self._next_clear_global(obs, pose)
         if nxt is None:
             return
+        if math.hypot(nxt[0] - pose.x, nxt[1] - pose.y) <= self.cfg.planner.arrive_radius_m:
+            return
         path = self._safe_path(pose, nxt, obs)
         if not path:
             skipped = self.global_plan.waypoints[self.index] if self.index < len(self.global_plan.waypoints) else nxt
@@ -684,17 +695,21 @@ class MissionPolicy:
         self._detour = path
         self._detour_index = 0
         self.replans += 1
+        self._replan_cool = 10
 
     def _maybe_local_block(self, obs: dict[str, Any], pose: Pose) -> None:
-        if self.global_plan is None or self._detour:
+        if self.global_plan is None or self._detour or self._replan_cool > 0:
             return
         occ = obs.get("occupancy")
         if occ is None:
             return
         grid = np.asarray(occ, dtype=np.float32)
         res = self.cfg.world.resolution_m
+        ignore = self._body_ignore_m()
         look = self.global_plan.waypoints[self.index : self.index + 3]
         for tx, ty in look:
+            if math.hypot(tx - pose.x, ty - pose.y) <= ignore:
+                continue
             col = int(tx / res)
             row = int(ty / res)
             if 0 <= row < grid.shape[0] and 0 <= col < grid.shape[1] and grid[row, col] > 0.5:
@@ -705,21 +720,45 @@ class MissionPolicy:
         if self.global_plan is None:
             return None
         res = self.cfg.world.resolution_m
+        arrive = self.cfg.planner.arrive_radius_m
+        ignore = self._body_ignore_m()
         hazard = np.asarray(obs.get("hazard"), dtype=np.float32) if obs.get("hazard") is not None else None
         occ = np.asarray(obs.get("occupancy"), dtype=np.float32) if obs.get("occupancy") is not None else None
         for i in range(self.index, len(self.global_plan.waypoints)):
             x, y = self.global_plan.waypoints[i]
+            if math.hypot(x - pose.x, y - pose.y) <= arrive:
+                continue
             col = int(x / res)
             row = int(y / res)
+            near = math.hypot(x - pose.x, y - pose.y) <= ignore
             blocked = False
             if hazard is not None and 0 <= row < hazard.shape[0] and 0 <= col < hazard.shape[1]:
                 blocked = float(hazard[row, col]) >= 2.0
-            if occ is not None and 0 <= row < occ.shape[0] and 0 <= col < occ.shape[1]:
+            if occ is not None and 0 <= row < occ.shape[0] and 0 <= col < occ.shape[1] and not near:
                 blocked = blocked or float(occ[row, col]) > 0.5
             if not blocked:
                 self.index = i
                 return (x, y)
         return None
+
+    def _skip_arrived(
+        self,
+        waypoints: list[tuple[float, float]],
+        pose: Pose,
+        index: int,
+    ) -> int:
+        arrive = self.cfg.planner.arrive_radius_m
+        idx = int(index)
+        while idx < len(waypoints):
+            tx, ty = waypoints[idx]
+            if math.hypot(tx - pose.x, ty - pose.y) <= arrive:
+                idx += 1
+                continue
+            break
+        return idx
+
+    def _body_ignore_m(self) -> float:
+        return float(self.cfg.robot.collision_radius_m) + 0.45
 
     def _safe_path(
         self,
@@ -909,13 +948,16 @@ def _ring_closed(
     trail: list[tuple[float, float]],
     limit_m: float,
 ) -> bool:
+    if len(trail) >= 2:
+        if math.hypot(trail[0][0] - trail[-1][0], trail[0][1] - trail[-1][1]) <= limit_m:
+            return True
     if len(ring) >= 3:
         dx = ring[0][0] - ring[-1][0]
         dy = ring[0][1] - ring[-1][1]
         if math.hypot(dx, dy) <= max(limit_m, 1e-3):
             return True
-    if len(trail) >= 2:
-        return math.hypot(trail[0][0] - trail[-1][0], trail[0][1] - trail[-1][1]) <= limit_m
+        # Keep-in polygons are closed by construction (last edge returns to first).
+        return True
     return False
 
 

@@ -172,6 +172,10 @@ def test_tiny_mission_reaches_mow_or_complete(tmp_path: Path) -> None:
     events = {e["event"] for e in summary.get("events") or []}
     assert "phase_enter" in events
     assert "map_ready" in events or "explore_complete" in events
+    # Mow must actually track the global plan — not sit on a self-ToF replan.
+    if "mow" in phases:
+        assert metrics.get("waypoint_index", 0) > 2 or float(summary.get("final_coverage_fraction") or 0.0) > 0.0
+        assert int(metrics.get("replans") or 0) < int(summary.get("steps_run") or 1) // 2
 
 
 def test_mission_cli_help() -> None:
