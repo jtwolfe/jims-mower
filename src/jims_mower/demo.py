@@ -27,22 +27,19 @@ POLICIES = ("terrain", "scripted", "random", "bc", "teach")
 DEFAULT_DEMO_STEPS = 160
 
 
+DEFAULT_CAM_STRIDE = 10
+
+
 def camera_dump_stride(steps: int, requested: Optional[int] = None) -> int:
     """How often to write camera PiP folders so long runs stay scrubbable.
 
-    Short smoke dumps stay dense. Episodes of ~120–200 steps use every 8
-    steps (in the 5–10 band) so the viewer has more than three frames.
+    Default is every 10 steps. Always include step 0 and the last step via
+    :func:`camera_dump_indices`. ``poses.json`` is still written every step.
     """
-    if requested is not None:
-        return max(1, int(requested))
-    n = max(0, int(steps))
-    if n <= 16:
-        return 1
-    if n <= 40:
-        return 2
-    if n <= 80:
-        return 5
-    return 8
+    _ = steps
+    if requested is None:
+        return DEFAULT_CAM_STRIDE
+    return max(1, int(requested))
 
 
 def camera_dump_indices(steps: int, stride: Optional[int] = None) -> set[int]:
@@ -132,6 +129,7 @@ def run_demo(
     out_dir: Path,
     *,
     steps: int = DEFAULT_DEMO_STEPS,
+    cam_stride: Optional[int] = None,
     dump_stride: Optional[int] = None,
     seed: int = 7,
     cameras: Optional[int] = None,
@@ -199,7 +197,7 @@ def run_demo(
     names = list(obs["cameras"].keys())
     records: list[dict] = []
     poses: list[dict] = [info.get("pose") or {}]
-    dump_steps = camera_dump_indices(steps, dump_stride)
+    dump_steps = camera_dump_indices(steps, cam_stride if cam_stride is not None else dump_stride)
     overlay_policy = teach_policy or terrain_policy
 
     def _dump_step(step_dir: Path, obs: dict, info: dict) -> None:
@@ -436,10 +434,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="episode length (default 160 — long enough to inspect in the viewer)",
     )
     p.add_argument(
+        "--cam-stride",
+        type=int,
+        default=DEFAULT_CAM_STRIDE,
+        help="write camera folders every N steps (default 10; always includes 0 and last)",
+    )
+    p.add_argument(
         "--dump-stride",
         type=int,
         default=None,
-        help="write camera folders every N steps (default: 1/2/5/8 by length; ~8 for long runs)",
+        help=argparse.SUPPRESS,
     )
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--cameras", type=int, default=None, help="4, 5, or 6")
@@ -500,7 +504,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     summary = run_demo(
         args.out,
         steps=args.steps,
-        dump_stride=args.dump_stride,
+        cam_stride=args.dump_stride if args.dump_stride is not None else args.cam_stride,
         seed=args.seed,
         cameras=args.cameras,
         hand_signals=args.hand_signals,

@@ -9,9 +9,9 @@ After a demo or record run:
 
 ```bash
 # Default --steps is 160 (not a 12-step smoke). Camera PiP folders land
-# every ~8 steps on long runs so scrubbing stays dense.
+# every 10 steps (--cam-stride) so scrubbing stays dense. poses.json is every step.
 jims-mower-demo --out demo_out
-jims-mower-demo --steps 160 --dump-stride 8 --out demo_out
+jims-mower-demo --steps 160 --cam-stride 10 --out demo_out
 jims-mower-demo --config gradient_yard --steps 160 --out demo_gradient
 jims-mower-viewer --episode demo_out
 # open http://127.0.0.1:8765/

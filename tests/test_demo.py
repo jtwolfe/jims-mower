@@ -87,22 +87,20 @@ def test_demo_terrain_observer_override(tmp_path: Path) -> None:
 
 
 def test_camera_dump_stride_long_runs() -> None:
-    assert camera_dump_stride(12) == 1
-    assert camera_dump_stride(40) == 2
-    assert camera_dump_stride(80) == 5
-    assert camera_dump_stride(160) == 8
-    assert camera_dump_stride(160, requested=10) == 10
+    assert camera_dump_stride(12) == 10
+    assert camera_dump_stride(160) == 10
+    assert camera_dump_stride(160, requested=8) == 8
     picks = camera_dump_indices(160)
     assert 0 in picks
     assert 159 in picks
-    assert 8 in picks
+    assert 10 in picks
     assert 7 not in picks
-    # ~20 frames, not 3, not 160.
-    assert 15 <= len(picks) <= 25
+    # Every 10 steps plus last — not 3 frames, not every step.
+    assert 15 <= len(picks) <= 20
 
 
-def test_demo_dump_stride_writes_interval_folders(tmp_path: Path) -> None:
-    run_demo(tmp_path, steps=12, seed=1, cameras=4, policy="scripted", dump_stride=5)
+def test_demo_cam_stride_writes_interval_folders(tmp_path: Path) -> None:
+    run_demo(tmp_path, steps=12, seed=1, cameras=4, policy="scripted", cam_stride=5)
     assert (tmp_path / "step_000").is_dir()
     assert (tmp_path / "step_005").is_dir()
     assert (tmp_path / "step_010").is_dir()

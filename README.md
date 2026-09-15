@@ -26,9 +26,9 @@ python -m pip install -e ".[dev]"
 # Terrain-aware coverage (default). Heuristic CV maps, not god-view.
 # Writes PNG frames, observer maps, and a plan overlay.
 # Default --steps is 160 so the World Viewer has a real trail to scrub.
-# Camera folders are dumped every ~8 steps on long runs (--dump-stride).
+# Camera folders are dumped every 10 steps (--cam-stride); poses.json is every step.
 jims-mower-demo --out demo_out
-jims-mower-demo --steps 160 --dump-stride 8 --out demo_out
+jims-mower-demo --steps 160 --cam-stride 10 --out demo_out
 
 # Same path, explicit observer (YAML default is already heuristic):
 python -m jims_mower.demo --terrain-observer heuristic --out demo_cv
