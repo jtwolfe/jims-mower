@@ -270,6 +270,8 @@ class MissionPolicy:
             MissionPhase.REVIEW,
             MissionPhase.COMPLETE,
             MissionPhase.CALIBRATE_BOUNDARY,
+            MissionPhase.MOW,
+            MissionPhase.EXPLORE,
         }:
             return self._finish(self._hold(), advice, info)
 
@@ -535,6 +537,16 @@ class MissionPolicy:
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
+        if advice == "stop":
+            self._calibrate_stall += 1
+            if self._calibrate_stall >= 6 and self.index < len(self.global_plan.waypoints):
+                skipped = self.global_plan.waypoints[self.index]
+                self._skipped_global.append(skipped)
+                self._emit("unreachable_segment", {"x": skipped[0], "y": skipped[1], "index": self.index, "reason": "stop"})
+                self.index += 1
+                self._calibrate_stall = 0
+            return self._nudge_inward(pose)
+        self._calibrate_stall = 0
         if self.index >= len(self.global_plan.waypoints):
             self._emit("mow_complete", self.global_plan.as_metrics())
             self._transition(MissionPhase.RETURN_HOME)
