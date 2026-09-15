@@ -22,11 +22,15 @@ git clone https://github.com/jtwolfe/jims-mower.git
 cd jims-mower
 python -m pip install -e ".[dev]"
 
-# Multi-camera demo (writes PNG frames + detections + terrain layers)
+# Terrain-aware coverage (default). Writes PNG frames, maps, and a plan overlay.
 jims-mower-demo --steps 40 --out demo_out
 
 # Steeper yard (more drains / banks):
 python -m jims_mower.demo --config configs/steep_yard.yaml --out demo_steep
+
+# Keep the old scripted creep or random wheels:
+python -m jims_mower.demo --policy scripted --out demo_scripted
+python -m jims_mower.demo --policy random --out demo_random
 
 # Or:
 python -m jims_mower.demo --cameras 6 --hand-signals --out demo_out
@@ -107,12 +111,59 @@ Maps in the observation (`elevation`, `slope`, `hazard`) come from the
 pluggable terrain observer. Physics and reward always use the **true** height
 field.
 
+The default demo policy (`--policy terrain`) **accounts for** those maps: it
+builds a costmap, plans a coverage path around channels / bank lips, and the
+controller slows, reroutes, or stops instead of applying scripted wheel
+speeds.
+
+## From detection to a wheel command
+
+```mermaid
+flowchart LR
+    Cam[RGB + IMU + GNSS] --> Obs[TerrainObserver]
+    Obs --> Maps["elevation / slope / hazard"]
+    Maps --> Cost[Costmap]
+    Cost --> Plan[Boustrophedon + A*]
+    Plan --> Ctrl[Zero-turn tracker]
+    IMU[IMU pitch/roll] --> Ctrl
+    Advice["info terrain_advice"] --> Ctrl
+    Ctrl -->|slow / reroute / stop| Wheels[v_left, v_right, trimmer]
+```
+
+1. **Detect / estimate** — `TerrainObserver` fills `elevation`, `slope`, and
+   `hazard` (`0` free, `1` steep, `2` drain lip, `3` channel). Oracle in sim;
+   heuristic / your TensorRT head on the robot.
+2. **Costmap** — free = 1; steep below `planner.max_climb_slope_rad` = slow
+   corridor; steeper than that, drain lips, and channels are blocked. Channels
+   and lips are inflated by `planner.drain_clearance_m`. Occupancy (trees /
+   detections) is blocked too.
+3. **Plan** — lawnmower strips on free grass, A* between strip ends so the
+   path goes *around* a ditch instead of across it.
+4. **Act** — a differential-drive tracker follows waypoints. `terrain_advice`
+   and an IMU pitch/roll cross-check map to behaviour: **slow** scales cruise
+   by `planner.slow_speed_factor`, **reroute** blocks a forward cone and
+   replans, **stop** zeros the wheels (the env still terminates on tip-over or
+   a wheel in the channel).
+5. **Pose stub** — `ComplementaryPoseFilter` blends noisy GPS XY with
+   commanded-speed odometry and IMU tilt. Working stub, not a published EKF.
+   The planner uses that estimate as its start pose.
+
+On a **Jetson Orin Nano** this same split is the runtime: GStreamer/NVMM
+cameras + your detector / terrain head behind the protocols, the numpy
+costmap + planner + controller in-process (the rasters are small), and a real
+complementary filter / EKF behind `ComplementaryPoseFilter`. Do not run the
+gym renderer or `OracleTerrainObserver` on-box. Tune `max_climb_slope_rad`,
+`drain_clearance_m`, and `slow_speed_factor` in YAML to the machine and the
+yard.
+
 ## Architecture
 
 ```mermaid
 flowchart LR
     subgraph Agent
-      A[Policy / demo script]
+      A[Terrain policy / scripted / random]
+      P2[Costmap + coverage plan]
+      U[GPS+IMU pose stub]
     end
     subgraph Gym["MowerEnv"]
       K[Zero-turn kinematics + attitude]
@@ -136,6 +187,10 @@ flowchart LR
     C --> P
     IMU --> P
     P -->|cameras, detections, maps, imu, gps| A
+    P --> P2
+    IMU --> U
+    U --> P2
+    P2 --> A
     R -->|reward| A
 ```
 
@@ -206,6 +261,16 @@ stds, IMU accel bias (drawn once per episode), GPS dropout probability.
 
 `perception.terrain_mode`: `oracle` (training), `heuristic`, or `blind`.
 
+Coverage planner (`planner`):
+
+| Key | Role |
+| --- | --- |
+| `max_climb_slope_rad` | Above this, steep cells are blocked (below: slow corridor) |
+| `drain_clearance_m` | Inflation around channels / lips |
+| `slow_speed_factor` | Wheel-speed scale when advice is `slow` |
+| `strip_spacing_m` | Boustrophedon lane width |
+| `cruise_speed` | Nominal forward command in \([-1, 1]\) |
+
 Default 6-camera body-frame rig (x forward, y left, z up). Front cameras are
 pitched a bit more down than v0 so drain lips sit in frame:
 
@@ -249,7 +314,8 @@ This package is the **training / eval gym**, not the robot runtime.
   repo. On the robot, run GStreamer/NVMM capture + your TensorRT (or similar)
   head behind the `Detector` / `TerrainObserver` protocols.
 - Fuse IMU + GNSS with a complementary filter or a small EKF in *your*
-  runtime; the gym only emits the noisy measurements.
+  runtime. The gym ships `ComplementaryPoseFilter` as the swap-in stub and
+  still emits the noisy measurements.
 - The numpy renderer is for the gym only. It will not run as the robot’s
   perception.
 - Memory budget on-device is the model, not this env. The mock / oracle path
@@ -265,16 +331,20 @@ pytest
 
 Unit tests cover kinematics (including zero-turn and slope attitude), drain
 and tip-over hazards, IMU/GPS observation shapes, the trimmer interlock,
-maps, camera math, the mock detector, terrain observers, reward, the
-renderer’s non-flat shading, and the Gymnasium env checker. GitHub Actions
-runs the same suite headless on Python 3.10–3.12 plus a short demo smoke.
+maps, camera math, the mock detector, terrain observers, the costmap and
+coverage planner (channels forbidden), the controller (slows on steep /
+stops on tip), the GPS+IMU pose stub, reward, the renderer’s non-flat
+shading and plan overlay, and the Gymnasium env checker. GitHub Actions
+runs the same suite headless on Python 3.10–3.12 plus a short terrain-policy
+demo smoke.
 
 ## Layout
 
 ```
-configs/default.yaml     camera poses + yard / terrain / sensors / reward
+configs/default.yaml     camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml  louder drain / bank demo
-src/jims_mower/          env, kinematics, terrain, sensors, safety, renderer
+src/jims_mower/          env, kinematics, terrain, planning, sensors, safety
+src/jims_mower/planning/ costmap, boustrophedon+A*, controller, pose stub
 tests/                   pytest
 ```
 

@@ -76,6 +76,22 @@ def test_topdown_contains_robot_and_obstacle() -> None:
     assert img.dtype == np.uint8
 
 
+def test_topdown_plan_overlay_changes_pixels() -> None:
+    coverage = _coverage()
+    pose = Pose(4.0, 4.0, 0.0)
+    bare = render_topdown(pose, coverage, [], image_size=80)
+    planned = render_topdown(
+        pose,
+        coverage,
+        [],
+        image_size=80,
+        waypoints=[(2.0, 2.0), (5.0, 6.0)],
+        waypoint_index=0,
+    )
+    assert planned.shape == bare.shape
+    assert np.abs(planned.astype(int) - bare.astype(int)).sum() > 0
+
+
 def test_different_cameras_differ() -> None:
     coverage = _coverage()
     pose = Pose(4.0, 4.0, 0.0)

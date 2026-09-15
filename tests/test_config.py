@@ -128,3 +128,28 @@ def test_rejects_bad_gps_dropout() -> None:
 def test_rejects_bad_drain_width() -> None:
     with pytest.raises(ConfigError):
         load_config({"world": {"terrain": {"drain_width_m": 0.0}}})
+
+
+def test_default_has_planner_knobs() -> None:
+    cfg = load_config()
+    assert cfg.planner.max_climb_slope_rad > 0
+    assert cfg.planner.drain_clearance_m >= 0
+    assert 0.0 < cfg.planner.slow_speed_factor <= 1.0
+
+
+def test_rejects_bad_slow_speed_factor() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"slow_speed_factor": 0.0}})
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"slow_speed_factor": 1.5}})
+
+
+def test_rejects_bad_max_climb() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"max_climb_slope_rad": 0.0}})
+
+
+def test_planner_yaml_override() -> None:
+    cfg = load_config({"planner": {"drain_clearance_m": 0.55, "cruise_speed": 0.4}})
+    assert cfg.planner.drain_clearance_m == pytest.approx(0.55)
+    assert cfg.planner.cruise_speed == pytest.approx(0.4)
