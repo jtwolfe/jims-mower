@@ -78,3 +78,7 @@ jobs:
           test -f /tmp/jims-mower-ci-teach/profile.json
           jims-mower-demo --policy teach --steps 4 --cameras 4 --out /tmp/jims-mower-ci-teach-demo
           jims-mower-demo --profile /tmp/jims-mower-ci-teach/profile.json --steps 3 --cameras 4 --out /tmp/jims-mower-ci-taught
+      - name: UX-B self-test + fault/radio smoke
+        run: |
+          jims-mower-selftest --out /tmp/jims-mower-ci-selftest.json
+

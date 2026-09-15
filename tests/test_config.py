@@ -209,6 +209,19 @@ def test_rejects_bad_tof_count() -> None:
         load_config({"sensors": {"tof": {"count": 3}}})
 
 
+def test_faults_and_radio_defaults_off() -> None:
+    cfg = load_config()
+    assert cfg.faults.enabled is False
+    assert cfg.radio.enabled is False
+    assert cfg.radio.on_loss == "stop_beacon"
+    assert cfg.radio.wifi.range_m > 0
+
+
+def test_rejects_bad_radio_on_loss() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"radio": {"on_loss": "shout"}})
+
+
 def test_runtime_budget_defaults_off() -> None:
     cfg = load_config()
     assert cfg.runtime.enabled is False

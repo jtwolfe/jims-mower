@@ -116,6 +116,24 @@ NEAR_MISS_LIVING_M = 1.5
 BC_FEATURE_DIM = 40
 DEFAULT_BC_WEIGHTS = "bc_weights.npz"
 
+# WAVE UX-B — faults + radio sim (software only; no RF hardware).
+FAULT_SCHEMA = "jims_mower.fault.v1"
+RADIO_SCHEMA = "jims_mower.radio.v1"
+SELFTEST_SCHEMA = "jims_mower.selftest.v1"
+FAULT_CODES = (
+    "ok",
+    "STUCK",
+    "FAULT_IMMOBILISED",
+    "TRIMMER_JAM",
+    "CAM_BLIND",
+    "IMU_FREEZE",
+    "GNSS_DROPOUT",
+    "RADIO_LOSS",
+)
+MOTOR_KILL_MODES = frozenset({"cmd_ignored", "encoder_stuck", "open_circuit"})
+RADIO_CHANNELS = ("wifi", "bt", "lora")
+RADIO_LOSS_ACTIONS = frozenset({"limp_home", "stop_beacon"})
+
 KIND_RGB = {
     "person": (220, 80, 80),
     "dog": (160, 100, 50),

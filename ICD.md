@@ -193,3 +193,33 @@ includes `camera_specs` and a `domain_randomization` snapshot so
 [`perception.train`](src/jims_mower/perception/train.py) can back-project
 pixels. `--domain-rand` turns renderer DR on for training dumps — see
 [`docs/WAVE2B.md`](docs/WAVE2B.md).
+
+## Faults + SOS + radio (WAVE UX-B)
+
+Additive. Notes: [`docs/UX_B.md`](docs/UX_B.md). Off by default
+(`faults.enabled` / `radio.enabled`). No claimed RF / SIL / mAP / FPS.
+
+`info["fault"]` (always present):
+
+| Field | Meaning |
+| --- | --- |
+| `code` | `ok` / `STUCK` / `FAULT_IMMOBILISED` / `TRIMMER_JAM` / `CAM_BLIND` / `IMU_FREEZE` / `GNSS_DROPOUT` / `RADIO_LOSS` |
+| `component` | `drive_left` / `drive_right` / `trimmer` / `camera` / `imu` / `gnss` / `chassis` / `radio` |
+| `pose` | `{x,y,theta,z,pitch,roll}` at the report |
+| `retrieve` | `true` only for dead-motor immobilised or radio `stop_beacon` |
+
+A dead left/right drive motor (`cmd_ignored` / `encoder_stuck` /
+`open_circuit`) latches **`FAULT_IMMOBILISED`**: both wheels + trimmer
+are zeroed (no one-sided drag across a drain). **Stuck** (terrain lip /
+`code=STUCK`) still uses reverse → pivot → help.
+
+`FaultBus` also unifies trimmer jam, black camera frames, IMU freeze,
+and GNSS `valid=0` (including the existing `gps.dropout_prob` bit).
+
+`jims-mower-telemetry` includes `sos` / `sos_steps`. The incident
+scrubber shows an SOS banner when `retrieve` is set.
+
+Radio sim (no hardware): command preference **Wi-Fi → BT → LoRa**.
+`radio.on_loss` is `stop_beacon` (SOS hold) or `limp_home` (limp scale).
+`jims-mower-selftest` checks unloaded wheel spin, IMU still, and camera
+entropy.

@@ -64,6 +64,7 @@ jims-mower-import-yard = "jims_mower.survey:main"
 jims-mower-viewer = "jims_mower.viewer:main"
 jims-mower-mesh = "jims_mower.mesh:main"
 jims-mower-teach = "jims_mower.teach:main"
+jims-mower-selftest = "jims_mower.selftest:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"

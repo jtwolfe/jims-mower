@@ -59,11 +59,15 @@ def _banner(width: int, text: str, *, height: int = 22) -> np.ndarray:
     bar = np.full((height, width, 3), 24, dtype=np.uint8)
     # Tiny 5x7 hex-ish marker so the advice is visible without a font rasterizer.
     color = (240, 220, 80)
-    if "stop" in text:
+    low = text.lower()
+    if "sos" in low or "fault_immobilised" in low or "retrieve" in low:
+        color = (220, 40, 40)
+        bar[:] = (48, 8, 8)
+    elif "stop" in low:
         color = (230, 60, 60)
-    elif "reroute" in text:
+    elif "reroute" in low:
         color = (230, 140, 40)
-    elif "slow" in text:
+    elif "slow" in low:
         color = (230, 200, 60)
     bar[:, :8] = color
     return bar
@@ -112,6 +116,9 @@ def write_incident_viewer(
             or info.get("living_advice")
             or "ok"
         )
+        fault = info.get("fault") if isinstance(info.get("fault"), dict) else {}
+        if fault.get("retrieve") or str(fault.get("code") or "") == "FAULT_IMMOBILISED":
+            advice = f"SOS {fault.get('code') or 'FAULT'} {fault.get('component') or ''}".strip()
         view = _stack_view(
             obs.get("cameras") or {},
             np.asarray(obs.get("hazard", np.zeros((8, 8), dtype=np.float32))),
@@ -131,6 +138,8 @@ def write_incident_viewer(
                 "tipover": info.get("tipover"),
                 "drain_drop": info.get("drain_drop"),
                 "action": rec.get("action"),
+                "fault": fault or None,
+                "sos": bool(fault.get("retrieve")) if fault else False,
             }
         )
     index = {
@@ -163,8 +172,9 @@ def _html_scrubber(index: dict[str, Any]) -> str:
   </style>
 </head>
 <body>
-  <h1>Incident replay</h1>
-  <p>Scrub cameras + hazard + advice. Offline dump — not a benchmark.</p>
+    <h1>Incident replay</h1>
+    <p>Scrub cameras + hazard + advice. Offline dump — not a benchmark.</p>
+    <div id="fault-banner" style="display:none;background:#5a1010;color:#ffd0d0;padding:8px 12px;margin:8px 0;border-left:6px solid #e03030;font-weight:bold;">SOS</div>
   <input id="scrub" type="range" min="0" max="{last}" value="0" {disabled}/>
   <div id="meta">step —</div>
   <img id="view" alt="episode frame"/>
@@ -180,7 +190,16 @@ def _html_scrubber(index: dict[str, Any]) -> str:
       const rec = (INDEX.frames || [])[i];
       if (!rec) return;
       view.src = rec.file;
-      meta.textContent = "step " + rec.step + "  advice=" + rec.advice;
+      const fault = rec.fault || {{}};
+      const sos = rec.sos || fault.retrieve || fault.code === "FAULT_IMMOBILISED";
+      const banner = document.getElementById("fault-banner");
+      if (sos) {{
+        banner.style.display = "block";
+        banner.textContent = "SOS  " + (fault.code || "FAULT") + "  " + (fault.component || "") + "  retrieve";
+      }} else {{
+        banner.style.display = "none";
+      }}
+      meta.textContent = "step " + rec.step + "  advice=" + rec.advice + (sos ? "  SOS" : "");
       box.textContent = JSON.stringify(rec, null, 2);
     }}
     scrub.addEventListener("input", (e) => show(Number(e.target.value)));

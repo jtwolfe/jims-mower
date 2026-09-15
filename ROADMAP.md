@@ -278,3 +278,19 @@ jims-mower-teach --steps 8 --out teach_out --cameras 4
 jims-mower-demo --policy teach --steps 8 --out demo_teach
 jims-mower-demo --profile teach_out/profile.json --steps 4 --out demo_taught
 ```
+
+## WAVE UX-B — faults + radio sim (append)
+
+Parallel to UX-A. Do not rewrite the WAVE 4 boxes above. Notes:
+[`docs/UX_B.md`](docs/UX_B.md). No claimed mAP / FPS / RF range.
+
+- [x] `FaultBus` — kill left/right drive mid-episode (`cmd_ignored` /
+      `encoder_stuck` / `open_circuit`); trimmer jam, cam blind, IMU
+      freeze, GNSS dropout unified
+- [x] `FAULT_IMMOBILISED` (dead motor: zero wheels+trimmer, SOS retrieve)
+      vs **stuck** (recovery reverse / pivot / help still runs)
+- [x] `info["fault"]` + telemetry `sos` + incident SOS banner
+- [x] `jims-mower-selftest` — unloaded spin, IMU still, cam entropy
+- [x] Radio sim Wi-Fi → BT → LoRa; heartbeat loss → `limp_home` or
+      `stop_beacon` (no RF hardware)
+

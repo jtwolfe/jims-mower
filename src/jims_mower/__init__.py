@@ -16,6 +16,8 @@ from jims_mower.profile import YardProfile, load_yard_profile, trail_to_polygon
 from jims_mower.planning.fusion import EkfPoseFilter
 from jims_mower.runtime.budget import OrinBudget
 from jims_mower.safety import living_advice, terrain_hazards, trimmer_interlock
+from jims_mower.faults import FaultBus
+from jims_mower.radio import RadioSim
 from jims_mower.safe_state import SafeStateMachine
 
 __version__ = "0.1.0"
@@ -38,10 +40,12 @@ __all__ = [
     "EkfPoseFilter",
     "EnvConfig",
     "EpisodeScorecard",
+    "FaultBus",
     "GeofenceSpec",
     "MowerEnv",
     "YardProfile",
     "OrinBudget",
+    "RadioSim",
     "SafeStateMachine",
     "Scenario",
     "TerrainPolicy",

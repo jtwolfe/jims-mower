@@ -147,3 +147,25 @@ runtime:
     t_ambient_c: 35.0
     t_hot_c: 75.0
     t_crit_c: 85.0
+
+# WAVE UX-B — fault injection + radio sim. Off by default.
+faults:
+  enabled: false
+  inject: []
+radio:
+  enabled: false
+  distance_m: 10.0
+  heartbeat_timeout_s: 2.0
+  on_loss: stop_beacon
+  wifi:
+    bandwidth_bps: 20000000.0
+    range_m: 40.0
+    drop_prob: 0.02
+  bt:
+    bandwidth_bps: 1000000.0
+    range_m: 12.0
+    drop_prob: 0.08
+  lora:
+    bandwidth_bps: 5000.0
+    range_m: 2000.0
+    drop_prob: 0.15

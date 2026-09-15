@@ -75,9 +75,12 @@ jims-mower-demo --steps 40 --out demo_out
 jims-mower-viewer --episode demo_out
 jims-mower-teach --steps 80 --out teach_out
 jims-mower-demo --profile teach_out/profile.json --out demo_taught
+
+# WAVE UX-B — software self-test (no RF hardware)
+jims-mower-selftest
 ```
 
-Docs: [`docs/UX.md`](docs/UX.md).
+Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md).
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
 
@@ -533,6 +536,20 @@ jims-mower-bridge /tmp/ep
 jims-mower-export-trt --dry-run
 ```
 
+## WAVE UX-B — faults + radio sim
+
+| Piece | Module / path |
+| --- | --- |
+| FaultBus | [`faults.py`](src/jims_mower/faults.py) — motors, trimmer, cam, IMU, GNSS |
+| Immobilised vs stuck | Dead motor → `FAULT_IMMOBILISED` + SOS; terrain stuck still recovers |
+| Radio sim | [`radio.py`](src/jims_mower/radio.py) — Wi-Fi → BT → LoRa, no RF hardware |
+| Self-test | `jims-mower-selftest` — spin / IMU still / frame entropy |
+| Notes | [`docs/UX_B.md`](docs/UX_B.md) |
+
+```bash
+jims-mower-selftest
+```
+
 ## Layout
 
 ```
@@ -540,7 +557,7 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo
 configs/scenarios/            WAVE 1A/1C/2A yards (suburban, geofence_movers, …)
-docs/                         WAVE1B / WAVE1C / WAVE2A / WAVE2B / WAVE3A / WAVE3B + JETSON + runtime contract
+docs/                         WAVE notes + UX.md / UX_B.md + JETSON + runtime contract
 docker/Dockerfile.aarch64     Orin / aarch64 packaging notes (not CI)
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/runtime/       fake drivers, bridge, budget, TRT placeholder
