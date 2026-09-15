@@ -200,6 +200,73 @@ def ground_hits(
     return hx, hy, valid
 
 
+def plane_hits(
+    cam: CameraWorldPose,
+    width: int,
+    height: int,
+    *,
+    origin_x: float,
+    origin_y: float,
+    origin_z: float,
+    gx: float,
+    gy: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Intersect rays with ``z = origin_z + gx*(x-ox) + gy*(y-oy)``.
+
+    A horizontal plane (``gx = gy = 0``) matches :func:`ground_hits` at
+    ``ground_z=origin_z``. Used to back-project onto the robot's local
+    tangent plane without reading the god-view height field.
+    """
+    ox, oy, oz, dirs = pixel_rays_world(cam, width, height)
+    dx = dirs[:, :, 0]
+    dy = dirs[:, :, 1]
+    dz = dirs[:, :, 2]
+    denom = dz - float(gx) * dx - float(gy) * dy
+    numer = (
+        float(origin_z)
+        + float(gx) * (ox - float(origin_x))
+        + float(gy) * (oy - float(origin_y))
+        - oz
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = numer / denom
+    valid = (np.abs(denom) > 1e-6) & (t > 0.0) & np.isfinite(t) & (dz < -1e-6)
+    hx = np.where(valid, ox + t * dx, np.nan)
+    hy = np.where(valid, oy + t * dy, np.nan)
+    return hx, hy, valid
+
+
+def attitude_slopes(pose: Pose) -> tuple[float, float]:
+    """World-frame ``dz/dx``, ``dz/dy`` from seated pitch / roll / yaw."""
+    c = math.cos(pose.theta)
+    s = math.sin(pose.theta)
+    tan_p = math.tan(pose.pitch)
+    tan_r = math.tan(pose.roll)
+    gx = tan_p * c - tan_r * s
+    gy = tan_p * s + tan_r * c
+    return float(gx), float(gy)
+
+
+def attitude_plane_hits(
+    cam: CameraWorldPose,
+    width: int,
+    height: int,
+    pose: Pose,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Intersect rays with the robot's local ground tangent plane."""
+    gx, gy = attitude_slopes(pose)
+    return plane_hits(
+        cam,
+        width,
+        height,
+        origin_x=pose.x,
+        origin_y=pose.y,
+        origin_z=pose.z,
+        gx=gx,
+        gy=gy,
+    )
+
+
 def heightfield_hits(
     cam: CameraWorldPose,
     width: int,

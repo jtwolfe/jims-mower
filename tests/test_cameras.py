@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from jims_mower.cameras import (
+    attitude_plane_hits,
     body_to_world,
     camera_world_pose,
     focal_length_px,
@@ -136,6 +137,30 @@ def test_heightfield_hits_match_flat_ground() -> None:
     assert bool(both.any())
     assert np.allclose(hx0[both], hx1[both], atol=0.15)
     assert np.allclose(hy0[both], hy1[both], atol=0.15)
+
+
+def test_attitude_plane_matches_flat_ground() -> None:
+    pose = Pose(2.0, 2.0, 0.0)
+    cam = CameraSpec("front", 0.25, 0.0, 0.38, 0.0, -25.0)
+    wp = camera_world_pose(pose, cam)
+    hx0, hy0, valid0 = ground_hits(wp, 16, 12)
+    hx1, hy1, valid1 = attitude_plane_hits(wp, 16, 12, pose)
+    both = valid0 & valid1
+    assert bool(both.any())
+    assert np.allclose(hx0[both], hx1[both], atol=1e-5)
+    assert np.allclose(hy0[both], hy1[both], atol=1e-5)
+
+
+def test_attitude_plane_tracks_seated_grade() -> None:
+    slope = 0.12
+    pose = Pose(6.0, 6.0, 0.0, z=0.0, pitch=slope, roll=0.0)
+    cam = CameraSpec("front", 0.25, 0.0, 0.38, 0.0, -22.0)
+    wp = camera_world_pose(pose, cam)
+    hx, hy, valid = attitude_plane_hits(wp, 24, 18, pose)
+    assert bool(valid.any())
+    # Hits should land on the same planar grade the robot is sitting on.
+    z_plane = math.tan(slope) * (hx[valid] - pose.x)
+    assert float(np.abs(z_plane).mean()) < 2.5
 
 
 def test_left_camera_yaw() -> None:

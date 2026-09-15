@@ -1,6 +1,7 @@
 """Multi-camera ground-plane BEV fuse for heuristic / learned hazard stamps.
 
-Each camera contributes class + confidence on the flat-yard plane. Cells
+Each camera contributes class + confidence on the robot's local tangent
+plane (seated pitch / roll / z). Cells
 take the highest-confidence class (ties keep the stronger label). No
 claimed detector scores — confidence is a relative merge weight only.
 """
@@ -12,7 +13,7 @@ from typing import Optional
 
 import numpy as np
 
-from jims_mower.cameras import camera_world_pose, ground_hits
+from jims_mower.cameras import attitude_plane_hits, camera_world_pose
 from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_STEEP
 from jims_mower.perception.cv_terrain import DEFAULT_MAX_RANGE_M
 from jims_mower.types import CameraSpec, Pose
@@ -45,7 +46,8 @@ def collect_stamps(
     """Back-project labelled pixels onto map cells with a range-based weight."""
     height, width = labels.shape
     world_cam = camera_world_pose(pose, cam)
-    hx, hy, valid = ground_hits(world_cam, width, height, ground_z=ground_z)
+    hx, hy, valid = attitude_plane_hits(world_cam, width, height, pose)
+    _ = ground_z
     rng = np.hypot(hx - world_cam.x, hy - world_cam.y)
     if confidence is None:
         conf = np.ones(labels.shape, dtype=np.float32)
