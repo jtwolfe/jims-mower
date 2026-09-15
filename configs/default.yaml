@@ -1,0 +1,53 @@
+# Default yard + robot for the Jim's Mower gym.
+# Distances are metres. Body is ~50 x 50 x 50 cm; cameras are body-frame
+# (x forward, y left, z up) with yaw/pitch in degrees.
+
+dt: 0.10
+max_steps: 500
+
+robot:
+  length_m: 0.50
+  width_m: 0.50
+  height_m: 0.50
+  wheelbase_m: 0.40
+  max_wheel_speed_mps: 1.2
+  collision_radius_m: 0.28
+  trimmer:
+    # Front-mounted whipper-snipper, not an under-deck blade.
+    offset_m: 0.32
+    radius_m: 0.16
+    safety_radius_m: 1.50
+    height_m: 0.12
+
+sensors:
+  width: 80
+  height: 60
+  # 4, 5, or 6 RGB cameras. Leave `cameras` empty to use the default rig.
+  camera_count: 6
+  fov_deg: 70.0
+  cameras: []
+
+world:
+  width_m: 12.0
+  height_m: 12.0
+  resolution_m: 0.10
+  n_people: 1
+  n_dogs: 1
+  n_cats: 1
+  n_birds: 1
+  n_trees: 3
+  n_furniture: 1
+  n_toys: 2
+
+reward:
+  coverage_scale: 1.0
+  time_penalty: 0.01
+  collision_living: 50.0
+  collision_static: 20.0
+  out_of_bounds: 10.0
+  completion_bonus: 15.0
+  completion_threshold: 0.95
+
+curriculum:
+  hand_signals: false
+  signal_hold_steps: 40

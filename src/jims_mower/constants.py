@@ -1,0 +1,73 @@
+"""Shared label tables for detections and curriculum signals."""
+
+from __future__ import annotations
+
+LIVING_KINDS = frozenset({"person", "dog", "cat", "bird"})
+ANIMAL_KINDS = frozenset({"dog", "cat", "bird"})
+STATIC_KINDS = frozenset({"tree", "furniture", "toy"})
+ALL_KINDS = LIVING_KINDS | STATIC_KINDS
+
+HAND_SIGNALS = ("stop", "go", "follow", "back")
+
+LABEL_TO_ID = {
+    "person": 1,
+    "dog": 2,
+    "cat": 3,
+    "bird": 4,
+    "tree": 5,
+    "furniture": 6,
+    "toy": 7,
+}
+ID_TO_LABEL = {v: k for k, v in LABEL_TO_ID.items()}
+
+SIGNAL_TO_ID = {name: i + 1 for i, name in enumerate(HAND_SIGNALS)}
+ID_TO_SIGNAL = {v: k for k, v in SIGNAL_TO_ID.items()}
+
+MAX_DETECTIONS = 24
+DET_FEATURES = 8  # label, camera, u, v, w, h, conf, signal
+
+# Synthetic palette used by the renderer (and the color-heuristic grass hook).
+UNCUT_GRASS_RGB = (46, 140, 58)
+CUT_GRASS_RGB = (168, 148, 72)
+DIRT_RGB = (90, 70, 50)
+SKY_RGB = (135, 186, 230)
+
+KIND_RGB = {
+    "person": (220, 80, 80),
+    "dog": (160, 100, 50),
+    "cat": (200, 160, 80),
+    "bird": (80, 80, 220),
+    "tree": (30, 90, 40),
+    "furniture": (120, 80, 140),
+    "toy": (240, 180, 40),
+}
+
+DEFAULT_RADII = {
+    "person": 0.25,
+    "dog": 0.20,
+    "cat": 0.12,
+    "bird": 0.08,
+    "tree": 0.35,
+    "furniture": 0.30,
+    "toy": 0.10,
+}
+
+DEFAULT_SPEEDS = {
+    "person": 0.35,
+    "dog": 0.70,
+    "cat": 0.50,
+    "bird": 1.10,
+}
+
+DEFAULT_HEIGHTS = {
+    "person": 0.90,
+    "dog": 0.35,
+    "cat": 0.20,
+    "bird": 1.40,
+    "tree": 0.40,
+    "furniture": 0.40,
+    "toy": 0.08,
+}
+
+# Birds above this height are a trimmer-safety concern but not a body collision.
+BIRD_COLLISION_Z_M = 0.60
