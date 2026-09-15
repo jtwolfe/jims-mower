@@ -526,6 +526,16 @@ class MowerEnv(gym.Env):
             self._terrain,
             self.cfg.robot.trimmer.height_m,
         )
+        terrain_ev = terrain_hazards(
+            self._pose,
+            self._terrain,
+            length_m=self.cfg.robot.length_m,
+            track_m=self.cfg.robot.track_m,
+            tip_roll_rad=self.cfg.robot.tip_roll_rad,
+            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+            wheel_drop_m=self.cfg.robot.wheel_drop_m,
+            steep_slope_rad=self.cfg.robot.steep_slope_rad,
+        )
         obs = {
             "cameras": images,
             "coverage": self._coverage.as_float(),
@@ -577,6 +587,11 @@ class MowerEnv(gym.Env):
             "n_drains": len(self._terrain.drains),
             "n_banks": len(self._terrain.banks),
             "terrain_source": terrain_est.source,
+            "terrain_advice": terrain_ev.advice,
+            "terrain_reason": terrain_ev.reason,
+            "tipover": terrain_ev.tipover,
+            "drain_drop": terrain_ev.drain_drop,
+            "steep": terrain_ev.steep,
         }
         return obs, info
 

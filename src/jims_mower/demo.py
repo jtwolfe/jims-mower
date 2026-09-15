@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -12,10 +13,38 @@ from PIL import Image
 
 from jims_mower.config import load_config
 from jims_mower.env import MowerEnv
+from jims_mower.kinematics import sit_on_terrain
+from jims_mower.renderer import render_camera
+from jims_mower.types import Pose
 
 
 def _save_rgb(path: Path, image: np.ndarray) -> None:
     Image.fromarray(image, mode="RGB").save(path)
+
+
+def _drain_camera_view(env: MowerEnv) -> Optional[np.ndarray]:
+    """Front-camera view aimed at a drain so the ditch is visible in the dump."""
+    if not env._terrain.drains:
+        return None
+    drain = env._terrain.drains[0]
+    mx = 0.5 * (drain.x0 + drain.x1)
+    my = 0.5 * (drain.y0 + drain.y1)
+    heading = drain.heading
+    # Stand off along the perpendicular so the channel crosses the image.
+    nx, ny = -math.sin(heading), math.cos(heading)
+    pose = Pose(mx - 1.6 * nx, my - 1.6 * ny, math.atan2(ny, nx))
+    pose = sit_on_terrain(pose, env._terrain, env.cfg.robot.length_m, env.cfg.robot.track_m)
+    cam = next((c for c in env.cameras if c.name == "front"), env.cameras[0])
+    return render_camera(
+        pose,
+        cam,
+        env._coverage,
+        env._yard.obstacles,
+        env.cfg.sensors.width,
+        env.cfg.sensors.height,
+        (env.cfg.world.width_m, env.cfg.world.height_m),
+        terrain=env._terrain,
+    )
 
 
 def _montage(images: dict[str, np.ndarray], order: list[str]) -> np.ndarray:
@@ -63,6 +92,9 @@ def run_demo(
             _save_rgb(step_dir / "topdown.png", topdown)
         for layer, img in env.terrain_layer_images().items():
             _save_rgb(step_dir / f"{layer}.png", img)
+        drain_view = _drain_camera_view(env)
+        if drain_view is not None:
+            _save_rgb(step_dir / "drain_view.png", drain_view)
         (step_dir / "detections.json").write_text(
             json.dumps(info["detections"], indent=2),
             encoding="utf-8",

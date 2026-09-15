@@ -29,6 +29,8 @@ def test_demo_writes_cameras_and_summary(tmp_path: Path) -> None:
     sensors = json.loads((step0 / "sensors.json").read_text(encoding="utf-8"))
     assert len(sensors["imu"]) == 6
     assert len(sensors["gps"]) == 4
+    assert sensors.get("n_drains", 0) >= 1
+    assert (step0 / "drain_view.png").is_file()
 
 
 def test_demo_six_cameras(tmp_path: Path) -> None:
