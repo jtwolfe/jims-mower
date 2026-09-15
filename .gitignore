@@ -42,5 +42,9 @@ htmlcov/
 /dataset_out/
 /farm_out/
 /terrain_mlp.npz
+/bc_logs/
+/bc_weights.npz
+/owner_overlay.html
+/owner_overlay.json
 *.ppm
 .DS_Store

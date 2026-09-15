@@ -120,7 +120,36 @@ not the height field:
    when the detector is the mock / oracle.
 
 `ComplementaryPoseFilter` is a GPS+IMU stub for planner start / attitude, not
-a published EKF.
+a published EKF. The controller wraps wheel commands in
+[`SafeStateMachine`](src/jims_mower/safe_state.py): **RUN** / **LIMP** /
+**ESTOP** / **SAFE**.
+
+## Software ESTOP / limp / safe (WAVE 3A)
+
+This is a **software latch**, not a claimed hardware SIL rating.
+
+| Mode | Wheels | Trimmer | How you get there |
+| --- | --- | --- | --- |
+| `run` | as commanded | interlock still applies | default |
+| `limp` | scaled by `planner.safe_state.limp_scale` | off | repeated `stop` advice / tip / drain |
+| `estop` | zero | off | `info["estop"]` or `obs["estop"]` true |
+| `safe` | zero | off | limp exhausted or controller call-for-help |
+
+`estop` stays latched until an operator `SafeStateMachine.clear()`. Hand-signal
+`go` clears limp/safe only. The ICD action is still `Box(3,)`; the machine
+rewrites the command the controller sends.
+
+Contract message: `SafeState` (`jims_mower.contract`) — `mode`, `scale`,
+`hold`, `trimmer_allowed`, `help_requested`.
+
+## Learning stubs (WAVE 3A)
+
+- `jims-mower-bc collect` / `train` — (obs→action) from `TerrainPolicy`, tiny
+  numpy MLP. `jims-mower-demo --policy bc` loads `bc_weights.npz` if present.
+- `jims-mower-rl` — 1-episode CPU REINFORCE / random-search. Optional
+  `pip install -e ".[rl]"` for SB3. Hazard action mask zeros forward wheels
+  into drain-lip / channel cells.
+- No claimed imitation / return / FPS numbers.
 
 ## Scenario extras (WAVE 1A)
 

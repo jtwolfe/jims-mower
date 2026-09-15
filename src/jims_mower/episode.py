@@ -185,6 +185,9 @@ def _info_slim(info: dict[str, Any]) -> dict[str, Any]:
         "terrain_advice",
         "terrain_source",
         "terrain_reason",
+        "living_advice",
+        "geofence_advice",
+        "nearest_person_m",
         "imu",
         "gps",
         "tof",
@@ -256,8 +259,8 @@ def record_episode(
     from jims_mower.demo import POLICIES, _random_action, _scripted_action
 
     name = (policy or "terrain").strip().lower()
-    if name not in POLICIES:
-        raise ValueError(f"policy must be one of {POLICIES}; got {policy!r}")
+    if name not in POLICIES or name == "bc":
+        raise ValueError(f"record policy must be terrain|scripted|random; got {policy!r}")
     cfg = load_config(config)
     if cameras is not None:
         cfg.sensors.camera_count = cameras
@@ -304,6 +307,9 @@ def record_episode(
             extra = {
                 "policy_advice": terrain_policy.last_advice if terrain_policy else None,
                 "waypoint_index": terrain_policy.index if terrain_policy else None,
+                "safe_mode": getattr(terrain_policy, "last_safe_mode", None)
+                if terrain_policy
+                else None,
             }
             if terrain_policy is not None and hasattr(terrain_policy.fusion, "pose"):
                 fp = terrain_policy.fusion.pose()

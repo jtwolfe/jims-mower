@@ -36,3 +36,16 @@ jobs:
         run: |
           jims-mower-demo --steps 4 --cameras 4 --policy scripted --out /tmp/jims-mower-ci-mission-a --save-mission /tmp/jims-mower-ci-mission.npz
           jims-mower-mission inspect --in /tmp/jims-mower-ci-mission.npz
+      - name: Behaviour cloning smoke
+        run: |
+          jims-mower-bc collect --steps 4 --cameras 4 --seed 1 --out /tmp/jims-mower-ci-bc
+          jims-mower-bc train --in /tmp/jims-mower-ci-bc --out /tmp/jims-mower-ci-bc.npz --epochs 8
+          jims-mower-demo --steps 3 --cameras 4 --policy bc --bc-weights /tmp/jims-mower-ci-bc.npz --out /tmp/jims-mower-ci-bc-demo
+      - name: RL CPU smoke
+        run: jims-mower-rl --smoke --algo reinforce --episodes 1 --steps 4
+      - name: Incident + telemetry smoke
+        run: |
+          jims-mower-incident /tmp/jims-mower-ci-ep --out /tmp/jims-mower-ci-incident
+          jims-mower-telemetry /tmp/jims-mower-ci-ep --out /tmp/jims-mower-ci-telemetry.json
+      - name: Owner overlay smoke
+        run: jims-mower-owner --config geofence_movers --cameras 4 --out /tmp/jims-mower-ci-owner.html

@@ -8,7 +8,12 @@ from typing import Any, Optional, Union
 
 import yaml
 
-from jims_mower.constants import MOVER_DENSITIES, TRAJECTORY_MODES, WEATHER_PACKS, WORLD_LAYOUTS
+from jims_mower.constants import (
+    MOVER_DENSITIES,
+    TRAJECTORY_MODES,
+    WEATHER_PACKS,
+    WORLD_LAYOUTS,
+)
 from jims_mower.types import CameraSpec
 
 def _discover_default_config() -> Path:
@@ -243,6 +248,16 @@ class UncertaintyConfig:
 
 
 @dataclass
+class SafeStateConfig:
+    """ESTOP / limp / safe hold. Used by the controller, not a claimed SIL rating."""
+
+    limp_after_stops: int = 8
+    safe_after_limp_steps: int = 12
+    limp_scale: float = 0.35
+    recover_ok_steps: int = 4
+
+
+@dataclass
 class PlannerConfig:
     """Coverage planner + controller knobs (max climb, drain clearance, slow)."""
 
@@ -273,6 +288,7 @@ class PlannerConfig:
     recovery_reverse_steps: int = 6
     recovery_pivot_steps: int = 5
     max_recoveries: int = 2
+    safe_state: SafeStateConfig = field(default_factory=SafeStateConfig)
 
 
 @dataclass
@@ -501,6 +517,13 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner recovery trigger/steps must be >= 1")
     if plan.max_recoveries < 0:
         raise ConfigError("planner.max_recoveries must be >= 0")
+    safe = plan.safe_state
+    if safe.limp_after_stops < 1 or safe.safe_after_limp_steps < 1:
+        raise ConfigError("planner.safe_state limp/safe thresholds must be >= 1")
+    if not 0.0 < safe.limp_scale <= 1.0:
+        raise ConfigError("planner.safe_state.limp_scale must be in (0, 1]")
+    if safe.recover_ok_steps < 1:
+        raise ConfigError("planner.safe_state.recover_ok_steps must be >= 1")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

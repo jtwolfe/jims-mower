@@ -102,3 +102,19 @@ Hazard labels: `0` free, `1` steep, `2` drain lip, `3` channel.
 | `stamp_s` | number | |
 
 Gym action is `[left, right, trimmer]`.
+
+## SafeState
+
+Software ESTOP / limp / safe hold. Not a claimed SIL rating. Additive
+in contract version `"1"`.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `version` | string | `"1"` |
+| `mode` | string | `run` / `limp` / `estop` / `safe` |
+| `scale` | number | limp wheel scale; `0` when holding |
+| `hold` | bool | zero wheels + trimmer |
+| `trimmer_allowed` | bool | limp/estop/safe force false |
+| `help_requested` | bool | safe / estop |
+| `reason` | string or null | |
+| `stamp_s` | number | |

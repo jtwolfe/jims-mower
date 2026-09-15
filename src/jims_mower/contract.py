@@ -22,6 +22,7 @@ MESSAGE_KINDS = (
     "TerrainMaps",
     "Plan",
     "WheelCommand",
+    "SafeState",
 )
 
 
@@ -251,6 +252,37 @@ class Plan:
 
 
 @dataclass
+class SafeState:
+    """Software ESTOP / limp / safe hold. Not a claimed SIL rating."""
+
+    mode: str = "run"
+    scale: float = 1.0
+    hold: bool = False
+    trimmer_allowed: bool = True
+    help_requested: bool = False
+    reason: Optional[str] = None
+    stamp_s: float = 0.0
+    version: str = CONTRACT_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SafeState":
+        _require_version(data)
+        return cls(
+            mode=str(data.get("mode", "run")),
+            scale=float(data.get("scale", 1.0)),
+            hold=bool(data.get("hold", False)),
+            trimmer_allowed=bool(data.get("trimmer_allowed", True)),
+            help_requested=bool(data.get("help_requested", False)),
+            reason=data.get("reason"),
+            stamp_s=float(data.get("stamp_s", 0.0)),
+            version=str(data.get("version", CONTRACT_VERSION)),
+        )
+
+
+@dataclass
 class WheelCommand:
     left: float
     right: float
@@ -382,6 +414,21 @@ JSON_SCHEMAS: dict[str, dict[str, Any]] = {
             "trimmer": {"type": "number"},
         },
     },
+    "SafeState": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "SafeState",
+        "type": "object",
+        "required": ["version", "mode"],
+        "properties": {
+            **_SCHEMA_COMMON,
+            "mode": {"type": "string"},
+            "scale": {"type": "number"},
+            "hold": {"type": "boolean"},
+            "trimmer_allowed": {"type": "boolean"},
+            "help_requested": {"type": "boolean"},
+            "reason": {"type": "string"},
+        },
+    },
 }
 
 _LOADERS = {
@@ -393,6 +440,7 @@ _LOADERS = {
     "TerrainMaps": TerrainMaps.from_dict,
     "Plan": Plan.from_dict,
     "WheelCommand": WheelCommand.from_dict,
+    "SafeState": SafeState.from_dict,
 }
 
 
@@ -424,5 +472,6 @@ def contract_field_names(kind: str) -> list[str]:
         "TerrainMaps": TerrainMaps,
         "Plan": Plan,
         "WheelCommand": WheelCommand,
+        "SafeState": SafeState,
     }[kind]
     return [f.name for f in fields(cls)]

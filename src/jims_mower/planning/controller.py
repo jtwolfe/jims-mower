@@ -20,6 +20,7 @@ from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wr
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
 from jims_mower.planning.fusion import attitude_from_accel, make_pose_filter
+from jims_mower.safe_state import SafeStateMachine, estop_requested
 from jims_mower.types import Pose
 
 _ADVICE_RANK = {name: i for i, name in enumerate(("ok", "slow", "reroute", "stop"))}
@@ -155,6 +156,8 @@ class TerrainPolicy:
         self.last_recovery = "idle"
         self.help_requested = False
         self.last_signal: Optional[str] = None
+        self.safe = SafeStateMachine.from_config(cfg.planner.safe_state)
+        self.last_safe_mode = self.safe.mode
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> CoveragePlan:
         info = info or {}
@@ -181,6 +184,8 @@ class TerrainPolicy:
         self.last_recovery = "idle"
         self.help_requested = False
         self.last_signal = None
+        self.safe.reset()
+        self.last_safe_mode = self.safe.mode
         self._remember_map_size(obs)
         self._drain_cells = _drain_cell_count(obs.get("hazard"))
         self._occ_cells = _occ_cell_count(obs.get("occupancy"))
@@ -229,26 +234,30 @@ class TerrainPolicy:
             advice = "ok"
         self.last_advice = advice
 
+        if estop_requested(obs, info):
+            self.safe.request_estop("software/hardware estop")
+
         signal = observed_hand_signal(obs, self.cfg.curriculum.hand_signals)
         self.last_signal = signal
         if signal is not None:
             override = self._hand_signal_action(signal, pose, obs, info, advice)
             if override is not None:
-                return override
+                return self._finish_action(override, advice, info)
 
         if self.help_requested:
             self.last_recovery = "help"
             self.last_advice = "stop"
-            return self._hold()
+            self.safe.enter_safe("call-for-help")
+            return self._finish_action(self._hold(), "stop", info)
 
         terrain_only = combine_advice(env_advice, sensed, chassis)
         self._update_recovery_streaks(terrain_only)
         recovered = self._maybe_recovery_action(terrain_only, pose)
         if recovered is not None:
-            return recovered
+            return self._finish_action(recovered, advice, info)
 
         if advice == "stop":
-            return self._hold()
+            return self._finish_action(self._hold(), advice, info)
 
         if self.plan is None:
             self.reset(obs, info)
@@ -274,7 +283,7 @@ class TerrainPolicy:
             if self.index >= len(waypoints):
                 self._last_v = 0.0
                 self._last_omega = 0.0
-                return np.array([0.0, 0.0, 0.0], dtype=np.float32)
+                return self._finish_action(np.array([0.0, 0.0, 0.0], dtype=np.float32), advice, info)
 
         target = waypoints[self.index]
         cruise = self.cfg.planner.cruise_speed
@@ -294,7 +303,35 @@ class TerrainPolicy:
             self.cfg.robot.wheelbase_m,
         )
         trimmer = 1.0 if advice in {"ok", "slow"} else 0.0
-        return np.array([wheels[0], wheels[1], trimmer], dtype=np.float32)
+        return self._finish_action(
+            np.array([wheels[0], wheels[1], trimmer], dtype=np.float32),
+            advice,
+            info,
+        )
+
+    def _finish_action(
+        self,
+        action: np.ndarray,
+        advice: str,
+        info: dict[str, Any],
+    ) -> np.ndarray:
+        """Tick ESTOP/limp/safe and scale the wheel command."""
+        if self.help_requested:
+            self.safe.enter_safe("call-for-help")
+        self.safe.tick(
+            advice=advice,
+            estop=estop_requested(None, info),
+            tipover=bool(info.get("tipover")),
+            drain_drop=bool(info.get("drain_drop")),
+            help_requested=self.help_requested,
+        )
+        self.last_safe_mode = self.safe.mode
+        out = self.safe.apply(action)
+        if self.safe.command().hold:
+            self._last_v = 0.0
+            self._last_omega = 0.0
+            self.last_advice = "stop"
+        return out
 
     @property
     def waypoints(self) -> list[tuple[float, float]]:
@@ -509,6 +546,7 @@ class TerrainPolicy:
             self.help_requested = False
             self._recovery = "idle"
             self._stop_streak = 0
+            self.safe.clear_if_not_estop()
             return None
         if signal == "follow":
             self.help_requested = False

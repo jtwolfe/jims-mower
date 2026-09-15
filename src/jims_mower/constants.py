@@ -80,6 +80,13 @@ GRAVITY_MPS2 = 9.80665
 
 TERRAIN_ADVICE = ("ok", "slow", "stop", "reroute")
 MISSION_SCHEMA = "jims_mower.mission.v1"
+SAFE_MODES = ("run", "limp", "estop", "safe")
+BC_SCHEMA = "jims_mower.bc.v1"
+TELEMETRY_SCHEMA = "jims_mower.telemetry.v1"
+OWNER_OVERLAY_SCHEMA = "jims_mower.owner.v1"
+NEAR_MISS_LIVING_M = 1.5
+BC_FEATURE_DIM = 40
+DEFAULT_BC_WEIGHTS = "bc_weights.npz"
 
 KIND_RGB = {
     "person": (220, 80, 80),

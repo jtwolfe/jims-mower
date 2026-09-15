@@ -6,12 +6,14 @@ import argparse
 import json
 import math
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 from PIL import Image
 
+from jims_mower.bc import BcPolicy, maybe_load_bc
 from jims_mower.bev import render_bev
+from jims_mower.constants import BC_FEATURE_DIM, DEFAULT_BC_WEIGHTS
 from jims_mower.env import MowerEnv
 from jims_mower.kinematics import sit_on_terrain, trimmer_xy
 from jims_mower.planning import TerrainPolicy
@@ -19,7 +21,7 @@ from jims_mower.renderer import render_camera, render_topdown
 from jims_mower.scenarios import load_source
 from jims_mower.types import Pose
 
-POLICIES = ("terrain", "scripted", "random")
+POLICIES = ("terrain", "scripted", "random", "bc")
 
 
 def _save_rgb(path: Path, image: np.ndarray) -> None:
@@ -101,11 +103,13 @@ def run_demo(
     seed: int = 7,
     cameras: Optional[int] = None,
     hand_signals: bool = False,
-    config: Optional[str] = None,
+    config: Optional[Any] = None,
     policy: str = "terrain",
     terrain_observer: Optional[str] = None,
     load_mission: Optional[str] = None,
     save_mission: Optional[str] = None,
+    bc_weights: Optional[str] = None,
+    log_bc: Optional[str] = None,
 ) -> dict:
     name = (policy or "terrain").strip().lower()
     if name not in POLICIES:
@@ -136,10 +140,21 @@ def run_demo(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     terrain_policy: Optional[TerrainPolicy] = None
+    bc_policy: Optional[BcPolicy] = None
+    bc_loaded = False
     rng = np.random.default_rng(seed)
+    if name == "bc":
+        bc_policy = maybe_load_bc(bc_weights, env.cfg.world.resolution_m)
+        if bc_policy is not None:
+            bc_policy.reset(obs, info)
+            bc_loaded = True
+        else:
+            name = "terrain"
     if name == "terrain":
         terrain_policy = TerrainPolicy(env.cfg)
         terrain_policy.reset(obs, info)
+    bc_log_feats: list[np.ndarray] = []
+    bc_log_acts: list[np.ndarray] = []
 
     names = list(obs["cameras"].keys())
     records: list[dict] = []
@@ -199,6 +214,10 @@ def run_demo(
                     "terrain_mode": env.cfg.perception.terrain_mode,
                     "terrain_advice": info.get("terrain_advice"),
                     "policy": name,
+                    "bc_loaded": bc_loaded,
+                    "safe_mode": getattr(terrain_policy, "last_safe_mode", None)
+                    if terrain_policy
+                    else None,
                     "waypoint_index": terrain_policy.index if terrain_policy else None,
                     "n_waypoints": len(terrain_policy.waypoints) if terrain_policy else 0,
                 },
@@ -215,9 +234,19 @@ def run_demo(
             action = _scripted_action()
         elif name == "random":
             action = _random_action(env, rng)
+        elif name == "bc":
+            assert bc_policy is not None
+            action = bc_policy.act(obs, info)
         else:
             assert terrain_policy is not None
             action = terrain_policy.act(obs, info)
+        if log_bc:
+            from jims_mower.features import extract_features
+
+            bc_log_feats.append(
+                extract_features(obs, info, resolution_m=env.cfg.world.resolution_m)
+            )
+            bc_log_acts.append(np.asarray(action, dtype=np.float32).reshape(-1)[:3])
         obs, reward, terminated, truncated, info = env.step(action)
         records.append(
             {
@@ -273,6 +302,9 @@ def run_demo(
         "steps_run": len(records),
         "cameras": names,
         "policy": name,
+        "bc_loaded": bc_loaded,
+        "bc_weights": bc_weights or DEFAULT_BC_WEIGHTS,
+        "safe_mode": getattr(terrain_policy, "last_safe_mode", None) if terrain_policy else None,
         "final_coverage_fraction": records[-1]["coverage_fraction"] if records else 0.0,
         "final_detections": info["detections"],
         "hand_signals_enabled": hand_signals,
@@ -292,6 +324,35 @@ def run_demo(
         "log": records,
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    if log_bc:
+        dest = Path(log_bc)
+        dest.mkdir(parents=True, exist_ok=True)
+        x = (
+            np.stack(bc_log_feats, axis=0)
+            if bc_log_feats
+            else np.zeros((0, BC_FEATURE_DIM), dtype=np.float32)
+        )
+        y = (
+            np.stack(bc_log_acts, axis=0)
+            if bc_log_acts
+            else np.zeros((0, 3), dtype=np.float32)
+        )
+        np.save(dest / "features.npy", x)
+        np.save(dest / "actions.npy", y)
+        np.savez_compressed(dest / "dataset.npz", features=x, actions=y)
+        (dest / "meta.json").write_text(
+            json.dumps(
+                {
+                    "n_samples": int(x.shape[0]),
+                    "policy": name,
+                    "not_a_benchmark": True,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        summary["bc_log"] = str(dest)
+        summary["bc_log_samples"] = int(x.shape[0])
     env.close()
     return summary
 
@@ -313,7 +374,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--policy",
         choices=POLICIES,
         default="terrain",
-        help="terrain (default coverage planner), scripted creep, or random wheels",
+        help="terrain (default coverage planner), scripted, random, or bc (loads weights if present)",
+    )
+    p.add_argument(
+        "--bc-weights",
+        type=Path,
+        default=None,
+        help="numpy BC weights (default bc_weights.npz); ignored unless --policy bc",
+    )
+    p.add_argument(
+        "--log-bc",
+        type=Path,
+        default=None,
+        help="write (obs→action) feature/action arrays while the demo runs",
     )
     p.add_argument(
         "--terrain-observer",
@@ -349,6 +422,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         terrain_observer=args.terrain_observer,
         load_mission=str(args.load_mission) if args.load_mission else None,
         save_mission=str(args.save_mission) if args.save_mission else None,
+        bc_weights=str(args.bc_weights) if args.bc_weights else None,
+        log_bc=str(args.log_bc) if args.log_bc else None,
     )
     print(
         f"Wrote {summary['steps_run']} steps, policy={summary['policy']}, "

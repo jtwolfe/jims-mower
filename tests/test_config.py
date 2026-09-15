@@ -20,6 +20,17 @@ def test_default_yaml_exists() -> None:
     assert DEFAULT_CONFIG_PATH.is_file() or isinstance(load_config(), EnvConfig)
 
 
+def test_default_safe_state_knobs() -> None:
+    cfg = load_config()
+    assert 0.0 < cfg.planner.safe_state.limp_scale <= 1.0
+    assert cfg.planner.safe_state.limp_after_stops >= 1
+
+
+def test_rejects_bad_limp_scale() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"safe_state": {"limp_scale": 0.0}}})
+
+
 def test_load_default_has_six_cameras() -> None:
     cfg = load_config()
     cams = cfg.resolved_cameras()

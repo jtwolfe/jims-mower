@@ -14,6 +14,7 @@ from jims_mower.geofence import GeofenceSpec
 from jims_mower.mission import load_mission, save_mission
 from jims_mower.planning.fusion import EkfPoseFilter
 from jims_mower.safety import living_advice, terrain_hazards, trimmer_interlock
+from jims_mower.safe_state import SafeStateMachine
 
 __version__ = "0.1.0"
 
@@ -37,6 +38,7 @@ __all__ = [
     "EpisodeScorecard",
     "GeofenceSpec",
     "MowerEnv",
+    "SafeStateMachine",
     "Scenario",
     "TerrainPolicy",
     "build_costmap",

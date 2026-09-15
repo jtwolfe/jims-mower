@@ -39,6 +39,11 @@ python -m jims_mower.demo --config configs/steep_yard.yaml --out demo_steep
 python -m jims_mower.demo --policy scripted --out demo_scripted
 python -m jims_mower.demo --policy random --out demo_random
 
+# Behaviour cloning stub (loads bc_weights.npz if you trained one):
+jims-mower-bc collect --steps 40 --cameras 4 --out bc_logs
+jims-mower-bc train --in bc_logs --out bc_weights.npz
+jims-mower-demo --policy bc --bc-weights bc_weights.npz --out demo_bc
+
 # Record / replay (offline planner, or replay actions through the env)
 jims-mower-record --out /tmp/jm-ep --steps 20 --cameras 4
 jims-mower-replay /tmp/jm-ep --mode offline
@@ -428,10 +433,13 @@ env checker, heuristic+planner episodes on `steep_yard` (fixed seeds: no
 channel entry; coverage vs oracle is reported without a fake mAP), the
 scenario loader, dataset-export layout, scorecards on frozen seeds, a farm
 dry-run, moving-agent trajectories, geofence costmaps, recovery /
-hand-signal overrides, and mission save/load. GitHub Actions PR CI runs
-the same suite headless on Python 3.10–3.12 plus short terrain-policy,
-suburban, geofence, mission, and record/replay smokes (heuristic default).
-Torch is an optional extra and is not installed in CI. The full
+hand-signal overrides, mission save/load, the ESTOP/limp machine, BC
+collect/train, the numpy RL smoke, incident/telemetry dumps, and the
+owner overlay stub. GitHub Actions PR CI runs the same suite headless on
+Python 3.10–3.12 plus short terrain-policy, suburban, geofence, mission,
+record/replay, BC collect/train, numpy RL smoke, incident viewer,
+telemetry, and owner overlay smokes (heuristic default). Torch and SB3
+are optional extras and are not installed in CI. The full
 seed×scenario farm is a separate
 [manual / nightly workflow](.github/workflows/farm.yml), not PR CI.
 
@@ -465,6 +473,22 @@ observer can still be heuristic. Dataset folder layout is written to
 The planner still runs in-process on small numpy rasters (Orin Nano class).
 There are no claimed mAP / FPS numbers. Do not run the gym renderer on-box.
 
+## WAVE 3A — learning + ops tooling
+
+| Piece | Module / path |
+| --- | --- |
+| Behaviour cloning | `jims-mower-bc collect\|train`; `--policy bc` |
+| RL scaffold | `jims-mower-rl` (numpy); optional `pip install -e ".[rl]"` for SB3 |
+| Action mask | [`action_mask.py`](src/jims_mower/action_mask.py) — hazard cone |
+| ESTOP / limp / safe | [`safe_state.py`](src/jims_mower/safe_state.py) used by `TerrainPolicy` |
+| Incident viewer | `jims-mower-incident <episode> --out viewer/` |
+| Telemetry JSON | `jims-mower-telemetry` — coverage, tip rate, drains, living near-misses |
+| Owner overlay | `jims-mower-owner --config geofence_movers` |
+
+The BC/RL stubs are **baselines**, not claimed SOTA. Train MSE / episode
+return in logs are diagnostic only. torch and stable-baselines3 stay out
+of the default install and out of PR CI.
+
 ## Layout
 
 ```
@@ -472,7 +496,7 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo
 configs/scenarios/            WAVE 1A/1C/2A yards (suburban, geofence_movers, …)
-docs/                         WAVE1B / WAVE1C / WAVE2A / WAVE2B notes + runtime contract
+docs/                         WAVE1B / WAVE1C / WAVE2A / WAVE2B / WAVE3A + runtime contract
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/scenarios.py   YAML scenario loader
 src/jims_mower/geofence.py    keep-in / keep-out polygons
@@ -487,6 +511,12 @@ src/jims_mower/contract.py    versioned message schemas
 src/jims_mower/episode.py     record / replay
 scripts/train_terrain_seg.py  export → numpy terrain weights
 docs/WAVE2B.md                domain-rand training note
+src/jims_mower/bc.py          numpy behaviour-cloning stub
+src/jims_mower/rl.py          REINFORCE / random-search / optional SB3
+src/jims_mower/safe_state.py  ESTOP / limp / safe
+src/jims_mower/incident.py    episode scrubber
+src/jims_mower/telemetry.py   ops JSON
+src/jims_mower/owner.py       phone overlay HTML
 tests/                        pytest
 ```
 
