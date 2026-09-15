@@ -10,6 +10,7 @@ from jims_mower.metrics import EpisodeScorecard, evaluate_episode
 from jims_mower.scenarios import Scenario, list_scenarios, load_scenario, load_source
 from jims_mower.kinematics import integrate_pose, sit_on_terrain
 from jims_mower.planning import TerrainPolicy, build_costmap, plan_coverage
+from jims_mower.planning.fusion import EkfPoseFilter
 from jims_mower.safety import terrain_hazards, trimmer_interlock
 
 __version__ = "0.1.0"
@@ -29,6 +30,7 @@ def _register() -> None:
 _register()
 
 __all__ = [
+    "EkfPoseFilter",
     "EnvConfig",
     "EpisodeScorecard",
     "MowerEnv",

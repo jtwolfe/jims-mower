@@ -124,6 +124,9 @@ def test_env_obs_sensor_shapes() -> None:
     assert obs["elevation"].shape == obs["coverage"].shape
     assert obs["slope"].shape == obs["coverage"].shape
     assert obs["hazard"].shape == obs["coverage"].shape
+    assert obs["confidence"].shape == obs["coverage"].shape
+    assert float(obs["confidence"].min()) >= 0.0
+    assert float(obs["confidence"].max()) <= 1.0
     assert env.observation_space.contains(obs)
     assert info["n_drains"] >= 1
     env.close()

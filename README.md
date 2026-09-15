@@ -39,6 +39,11 @@ python -m jims_mower.demo --config configs/steep_yard.yaml --out demo_steep
 python -m jims_mower.demo --policy scripted --out demo_scripted
 python -m jims_mower.demo --policy random --out demo_random
 
+# Record / replay (offline planner, or replay actions through the env)
+jims-mower-record --out /tmp/jm-ep --steps 20 --cameras 4
+jims-mower-replay /tmp/jm-ep --mode offline
+jims-mower-replay /tmp/jm-ep --mode env
+
 # Or:
 python -m jims_mower.demo --cameras 6 --hand-signals --out demo_out
 
@@ -156,7 +161,8 @@ flowchart LR
 2. **Costmap** — free = 1; steep below `planner.max_climb_slope_rad` = slow
    corridor; steeper than that, drain lips, and channels are blocked. Channels
    and lips are inflated by `planner.drain_clearance_m`. Occupancy (trees /
-   detections) is blocked too.
+   detections) is blocked too. Per-cell `confidence` inflates finite costs
+   when the observer is unsure (`planner.uncertainty`).
 3. **Plan** — lawnmower strips on free grass, A* between strip ends so the
    path goes *around* a ditch instead of across it.
 4. **Act** — a differential-drive tracker follows waypoints. `terrain_advice`
@@ -164,17 +170,19 @@ flowchart LR
    by `planner.slow_speed_factor`, **reroute** blocks a forward cone and
    replans, **stop** zeros the wheels (the env still terminates on tip-over or
    a wheel in the channel).
-5. **Pose stub** — `ComplementaryPoseFilter` blends noisy GPS XY with
-   commanded-speed odometry and IMU tilt. Working stub, not a published EKF.
-   The planner uses that estimate as its start pose.
+5. **Pose filter** — `EkfPoseFilter` (default) fuses GPS XY (+ optional Z),
+   IMU tilt/rates, and wheel odometry. Configurable process/measurement
+   noise under `planner.ekf`. `ComplementaryPoseFilter` remains as the
+   onboard stub (`planner.pose_filter: complementary`). The planner uses
+   the fused estimate as its start pose.
 
 On a **Jetson Orin Nano** this same split is the runtime: GStreamer/NVMM
 cameras + your detector / terrain head behind the protocols, the numpy
-costmap + planner + controller in-process (the rasters are small), and a real
-complementary filter / EKF behind `ComplementaryPoseFilter`. Do not run the
+costmap + planner + controller in-process (the rasters are small), and the
+EKF (or the complementary stub) behind `TerrainPolicy.fusion`. Do not run the
 gym renderer or `OracleTerrainObserver` on-box. Tune `max_climb_slope_rad`,
-`drain_clearance_m`, and `slow_speed_factor` in YAML to the machine and the
-yard.
+`drain_clearance_m`, `slow_speed_factor`, and `planner.uncertainty` in YAML
+to the machine and the yard.
 
 ## Architecture
 
@@ -249,6 +257,7 @@ flowchart LR
 | `elevation` | Height-field estimate (metres) |
 | `slope` | Slope raster (radians, 0–π/2) |
 | `hazard` | `0` free, `1` steep, `2` drain lip, `3` drain channel |
+| `confidence` | Per-cell map confidence in `[0, 1]` |
 | `detections` | Padded `[label, cam, u, v, w, h, conf, signal]` |
 | `pose` | `(x, y, theta, z, pitch, roll)` |
 | `imu` | `(ax, ay, az, gx, gy, gz)` body frame |
@@ -349,7 +358,7 @@ IMU + GNSS    ─┘         ▼
 | `classify_terrain_rgb` (brown / olive palette) | A segmentation head (drain / lip / bank / grass). TensorRT INT8 is the usual path. Do **not** ship the palette heuristic as the production detector. |
 | `ground_hits` flat-plane back-projection | Camera extrinsics in YAML + a depth net, stereo, or ToF cloud. Same output: world XY cells to stamp. |
 | `stamp_tof_corners` | Real VL53L1X (or similar) ranges at the wheel corners. Same hook. |
-| IMU slope disk | Keep; fuse with the complementary filter / your EKF. |
+| IMU slope disk | Keep; fuse with `EkfPoseFilter` (or the complementary stub). |
 | `OracleTerrainObserver` | Training / eval only. Never run on-box. |
 | `BlindTerrainObserver` | Empty stub while you wire the net. Same `estimate(...)` contract. |
 | Costmap + planner + controller | Keep in-process. The rasters are small. |
@@ -368,9 +377,9 @@ This package is the **training / eval gym**, not the robot runtime.
 - Do not pull a desktop OpenCV GUI or a full detector / SLAM stack into this
   repo. On the robot, run GStreamer/NVMM capture + your TensorRT (or similar)
   head behind the `Detector` / `TerrainObserver` protocols.
-- Fuse IMU + GNSS with a complementary filter or a small EKF in *your*
-  runtime. The gym ships `ComplementaryPoseFilter` as the swap-in stub and
-  still emits the noisy measurements.
+- Fuse IMU + GNSS + wheel odometry with the shipped `EkfPoseFilter`, or
+  keep `ComplementaryPoseFilter` as the lighter stub. The gym still emits
+  the noisy measurements. See `docs/runtime_contract.md` and `docs/WAVE1B.md`.
 - The numpy renderer is for the gym only. It will not run as the robot’s
   perception.
 - Memory budget on-device is the model, not this env. The heuristic / mock
@@ -388,15 +397,18 @@ Unit tests cover kinematics (including zero-turn and slope attitude), drain
 and tip-over hazards, IMU/GPS observation shapes, the trimmer interlock,
 maps, camera math, the mock detector, RGB terrain classification and
 back-projection, terrain observers (oracle / heuristic / blind), the
-costmap and coverage planner (channels forbidden), the controller (slows
-on steep / stops on tip / replans when the vision map grows), the GPS+IMU
-pose stub, reward, the renderer’s non-flat shading and plan overlay, the
-Gymnasium env checker, heuristic+planner episodes on `steep_yard`
+uncertainty-aware costmap and coverage planner (channels forbidden), the
+controller (slows on steep / stops on tip / replans when the vision map
+grows), the EKF pose filter (observability sanity) plus the complementary
+stub, the runtime contract, record/replay roundtrip, the latency scorecard
+(no FPS claims), reward, the renderer’s non-flat shading and plan overlay,
+the Gymnasium env checker, heuristic+planner episodes on `steep_yard`
 (fixed seeds: no channel entry; coverage vs oracle is reported without a
 fake mAP), the scenario loader, dataset-export layout, scorecards on
 frozen seeds, and a farm dry-run. GitHub Actions PR CI runs the same
 suite headless on Python 3.10–3.12 plus a short terrain-policy demo
-smoke (heuristic default). The full seed×scenario farm is a separate
+smoke and a record/replay CLI smoke (heuristic default). The full
+seed×scenario farm is a separate
 [manual / nightly workflow](.github/workflows/farm.yml), not PR CI.
 
 ## WAVE 1A foundation
@@ -421,13 +433,16 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo
 configs/scenarios/            WAVE 1A yards (suburban, paddock, …)
+docs/                         WAVE1B / WAVE1C notes + runtime contract
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/scenarios.py   YAML scenario loader
 src/jims_mower/export.py      dataset dump
 src/jims_mower/metrics.py     episode scorecards
 src/jims_mower/farm.py        seed × scenario farm
 src/jims_mower/bev.py         BEV composite
-src/jims_mower/planning/      costmap, boustrophedon+A*, controller, pose stub
+src/jims_mower/planning/      costmap, boustrophedon+A*, controller, EKF
+src/jims_mower/contract.py    versioned message schemas
+src/jims_mower/episode.py     record / replay
 tests/                        pytest
 ```
 

@@ -135,6 +135,9 @@ def test_default_has_planner_knobs() -> None:
     assert cfg.planner.max_climb_slope_rad > 0
     assert cfg.planner.drain_clearance_m >= 0
     assert 0.0 < cfg.planner.slow_speed_factor <= 1.0
+    assert cfg.planner.pose_filter == "ekf"
+    assert cfg.planner.ekf.r_gps_xy > 0
+    assert cfg.planner.uncertainty.inflate >= 0
 
 
 def test_rejects_bad_slow_speed_factor() -> None:
@@ -171,6 +174,16 @@ def test_wave1c_defaults() -> None:
     assert cfg.weather.pack == "clear"
     assert cfg.domain_randomization.enabled is False
     assert cfg.world.grass.enabled is False
+
+
+def test_rejects_bad_pose_filter() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"pose_filter": "ukf-paper"}})
+
+
+def test_rejects_bad_uncertainty_floor() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"uncertainty": {"confidence_floor": 1.5}}})
 
 
 def test_planner_yaml_override() -> None:

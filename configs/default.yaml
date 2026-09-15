@@ -103,3 +103,20 @@ planner:
   strip_spacing_m: 0.28
   waypoint_stride_m: 0.32
   cruise_speed: 0.55
+  pose_filter: ekf
+  ekf:
+    q_xy: 0.04
+    q_z: 0.08
+    q_yaw: 0.03
+    q_tilt: 0.04
+    q_odom: 0.06
+    r_gps_xy: 1.2
+    r_gps_z: 2.0
+    r_tilt: 0.10
+    use_gps_z: true
+    gps_gate_m: 5.0
+    gyro_yaw_mix: 0.30
+  uncertainty:
+    inflate: 1.5
+    hazard_boost: 4.0
+    confidence_floor: 0.25

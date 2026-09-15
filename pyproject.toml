@@ -37,6 +37,8 @@ dev = [
 jims-mower-demo = "jims_mower.demo:main"
 jims-mower-export = "jims_mower.export:main"
 jims-mower-farm = "jims_mower.farm:main"
+jims-mower-record = "jims_mower.record_cli:main"
+jims-mower-replay = "jims_mower.replay_cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jtwolfe/jims-mower"

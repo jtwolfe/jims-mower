@@ -12,7 +12,7 @@ from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN_EDGE, TERRAIN_ADVICE
 from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wrap_angle
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
-from jims_mower.planning.fusion import ComplementaryPoseFilter, attitude_from_accel
+from jims_mower.planning.fusion import attitude_from_accel, make_pose_filter
 from jims_mower.types import Pose
 
 _ADVICE_RANK = {name: i for i, name in enumerate(("ok", "slow", "reroute", "stop"))}
@@ -126,10 +126,7 @@ class TerrainPolicy:
 
     def __init__(self, cfg: EnvConfig) -> None:
         self.cfg = cfg
-        self.fusion = ComplementaryPoseFilter(
-            gps_blend=cfg.planner.gps_blend,
-            accel_blend=cfg.planner.accel_blend,
-        )
+        self.fusion = make_pose_filter(cfg)
         self.plan: Optional[CoveragePlan] = None
         self.index = 0
         self.replans = 0
@@ -277,6 +274,10 @@ class TerrainPolicy:
         slope = np.asarray(obs["slope"], dtype=np.float32)
         occupancy = np.asarray(obs["occupancy"], dtype=np.float32) if "occupancy" in obs else None
         coverage = np.asarray(obs["coverage"], dtype=np.float32) if "coverage" in obs else None
+        confidence = (
+            np.asarray(obs["confidence"], dtype=np.float32) if "confidence" in obs else None
+        )
+        unc = self.cfg.planner.uncertainty
         costmap = build_costmap(
             hazard,
             slope,
@@ -289,6 +290,10 @@ class TerrainPolicy:
             occupancy_inflate_m=self.cfg.planner.occupancy_inflate_m,
             margin_m=self.cfg.robot.collision_radius_m,
             extra_blocked=extra_blocked,
+            confidence=confidence,
+            uncertainty_inflate=unc.inflate,
+            uncertain_hazard_boost=unc.hazard_boost,
+            uncertain_confidence_floor=unc.confidence_floor,
         )
         mowable = _mowable_mask(coverage, costmap.blocked.shape)
         return plan_coverage(

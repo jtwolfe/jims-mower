@@ -24,6 +24,7 @@ class Costmap:
     width_m: float
     height_m: float
     resolution_m: float
+    confidence: Optional[np.ndarray] = None
 
     @property
     def rows(self) -> int:
@@ -113,6 +114,10 @@ def build_costmap(
     occupancy_inflate_m: float = 0.0,
     margin_m: float = 0.28,
     extra_blocked: Optional[np.ndarray] = None,
+    confidence: Optional[np.ndarray] = None,
+    uncertainty_inflate: float = 0.0,
+    uncertain_hazard_boost: float = 0.0,
+    uncertain_confidence_floor: float = 0.25,
 ) -> Costmap:
     """Build a traversal costmap.
 
@@ -124,6 +129,11 @@ def build_costmap(
 
     Occupancy > 0.5 is blocked (trees / detections). A yard-edge margin keeps
     the body inside ``in_yard``.
+
+    ``confidence`` (0–1, same shape) inflates finite costs when low:
+    ``cost *= 1 + uncertainty_inflate * (1 - conf)``, plus
+    ``uncertain_hazard_boost`` on steep/lip/channel hints. Uncertain free
+    cells stay traversable so a blind map does not lock the planner.
     """
     hazard = np.asarray(hazard, dtype=np.float32)
     slope = np.asarray(slope, dtype=np.float32)
@@ -173,10 +183,35 @@ def build_costmap(
         blocked[:, -margin_cells:] = True
         cost[blocked] = BLOCKED_COST
 
+    if confidence is None:
+        conf = np.ones((rows, cols), dtype=np.float32)
+    else:
+        conf = np.clip(np.asarray(confidence, dtype=np.float32), 0.0, 1.0)
+        if conf.shape != hazard.shape:
+            raise ValueError("confidence shape must match hazard")
+
+    # Uncertain cells cost more so A* prefers well-observed free grass.
+    inflate = max(0.0, float(uncertainty_inflate))
+    boost = max(0.0, float(uncertain_hazard_boost))
+    if inflate > 0.0 or boost > 0.0:
+        unc = 1.0 - conf
+        finite = np.isfinite(cost) & ~blocked
+        if inflate > 0.0:
+            cost[finite] = cost[finite] * (1.0 + inflate * unc[finite])
+        if boost > 0.0:
+            hinted = finite & (hazard >= HAZARD_STEEP)
+            cost[hinted] = cost[hinted] + boost * unc[hinted]
+            # Very low confidence on a drain-like hint: extra slow corridor,
+            # still not a hard block (blind maps must stay traversable).
+            floor = float(np.clip(uncertain_confidence_floor, 0.0, 1.0))
+            shaky = hinted & (conf < floor)
+            cost[shaky] = cost[shaky] + boost * (floor - conf[shaky])
+
     return Costmap(
         cost=cost,
         blocked=blocked,
         width_m=float(width_m),
         height_m=float(height_m),
         resolution_m=float(resolution_m),
+        confidence=conf,
     )
