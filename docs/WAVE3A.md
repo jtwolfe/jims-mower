@@ -44,3 +44,5 @@ pivots stay allowed.
 
 `jims-mower-owner` writes a phone-sized HTML map (geofence polygons +
 plan polyline + pose). It is a mock overlay, not a shipping app.
+WAVE UX-C (`jims-mower-app`, [`UX_C.md`](UX_C.md)) is the live local
+shell + YardProfile API.

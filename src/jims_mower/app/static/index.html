@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Jim's Mower</title>
+  <link rel="stylesheet" href="/static/app.css"/>
+</head>
+<body>
+  <div class="phone" id="app">
+    <div class="status-bar">
+      <span id="clock">9:41</span>
+      <span class="notch"></span>
+      <span id="batt-pill">92%</span>
+    </div>
+    <main id="screen"></main>
+    <nav id="tabbar" hidden>
+      <button data-href="#/map">Map</button>
+      <button data-href="#/health">Health</button>
+      <button data-href="#/fault" class="sos">SOS</button>
+    </nav>
+  </div>
+  <p class="desk-hint">Local owner app · WAVE UX-C · not a shipping store listing</p>
+  <script src="/static/viewer.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

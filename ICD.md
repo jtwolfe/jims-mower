@@ -156,6 +156,23 @@ rewrites the command the controller sends.
 Contract message: `SafeState` (`jims_mower.contract`) — `mode`, `scale`,
 `hold`, `trimmer_allowed`, `help_requested`.
 
+## Owner app API (WAVE UX-C)
+
+Local stdlib HTTP JSON API served by `jims-mower-app` (same process as the
+phone shell). Not a cloud account and not a claimed RF / mapping score.
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| `GET` | `/status` | `jims_mower.app_status.v1` — `pose`, `battery`, `state` (`mission` + SafeState `machine`), `radio`, `faults` |
+| `GET` / `PUT` | `/yard` | full [`YardProfile`](src/jims_mower/yard_profile.py) (`jims_mower.yard_profile.v1`) |
+| `POST` | `/command` | `{cmd}` ∈ `start` / `stop` / `return` / `estop` / `teach` |
+| `GET` | `/map/mesh` | coarse occupancy + `ux_a_href` (reuse UX-A viewer when present) |
+| `GET` | `/map/coverage` | downsampled cut / uncut / non-grass |
+| `GET` | `/events` | SSE of `/status` |
+
+`start` after `estop` is the operator clear of the software latch.
+See [`docs/UX_C.md`](docs/UX_C.md).
+
 ## Learning stubs (WAVE 3A)
 
 - `jims-mower-bc collect` / `train` — (obs→action) from `TerrainPolicy`, tiny
