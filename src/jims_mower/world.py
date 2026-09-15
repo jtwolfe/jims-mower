@@ -14,10 +14,12 @@ from jims_mower.constants import (
     DEFAULT_HEIGHTS,
     DEFAULT_RADII,
     DEFAULT_SPEEDS,
+    DENSITY_COUNTS,
     SOFT_KINDS,
     STATIC_KINDS,
+    TRAJECTORY_MODES,
 )
-from jims_mower.types import Obstacle, Pose
+from jims_mower.types import Obstacle, Pose, Trajectory
 
 
 @dataclass
@@ -76,6 +78,7 @@ def spawn_obstacle(
     y: Optional[float] = None,
     heading: Optional[float] = None,
     length_m: float = 0.0,
+    trajectory: Optional[Trajectory] = None,
 ) -> Optional[Obstacle]:
     radius = DEFAULT_RADII[kind]
     margin = radius + 0.6
@@ -91,6 +94,7 @@ def spawn_obstacle(
             heading=_random_heading(rng) if heading is None else float(heading),
             name=name or kind,
             length_m=length_m,
+            trajectory=trajectory,
         )
         return _decorate_kind(kind, obst, rng)
     for _ in range(tries):
@@ -111,6 +115,7 @@ def spawn_obstacle(
             heading=obst_heading,
             name=name or kind,
             length_m=length_m,
+            trajectory=trajectory,
         )
         return _decorate_kind(kind, obst, rng)
     return None
@@ -139,6 +144,9 @@ def place_obstacle(
     heading: float = 0.0,
     name: str = "",
     z: Optional[float] = None,
+    vx: float = 0.0,
+    vy: float = 0.0,
+    trajectory: Optional[Trajectory] = None,
 ) -> Obstacle:
     """Place one authored obstacle (scenario DSL)."""
     if kind not in ALL_KINDS:
@@ -149,10 +157,11 @@ def place_obstacle(
         y=float(y),
         radius=float(radius if radius is not None else DEFAULT_RADII[kind]),
         z=float(z if z is not None else DEFAULT_HEIGHTS[kind]),
-        vx=0.0,
-        vy=0.0,
+        vx=float(vx),
+        vy=float(vy),
         heading=float(heading),
         name=name or kind,
+        trajectory=trajectory,
     )
     if kind in CUTTER_RISK_KINDS:
         obst.soft = True
@@ -172,6 +181,8 @@ def spawn_yard(
     orchard_rows: int = 3,
     orchard_cols: int = 4,
     explicit: Optional[list[Obstacle]] = None,
+    mover_mode: str = "wander",
+    density: str = "default",
 ) -> Yard:
     yard = Yard(width_m=width_m, height_m=height_m)
     keepout = [robot_keepout]
@@ -181,6 +192,9 @@ def spawn_yard(
         yard.obstacles.append(obst)
         keepout.append((obst.x, obst.y, obst.radius))
     resolved = _counts_from_mapping(counts)
+    overlay = DENSITY_COUNTS.get(str(density), None)
+    if overlay:
+        resolved.update(overlay)
     if layout == "orchard":
         _place_orchard_trees(yard, keepout, orchard_rows, orchard_cols)
         resolved["tree"] = 0
@@ -194,6 +208,7 @@ def spawn_yard(
             obst = spawn_obstacle(rng, kind, yard, keepout, name=f"{kind}_{i}")
             if obst is not None:
                 yard.obstacles.append(obst)
+    _assign_default_paths(yard, rng, mover_mode)
     return yard
 
 
@@ -253,29 +268,108 @@ def _place_playground_toys(
             yard.obstacles.append(obst)
 
 
+def _assign_default_paths(yard: Yard, rng: np.random.Generator, mode: str) -> None:
+    """Give unauthored living agents a short patrol when the yard asks for it."""
+    key = str(mode or "wander").strip().lower()
+    if key not in TRAJECTORY_MODES or key == "wander":
+        return
+    for obst in yard.living():
+        if obst.trajectory is not None and obst.trajectory.waypoints:
+            continue
+        span = 2.4 if obst.kind == "person" else 3.2
+        axis = 0 if float(rng.random()) < 0.5 else 1
+        a = (obst.x, obst.y)
+        if axis == 0:
+            b = (
+                float(np.clip(obst.x + span, obst.radius + 0.3, yard.width_m - obst.radius - 0.3)),
+                obst.y,
+            )
+        else:
+            b = (
+                obst.x,
+                float(np.clip(obst.y + span, obst.radius + 0.3, yard.height_m - obst.radius - 0.3)),
+            )
+        obst.trajectory = Trajectory(mode=key if key != "line" else "patrol", waypoints=[a, b])
+
+
+def _clip_to_yard(x: float, y: float, obst: Obstacle, yard: Yard) -> tuple[float, float, bool]:
+    lo = obst.radius + 0.15
+    hi_x = yard.width_m - obst.radius - 0.15
+    hi_y = yard.height_m - obst.radius - 0.15
+    bounced = x < lo or x > hi_x or y < lo or y > hi_y
+    return float(np.clip(x, lo, hi_x)), float(np.clip(y, lo, hi_y)), bounced
+
+
+def _follow_waypoints(obst: Obstacle, dt: float, yard: Yard) -> None:
+    traj = obst.trajectory
+    assert traj is not None
+    pts = traj.waypoints
+    if not pts:
+        return
+    speed = traj.speed_mps if traj.speed_mps > 0.0 else DEFAULT_SPEEDS.get(obst.kind, 0.0)
+    idx = int(np.clip(traj.index, 0, len(pts) - 1))
+    tx, ty = pts[idx]
+    dx, dy = tx - obst.x, ty - obst.y
+    dist = math.hypot(dx, dy)
+    if dist < 0.12:
+        mode = traj.mode
+        if mode == "loop":
+            traj.index = (idx + 1) % len(pts)
+        elif mode == "line":
+            if idx < len(pts) - 1:
+                traj.index = idx + 1
+            else:
+                obst.vx = 0.0
+                obst.vy = 0.0
+                return
+        else:  # patrol
+            nxt = idx + traj.direction
+            if nxt < 0 or nxt >= len(pts):
+                traj.direction = -traj.direction
+                nxt = idx + traj.direction
+            traj.index = int(np.clip(nxt, 0, len(pts) - 1))
+        tx, ty = pts[traj.index]
+        dx, dy = tx - obst.x, ty - obst.y
+        dist = math.hypot(dx, dy)
+    if dist < 1e-6:
+        obst.vx = 0.0
+        obst.vy = 0.0
+        return
+    obst.heading = math.atan2(dy, dx)
+    obst.vx = speed * math.cos(obst.heading)
+    obst.vy = speed * math.sin(obst.heading)
+    nx, ny, bounced = _clip_to_yard(obst.x + obst.vx * dt, obst.y + obst.vy * dt, obst, yard)
+    if bounced:
+        traj.direction = -traj.direction
+        obst.heading = math.atan2(ty - ny, tx - nx)
+    obst.x = nx
+    obst.y = ny
+
+
 def step_movers(
     yard: Yard,
     dt: float,
     rng: np.random.Generator,
     heading_jitter: float = 0.35,
 ) -> None:
-    """Random-walk people/animals; bounce off the fence."""
+    """Advance people/animals along authored paths or a random walk; bounce off the fence."""
     for obst in yard.living():
+        traj = obst.trajectory
+        if traj is not None and traj.mode in TRAJECTORY_MODES and traj.mode != "wander" and traj.waypoints:
+            _follow_waypoints(obst, dt, yard)
+            continue
         obst.heading = obst.heading + float(rng.uniform(-heading_jitter, heading_jitter))
         speed = DEFAULT_SPEEDS.get(obst.kind, 0.0)
+        if traj is not None and traj.speed_mps > 0.0:
+            speed = traj.speed_mps
         obst.vx = speed * math.cos(obst.heading)
         obst.vy = speed * math.sin(obst.heading)
-        nx = obst.x + obst.vx * dt
-        ny = obst.y + obst.vy * dt
-        lo = obst.radius + 0.15
-        hi_x = yard.width_m - obst.radius - 0.15
-        hi_y = yard.height_m - obst.radius - 0.15
-        if nx < lo or nx > hi_x:
-            obst.heading = math.atan2(obst.vy, -obst.vx)
-            nx = float(np.clip(nx, lo, hi_x))
-        if ny < lo or ny > hi_y:
-            obst.heading = math.atan2(-obst.vy, obst.vx)
-            ny = float(np.clip(ny, lo, hi_y))
+        nx, ny, bounced = _clip_to_yard(obst.x + obst.vx * dt, obst.y + obst.vy * dt, obst, yard)
+        if bounced:
+            if nx != obst.x + obst.vx * dt:
+                obst.heading = math.atan2(obst.vy, -obst.vx)
+            if ny != obst.y + obst.vy * dt:
+                obst.heading = math.atan2(-obst.vy, obst.vx)
         obst.x = nx
         obst.y = ny
 

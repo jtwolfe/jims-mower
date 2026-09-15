@@ -8,7 +8,7 @@ from typing import Any, Optional, Union
 
 import yaml
 
-from jims_mower.constants import WEATHER_PACKS, WORLD_LAYOUTS
+from jims_mower.constants import MOVER_DENSITIES, TRAJECTORY_MODES, WEATHER_PACKS, WORLD_LAYOUTS
 from jims_mower.types import CameraSpec
 
 def _discover_default_config() -> Path:
@@ -134,6 +134,15 @@ class GrassGrowthConfig:
 
 
 @dataclass
+class MoverConfig:
+    """Living-agent motion. Trajectories stay cheap (no social-force model)."""
+
+    heading_jitter: float = 0.35
+    default_mode: str = "wander"
+    density: str = "default"
+
+
+@dataclass
 class WeatherConfig:
     """Time-of-day / weather pack applied by the geometric renderer."""
 
@@ -177,6 +186,7 @@ class WorldConfig:
     orchard_cols: int = 4
     terrain: TerrainConfig = field(default_factory=TerrainConfig)
     grass: GrassGrowthConfig = field(default_factory=GrassGrowthConfig)
+    movers: MoverConfig = field(default_factory=MoverConfig)
 
 
 @dataclass
@@ -251,6 +261,16 @@ class PlannerConfig:
     pose_filter: str = "ekf"  # ekf | complementary
     ekf: EkfConfig = field(default_factory=EkfConfig)
     uncertainty: UncertaintyConfig = field(default_factory=UncertaintyConfig)
+    living_slow_m: float = 3.0
+    living_reroute_m: float = 1.8
+    living_stop_m: float = 0.90
+    geofence_inflate_m: float = 0.30
+    geofence_slow_m: float = 0.80
+    geofence_stop_m: float = 0.28
+    recovery_trigger: int = 3
+    recovery_reverse_steps: int = 6
+    recovery_pivot_steps: int = 5
+    max_recoveries: int = 2
 
 
 @dataclass
@@ -389,6 +409,19 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     grass = cfg.world.grass
     if not 0.0 <= grass.regenerate_frac <= 1.0:
         raise ConfigError("world.grass.regenerate_frac must be in [0, 1]")
+    movers = cfg.world.movers
+    if movers.default_mode not in TRAJECTORY_MODES:
+        raise ConfigError(
+            f"world.movers.default_mode must be one of {sorted(TRAJECTORY_MODES)}; "
+            f"got {movers.default_mode!r}"
+        )
+    if movers.density not in MOVER_DENSITIES:
+        raise ConfigError(
+            f"world.movers.density must be one of {sorted(MOVER_DENSITIES)}; "
+            f"got {movers.density!r}"
+        )
+    if movers.heading_jitter < 0:
+        raise ConfigError("world.movers.heading_jitter must be >= 0")
     if cfg.weather.pack not in WEATHER_PACKS:
         raise ConfigError(
             f"weather.pack must be one of {sorted(WEATHER_PACKS)}; got {cfg.weather.pack!r}"
@@ -454,6 +487,16 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner.uncertainty inflate/hazard_boost must be >= 0")
     if not 0.0 <= unc.confidence_floor <= 1.0:
         raise ConfigError("planner.uncertainty.confidence_floor must be in [0, 1]")
+    if plan.living_slow_m <= 0 or plan.living_reroute_m <= 0 or plan.living_stop_m <= 0:
+        raise ConfigError("planner living radii must be positive")
+    if not (plan.living_stop_m <= plan.living_reroute_m <= plan.living_slow_m):
+        raise ConfigError("planner living_stop_m <= living_reroute_m <= living_slow_m")
+    if plan.geofence_inflate_m < 0 or plan.geofence_slow_m < 0 or plan.geofence_stop_m < 0:
+        raise ConfigError("planner geofence inflate/slow/stop must be >= 0")
+    if plan.recovery_trigger < 1 or plan.recovery_reverse_steps < 1 or plan.recovery_pivot_steps < 1:
+        raise ConfigError("planner recovery trigger/steps must be >= 1")
+    if plan.max_recoveries < 0:
+        raise ConfigError("planner.max_recoveries must be >= 0")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

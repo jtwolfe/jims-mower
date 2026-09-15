@@ -39,12 +39,25 @@ def _letterbox_row(tiles: list[np.ndarray], height: int, gap: int = 2) -> np.nda
     return canvas
 
 
-def costmap_from_obs(obs: dict, cfg) -> Costmap:
+def costmap_from_obs(obs: dict, cfg, geofence=None) -> Costmap:
+    from jims_mower.geofence import GeofenceSpec
+
     hazard = np.asarray(obs["hazard"], dtype=np.float32)
     slope = np.asarray(obs["slope"], dtype=np.float32)
     occupancy = np.asarray(obs["occupancy"], dtype=np.float32) if "occupancy" in obs else None
+    confidence = np.asarray(obs["confidence"], dtype=np.float32) if "confidence" in obs else None
     rows, cols = hazard.shape
     res = float(cfg.world.resolution_m)
+    unc = getattr(cfg.planner, "uncertainty", None)
+    fence = geofence
+    if fence is None:
+        raw = obs.get("geofence_spec") if isinstance(obs, dict) else None
+        if isinstance(raw, dict):
+            fence = GeofenceSpec(
+                keep_in=[tuple(p) for p in raw.get("keep_in") or []],
+                keep_out=[[tuple(p) for p in poly] for poly in raw.get("keep_out") or []],
+                inflate_m=cfg.planner.geofence_inflate_m,
+            )
     return build_costmap(
         hazard,
         slope,
@@ -56,6 +69,12 @@ def costmap_from_obs(obs: dict, cfg) -> Costmap:
         occupancy=occupancy,
         occupancy_inflate_m=cfg.planner.occupancy_inflate_m,
         margin_m=cfg.robot.collision_radius_m,
+        confidence=confidence,
+        uncertainty_inflate=getattr(unc, "inflate", 0.0) if unc is not None else 0.0,
+        uncertain_hazard_boost=getattr(unc, "hazard_boost", 0.0) if unc is not None else 0.0,
+        uncertain_confidence_floor=getattr(unc, "confidence_floor", 0.25) if unc is not None else 0.25,
+        geofence=fence,
+        geofence_inflate_m=cfg.planner.geofence_inflate_m,
     )
 
 
@@ -79,7 +98,8 @@ def render_bev(
             "cameras": env._last_images,
         }
     if costmap is None:
-        costmap = costmap_from_obs(obs, env.cfg)
+        spec = env.geofence_spec() if hasattr(env, "geofence_spec") else None
+        costmap = costmap_from_obs(obs, env.cfg, geofence=spec)
     topdown = render_topdown(
         env._pose,
         env._coverage,

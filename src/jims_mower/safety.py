@@ -13,6 +13,12 @@ from jims_mower.constants import (
     TERRAIN_DRAIN_EDGE,
     TERRAIN_PUDDLE,
 )
+from jims_mower.geofence import (
+    GeofenceSpec,
+    allowed_xy,
+    geofence_advice,
+    point_in_polygon,
+)
 from jims_mower.world import point_to_segment_distance
 from jims_mower.kinematics import sit_on_terrain, trimmer_xy, wheel_positions
 from jims_mower.types import Obstacle, Pose
@@ -28,6 +34,17 @@ class SafetyDecision:
     nearest_living_m: float
     nearest_kind: Optional[str]
     blocked_reason: Optional[str]
+    advice: str = "ok"
+
+
+@dataclass(frozen=True)
+class LivingSafety:
+    """Planner-side extension of the trimmer interlock for moving people/animals."""
+
+    advice: str
+    nearest_living_m: float
+    nearest_kind: Optional[str]
+    reason: Optional[str]
 
 
 def is_living(kind: str) -> bool:
@@ -73,8 +90,15 @@ def trimmer_interlock(
     hub = trimmer_xy(pose, offset_m)
     dist, obst = nearest_living(hub, obstacles)
     kind = obst.kind if obst is not None else None
+    living = living_advice(
+        dist,
+        kind,
+        slow_m=max(3.0, safety_radius_m * 2.0),
+        reroute_m=max(1.6, safety_radius_m),
+        stop_m=max(0.85, safety_radius_m * 0.55),
+    )
     if not requested:
-        return SafetyDecision(False, False, dist, kind, None)
+        return SafetyDecision(False, False, dist, kind, None, living.advice)
     if dist < safety_radius_m:
         return SafetyDecision(
             False,
@@ -82,8 +106,33 @@ def trimmer_interlock(
             dist,
             kind,
             f"{kind} within {safety_radius_m:.2f} m of trimmer",
+            living.advice if living.advice != "ok" else "reroute",
         )
-    return SafetyDecision(True, True, dist, kind, None)
+    return SafetyDecision(True, True, dist, kind, None, living.advice)
+
+
+def living_advice(
+    nearest_m: float,
+    kind: Optional[str],
+    *,
+    slow_m: float = 3.0,
+    reroute_m: float = 1.8,
+    stop_m: float = 0.90,
+) -> LivingSafety:
+    """Map range-to-living-thing onto the same advice ladder as terrain.
+
+    Extends the trimmer interlock: the controller must slow, temporarily
+    block / replan, or stop — not only disable the string head.
+    """
+    if kind is None or not math.isfinite(nearest_m):
+        return LivingSafety("ok", nearest_m, kind, None)
+    if nearest_m <= stop_m:
+        return LivingSafety("stop", nearest_m, kind, f"{kind} too close — hold")
+    if nearest_m <= reroute_m:
+        return LivingSafety("reroute", nearest_m, kind, f"{kind} nearby — go around")
+    if nearest_m <= slow_m:
+        return LivingSafety("slow", nearest_m, kind, f"{kind} in the yard — cut speed")
+    return LivingSafety("ok", nearest_m, kind, None)
 
 
 def is_body_collision(
@@ -131,31 +180,14 @@ def first_collision(
     return None
 
 
-def point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) -> bool:
-    """Ray-cast test. Vertices are (x, y) in metres. Degenerate poly → False."""
-    n = len(polygon)
-    if n < 3:
-        return False
-    inside = False
-    j = n - 1
-    for i in range(n):
-        xi, yi = polygon[i]
-        xj, yj = polygon[j]
-        intersects = ((yi > y) != (yj > y)) and (
-            x < (xj - xi) * (y - yi) / ((yj - yi) + 1e-12) + xi
-        )
-        if intersects:
-            inside = not inside
-        j = i
-    return inside
-
-
 def in_yard(
     pose: Pose,
     width_m: float,
     height_m: float,
     collision_radius_m: float,
     geofence: Optional[list[tuple[float, float]]] = None,
+    keepout: Optional[list[list[tuple[float, float]]]] = None,
+    spec: Optional[GeofenceSpec] = None,
 ) -> bool:
     """True when the body center is inside the yard (and geofence, if given)."""
     in_rect = (
@@ -164,8 +196,11 @@ def in_yard(
     )
     if not in_rect:
         return False
-    if geofence and len(geofence) >= 3:
-        return point_in_polygon(pose.x, pose.y, geofence)
+    fence = spec
+    if fence is None and (geofence or keepout):
+        fence = GeofenceSpec(keep_in=list(geofence or []), keep_out=list(keepout or []))
+    if fence is not None and fence.has_polygons():
+        return allowed_xy(pose.x, pose.y, fence)
     return True
 
 

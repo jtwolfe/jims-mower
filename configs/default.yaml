@@ -120,3 +120,10 @@ planner:
     inflate: 1.5
     hazard_boost: 4.0
     confidence_floor: 0.25
+  # WAVE 2A — living / geofence / recovery (defaults also live on PlannerConfig)
+  living_slow_m: 3.0
+  living_reroute_m: 1.8
+  living_stop_m: 0.90
+  geofence_inflate_m: 0.30
+  recovery_trigger: 3
+  max_recoveries: 2

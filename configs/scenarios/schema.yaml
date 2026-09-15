@@ -8,13 +8,20 @@
 # weather:
 #   lighting: day | dawn | night     # or booleans night / dawn
 #   wet: false                       # surface flag (visual only in WAVE 1A)
-# geofence: [[x, y], ...]            # ≥3 vertices; omit for rectangular yard
+# geofence: [[x, y], ...]            # keep-in ≥3 vertices (legacy)
+# geofence:                          # or structured keep-in / keep-out
+#   keep_in: [[x, y], ...]
+#   keep_out:
+#     - [[x, y], ...]
+# keepout:                           # extra no-go polygons (same as keep_out)
+#   - [[x, y], ...]
 # drains:                            # explicit channels (metres)
 #   - {x0, y0, x1, y1, width_m, depth_m, side_slope}
 # banks:
 #   - {x0, y0, x1, y1, width_m, height_m}
 # obstacles:
-#   - {kind: tree|person|dog|cat|bird|furniture|toy, x, y, radius?, heading?}
+#   - {kind: tree|person|dog|cat|bird|furniture|toy, x, y, radius?, heading?,
+#      trajectory?: {mode: wander|patrol|loop|line, waypoints: [[x,y],...], speed_mps?}}
 # world / robot / sensors / planner / perception / reward / env:
 #   same keys as EnvConfig (merged onto `base`)
 #

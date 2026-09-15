@@ -8,6 +8,17 @@ from typing import Optional
 from jims_mower.constants import CUTTER_RISK_KINDS, SOFT_KINDS
 
 
+@dataclass
+class Trajectory:
+    """Simple living-agent path. ``wander`` is the random-walk default."""
+
+    mode: str = "wander"
+    waypoints: list[tuple[float, float]] = field(default_factory=list)
+    speed_mps: float = 0.0
+    index: int = 0
+    direction: int = 1
+
+
 @dataclass(frozen=True)
 class Pose:
     """Planar yaw plus contact attitude on the height field.
@@ -51,6 +62,7 @@ class Obstacle:
     length_m: float = 0.0
     soft: bool = False
     cutter_risk: bool = False
+    trajectory: Optional[Trajectory] = None
 
     @property
     def xy(self) -> tuple[float, float]:

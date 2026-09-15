@@ -24,6 +24,15 @@ WORLD_LAYOUTS = frozenset(
 WEATHER_PACKS = frozenset({"clear", "dawn", "dusk", "night", "rain"})
 
 HAND_SIGNALS = ("stop", "go", "follow", "back")
+TRAJECTORY_MODES = frozenset({"wander", "patrol", "loop", "line"})
+MOVER_DENSITIES = frozenset({"sparse", "default", "busy"})
+RECOVERY_MODES = ("idle", "reverse", "pivot", "help")
+
+# Count overlays for world.movers.density. ``default`` leaves YAML counts.
+DENSITY_COUNTS = {
+    "sparse": {"person": 0, "dog": 1, "cat": 0, "bird": 0},
+    "busy": {"person": 2, "dog": 2, "cat": 1, "bird": 1},
+}
 
 LABEL_TO_ID = {
     "person": 1,
@@ -70,6 +79,7 @@ HAZARD_DRAIN = 3
 GRAVITY_MPS2 = 9.80665
 
 TERRAIN_ADVICE = ("ok", "slow", "stop", "reroute")
+MISSION_SCHEMA = "jims_mower.mission.v1"
 
 KIND_RGB = {
     "person": (220, 80, 80),

@@ -40,8 +40,10 @@ the hub.
 | `trimmer_enabled` | `float32 (1,)` | `0` or `1` after the interlock |
 | `hand_signal` | `Discrete(5)` | `0` none, `1` stop, `2` go, `3` follow, `4` back |
 
-`info` (not in the space) also carries `terrain_advice`, `detections` as
-dicts, `weather`, `scenario`, `geofence`, `nearest_person_m`, IMU/GPS lists.
+`info` (not in the space) also carries `terrain_advice`, `living_advice`,
+`geofence_advice`, `detections` as dicts, `weather`, `scenario`, `geofence`
+(keep-in vertices), `geofence_spec` (`keep_in` / `keep_out`),
+`nearest_person_m`, IMU/GPS lists.
 
 Maps `R×C` align with the grass grid: `resolution_m`, origin at world `(0,0)`,
 row = y, col = x.
@@ -106,7 +108,11 @@ not the height field:
 
 1. `build_costmap(hazard, slope, occupancy, …)`
 2. Boustrophedon strips + A* (`plan_coverage`)
-3. Zero-turn tracker; `terrain_advice` + IMU tilt → slow / reroute / stop
+3. Zero-turn tracker; `terrain_advice` + `living_advice` + `geofence_advice`
+   + IMU tilt → slow / reroute / stop. Repeated tip / channel advice runs
+   reverse → pivot → call-for-help. With `curriculum.hand_signals`, obs
+   `hand_signal` (`stop` / `go` / `follow` / `back`) overrides wheels even
+   when the detector is the mock / oracle.
 
 `ComplementaryPoseFilter` is a GPS+IMU stub for planner start / attitude, not
 a published EKF.
@@ -116,8 +122,13 @@ a published EKF.
 Not observation keys. Loaded via [`scenarios.load_source`](src/jims_mower/scenarios.py):
 
 - `weather.night` / `weather.dawn` / `weather.wet` — camera tint only
-- `geofence` — polygon; `in_yard` fails outside it
-- explicit `drains` / `banks` / `obstacles`
+- `geofence` — keep-in polygon (legacy vertex list) or
+  `{keep_in, keep_out}`; `in_yard` fails outside keep-in or inside keep-out
+- `keepout` — extra no-go polygons
+- explicit `drains` / `banks` / `obstacles` (obstacles may carry a
+  `trajectory`: `wander` / `patrol` / `loop` / `line`)
+- mission resume — `reset(options={"load_mission","save_mission"})` and
+  `jims-mower-mission` write map + uncut + pose (`jims_mower.mission.v1`)
 
 ## Exporter labels
 
