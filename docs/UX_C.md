@@ -86,7 +86,11 @@ JSON in / JSON out. Same origin as the static shell.
 
 `--live` `/status` also carries `backend: live`, `robot`
 (idle / pairing / live / fault), `owner_copy`, `radio_path` chips,
-map/cut %, `session_summary`, and fog / observed URLs.
+map/cut %, `session_summary`, fog / observed / coverage URLs, and a
+`path_overlay` (`trail` / `plan` / `frontiers` / `pose` / `phase`) plus
+`mode_banner` so the phone can tell **Mapping** from **Mowing** without
+the 3D viewer. Overlay arrays are downsampled for SSE. No mAP / RF
+range claimed.
 
 `POST /command` `start` after ESTOP is the operator clear. On `--live`
 it forwards to `LiveSession.control` (`start` / `pause` / `estop` /
@@ -98,7 +102,11 @@ Static HTML / CSS / JS in [`src/jims_mower/app/static/`](../src/jims_mower/app/s
 Narrow phone chrome (~390 px). Hash routes:
 
 - `#/onboard/unbox` → `pair` → `home` → `teach` → `mow`
-- `#/map` — live job (status / radios / Start / Pause / ESTOP / fog) when `--live`; else 2D SVG yard
+- `#/map` — live job: large **Mapping yard** / **Mowing** mode chip,
+  fog + observed + cut raster, SVG trail / plan / frontiers / pose,
+  Map% vs Cut% emphasis, and a Fog/Mapped/Trail/Plan/Cut legend.
+  Pause / Hold / ESTOP stay as a hold badge on the same phase. Pair
+  still required before Start. Else 2D SVG yard.
 - `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run
 - `#/fault` — ESTOP / SOS vs stuck recovery
 
@@ -175,7 +183,7 @@ Inject stuck vs dead-motor SOS from the job or SOS tab.
 ## Tests
 
 ```bash
-pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_first_run.py tests/test_live.py tests/test_schedule.py
+pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_first_run.py tests/test_live.py tests/test_path_overlay.py tests/test_schedule.py
 jims-mower-app --live --help
 jims-mower-owner --live --first-run --help
 ```

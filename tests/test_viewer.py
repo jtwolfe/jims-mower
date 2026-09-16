@@ -48,6 +48,9 @@ def test_viewer_static_assets_present() -> None:
     assert "EventSource" in js
     assert "postControl" in js
     assert "/api/live/control" in js
+    assert "applyPhaseLayerDefaults" in js
+    assert "path_overlay" in js
+    assert "tog-trail" in html
     assert 'job_state === "idle"' in js
     assert "Yard unknown" in html
     assert "unknownPad" in js

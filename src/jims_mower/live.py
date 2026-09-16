@@ -45,6 +45,7 @@ from jims_mower.mission_flow import (
     scale_mission_budget,
     session_summary,
 )
+from jims_mower.path_overlay import build_path_overlay
 from jims_mower.planning.observed import fog_rgba
 from jims_mower.profile import (
     YardProfile,
@@ -1451,6 +1452,12 @@ class LiveSession:
         fault = self._current_fault()
         radio_path = radio_path_for("idle", self.job_state)
         if policy is None:
+            idle_overlay = build_path_overlay(
+                phase="idle",
+                job_state=self.job_state,
+                pose=_pose_row((self.info or {}).get("pose")) if self.info else None,
+                poses=self.poses,
+            )
             return {
                 "schema": LIVE_SCHEMA,
                 "live": True,
@@ -1474,6 +1481,8 @@ class LiveSession:
                 "paired": bool(self.paired),
                 "pairing": self.pairing.as_info(),
                 "require_pair": bool(self.require_pair),
+                "path_overlay": idle_overlay,
+                "mode_banner": idle_overlay["mode"],
                 "done": False,
                 "not_a_benchmark": True,
             }
@@ -1518,6 +1527,21 @@ class LiveSession:
             )
         ):
             fence_unusable = False
+        teach_trail = []
+        if self.teach_policy is not None and self.teach_policy.trail:
+            teach_trail = list(self.teach_policy.trail)
+        path_overlay = build_path_overlay(
+            phase=phase,
+            job_state=self.job_state,
+            pose=pose,
+            poses=self.poses,
+            trail=teach_trail or None,
+            plan=plan,
+            explore=explore,
+            frontiers=frontiers,
+            n_waypoints=int(status["n_waypoints"]),
+            waypoint_index=int(status.get("waypoint_index") or 0),
+        )
         return {
             "schema": LIVE_SCHEMA,
             "live": True,
@@ -1576,6 +1600,8 @@ class LiveSession:
             "frontiers": frontiers,
             "explore": explore,
             "plan": plan,
+            "path_overlay": path_overlay,
+            "mode_banner": path_overlay["mode"],
             "keep_in": keep_in,
             "keep_out": keep_out,
             "trimmer_on": bool((self.info or {}).get("trimmer_enabled")),

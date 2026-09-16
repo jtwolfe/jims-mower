@@ -102,9 +102,14 @@ jims-mower-owner --live --first-run
 
 Same session: `jims-mower-app --live --config acre_yard_demo --port 8766`.
 Pair the BT stub, teach (or skip), then Start / Pause / ESTOP / speed /
-MAP READY → Start mow. Fog + observed preview (taught fence overlay) is
-in the phone chrome; deep-link `/viewer` is the desktop World Viewer on
-the same process.
+MAP READY → Start mow. The phone live map is map-first: a large **Mapping yard** (explore /
+calibrate) vs **Mowing** chip, live trail, explore/frontier or coverage
+plan overlay, and Map% / Cut% that swap emphasis with the phase. That
+path overlay is on the 2D preview — you do not need the 3D fog viewer
+to see where the robot has been or where it plans to go. Deep-link
+`/viewer` is still the desktop World Viewer on the same process
+(explore+frontiers+trail default on while mapping; plan+trail+coverage
+default on while mowing). No mAP / RF claims.
 
 `acre_yard` vs `acre_yard_demo`: same ~1-acre physics world (70×58 m,
 pond, sheds, paths). Use **`acre_yard_demo`** for the live phone / laptop
@@ -226,8 +231,10 @@ explore→mow need not finish in CI.
 `jims-mower-live` starts `MissionPolicy` and the World Viewer together.
 Open `http://127.0.0.1:8765/` immediately — the job is **idle** until
 Start. Stdlib HTTP + SSE (`GET /api/live`) pushes pose, phase, owner
-copy, map %, cut %, frontiers, plan (after freeze), and URLs for the
-latest fog / observed / **observed mesh** / coverage / camera frames.
+copy, map %, cut %, frontiers, plan (after freeze), a compact
+`path_overlay` (downsampled trail / plan / frontiers + pose + mode
+banner), and URLs for the latest fog / observed / **observed mesh** /
+coverage / camera frames.
 `POST /api/live/control` is the owner bar (start / pause / resume /
 speed / start_mow / reexplore / estop / hold / yard / pair / inject).
 The phone app (`jims-mower-app --live`) proxies the same endpoints —

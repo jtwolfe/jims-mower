@@ -112,6 +112,14 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert snap["schema"] == LIVE_SCHEMA
         assert "owner_copy" in snap
         assert snap["radio_path"]["simulated"] is True
+        assert "path_overlay" in snap
+        assert snap["path_overlay"]["phase"]
+        assert "trail" in snap["path_overlay"]
+        assert snap["mode_banner"]["kind"] in {"mapping", "mowing", "idle", "done"}
+
+        code, status = _json(host, port, "GET", "/status")
+        assert "path_overlay" in status
+        assert status["mode_banner"]["label"]
 
         conn = HTTPConnection(host, port, timeout=6.0)
         conn.request("GET", "/api/live?n=1")
@@ -159,7 +167,20 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "Inject SOS" in js
         assert "session-card" in js
         assert "cut-pct" in js
+        assert "mode-banner" in js
+        assert "Mapping yard" in js
+        assert "path-overlay" in js
+        assert "map-legend" in js
+        assert "Cut (idle)" in js
+        assert "drawPathOverlay" in js or "path_overlay" in js
         assert "session_summary" in js
+
+        conn = HTTPConnection(host, port, timeout=6.0)
+        conn.request("GET", "/static/viewer.js")
+        vjs = conn.getresponse().read().decode("utf-8")
+        conn.close()
+        assert "drawPathOverlay" in vjs
+        assert "ov-trail" in vjs
         assert "Pair Bluetooth" in js
         assert "rf_claim" in js
         assert "2468" in js

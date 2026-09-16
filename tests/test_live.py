@@ -169,6 +169,11 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         assert snap["schema"] == LIVE_SCHEMA
         assert "phase" in snap and "pose" in snap
         assert "map_pct" in snap
+        overlay = snap["path_overlay"]
+        assert "trail" in overlay and "plan" in overlay and "frontiers" in overlay
+        assert "pose" in overlay and overlay["pose"].keys() >= {"x", "y", "theta"}
+        assert overlay["phase"] == snap["phase"]
+        assert snap["mode_banner"]["label"]
         assert snap["observed_url"].startswith("/api/live/observed.png")
         assert snap["fog_url"].startswith("/api/live/fog.png")
         assert snap["observed_mesh_url"].startswith("/api/live/observed_mesh.json")
@@ -181,6 +186,8 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         assert text.count("data: ") == 2
         assert LIVE_SCHEMA in text
         frame = json.loads(text.split("data: ", 1)[1].split("\n\n", 1)[0])
+        assert "path_overlay" in frame
+        assert frame["path_overlay"]["phase"] == frame["phase"]
         assert frame["phase"] in {
             "calibrate_boundary",
             "explore",

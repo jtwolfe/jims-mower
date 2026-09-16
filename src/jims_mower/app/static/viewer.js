@@ -60,6 +60,70 @@
       </g>`;
   }
 
+  function polyLine(points) {
+    return (points || [])
+      .map((p) => {
+        const x = Array.isArray(p) ? p[0] : p.x;
+        const y = Array.isArray(p) ? p[1] : p.y;
+        return `${Number(x)},${Number(y)}`;
+      })
+      .join(" ");
+  }
+
+  function poseTriangle(pose) {
+    const px = Number((pose && pose.x) || 0);
+    const py = Number((pose && pose.y) || 0);
+    const th = Number((pose && pose.theta) || 0);
+    const nose = [px + 0.42 * Math.cos(th), py + 0.42 * Math.sin(th)];
+    const left = [px - 0.22 * Math.sin(th), py + 0.22 * Math.cos(th)];
+    const right = [px + 0.22 * Math.sin(th), py - 0.22 * Math.cos(th)];
+    return `${nose[0]},${nose[1]} ${left[0]},${left[1]} ${right[0]},${right[1]}`;
+  }
+
+  function drawPathOverlay(svg, opts) {
+    const o = opts || {};
+    const w = Number(o.width || 16);
+    const h = Number(o.height || 12);
+    const overlay = o.overlay || {};
+    const keepIn = o.keepIn || [];
+    const colors = overlay.colors || {
+      trail: "#aa88ff",
+      plan: "#2ad4e6",
+      explore: "#f0a030",
+      frontier: "#42c4dc",
+      fence: "#ffcc33",
+      pose: "#f3f6f1",
+    };
+    const trail = overlay.trail || [];
+    const plan = overlay.plan || [];
+    const explore = overlay.explore || [];
+    const frontiers = overlay.frontiers || [];
+    const pose = overlay.pose || o.pose || { x: 0, y: 0, theta: 0 };
+    const fence = keepIn.length
+      ? `<polygon class="ov-fence" points="${poly(keepIn)}" fill="none" stroke="${colors.fence || "#ffcc33"}" stroke-width="0.18"/>`
+      : "";
+    const trailEl = trail.length >= 2
+      ? `<polyline class="ov-trail" points="${polyLine(trail)}" fill="none" stroke="${colors.trail}" stroke-width="0.16" stroke-linecap="round" stroke-linejoin="round"/>`
+      : "";
+    const exploreEl = explore.length >= 2
+      ? `<polyline class="ov-explore" points="${polyLine(explore)}" fill="none" stroke="${colors.explore}" stroke-width="0.12" stroke-dasharray="0.28 0.2" stroke-linecap="round"/>`
+      : "";
+    const planEl = plan.length >= 2
+      ? `<polyline class="ov-plan" points="${polyLine(plan)}" fill="none" stroke="${colors.plan}" stroke-width="0.18" stroke-linecap="round" stroke-linejoin="round"/>`
+      : "";
+    const dots = frontiers
+      .map((p) => {
+        const x = Array.isArray(p) ? p[0] : p.x;
+        const y = Array.isArray(p) ? p[1] : p.y;
+        return `<circle class="ov-frontier" cx="${Number(x)}" cy="${Number(y)}" r="0.14" fill="${colors.frontier}"/>`;
+      })
+      .join("");
+    const robot = `<polygon class="ov-pose" points="${poseTriangle(pose)}" fill="#111" stroke="${colors.pose}" stroke-width="0.05"/>`;
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.innerHTML = `<g transform="translate(0 ${h}) scale(1 -1)">${fence}${exploreEl}${planEl}${trailEl}${dots}${robot}</g>`;
+  }
+
   async function uxAAvailable() {
     try {
       const res = await fetch(UX_A, { method: "HEAD" });
@@ -71,6 +135,7 @@
 
   global.JimsViewer = {
     drawYard,
+    drawPathOverlay,
     uxAHref: UX_A,
     uxAAvailable,
   };
