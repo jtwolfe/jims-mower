@@ -261,6 +261,41 @@ def test_acre_yard_demo_reaches_explore_without_full_lap() -> None:
     assert "boundary_recorded" in events
 
 
+def test_review_hold_waits_until_start_mow() -> None:
+    from jims_mower.config import MissionConfig
+
+    env = _tiny_env()
+    obs, info = env.reset(seed=5)
+    settings = MissionConfig(
+        stamp_radius_m=2.4,
+        camera_range_m=5.0,
+        max_calibrate_steps=8,
+        max_explore_steps=8,
+        explore_complete=0.01,
+        explore_no_frontier=0.01,
+        review_hold_steps=80,
+        calibrate_confirm_m=0.4,
+    )
+    policy = MissionPolicy(env.cfg, settings=settings)
+    policy.reset(obs, info)
+    for _ in range(80):
+        action = policy.act(obs, info)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        if policy.phase == MissionPhase.REVIEW:
+            break
+        if terminated or truncated:
+            break
+    assert policy.phase == MissionPhase.REVIEW
+    for _ in range(4):
+        action = policy.act(obs, info)
+        obs, _reward, _term, _trunc, info = env.step(action)
+        assert policy.phase == MissionPhase.REVIEW
+    assert policy.request_start_mow() is True
+    policy.act(obs, info)
+    env.close()
+    assert policy.phase == MissionPhase.MOW
+
+
 def test_mow_stop_reverse_then_skip() -> None:
     env = _tiny_env()
     obs, info = env.reset(seed=4)

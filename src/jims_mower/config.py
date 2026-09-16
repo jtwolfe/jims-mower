@@ -366,6 +366,8 @@ class MissionConfig:
     # distance then close on the authored keep-in (not a physics cheat).
     calibrate_confirm_m: float = 0.0
     phase_budget_scale: float = 1.0
+    # MAP READY beat before auto-mow (steps). Owner Start mow skips this.
+    review_hold_steps: int = 20
 
 
 @dataclass
@@ -813,6 +815,8 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("mission calibrate arrive/confirm must be >= 0")
     if not 0.05 <= float(mission.phase_budget_scale) <= 1.0:
         raise ConfigError("mission.phase_budget_scale must be in [0.05, 1]")
+    if int(mission.review_hold_steps) < 1:
+        raise ConfigError("mission.review_hold_steps must be >= 1")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

@@ -30,6 +30,9 @@
 #   calibrate_stride_m / calibrate_cruise / calibrate_arrive_m — 0 = auto
 #   calibrate_confirm_m — demo: close after N metres, use authored keep-in
 #   phase_budget_scale — live --phase-budget (does not change physics)
+#   review_hold_steps — MAP READY beat before auto-mow (owner Start mow skips)
+#   explore_complete on acre_yard_demo is a demo threshold (0.42), not the
+#   honest full-acre 0.72 on acre_yard
 # world.terrain.base_gradient:
 #   slope_rad / slope_pct, yaw_rad (ascent heading), undulation_m
 #   Default yards are a mild planar grade, not a flat pad. The curriculum

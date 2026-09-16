@@ -36,6 +36,31 @@
     <div class="phase-seg" data-phase="return_home">RETURN</div>
     <div class="phase-seg" data-phase="complete">DONE</div>
   </div>
+  <div id="owner-bar" hidden>
+    <div id="owner-copy">Yard unknown — start a job when ready.</div>
+    <div class="owner-controls">
+      <label class="owner-yard">
+        <span>yard</span>
+        <select id="owner-yard">
+          <option value="acre_yard_demo">acre demo</option>
+          <option value="acre_yard">full acre</option>
+          <option value="mission_tiny">tiny</option>
+        </select>
+      </label>
+      <button type="button" id="btn-job-start">Start</button>
+      <button type="button" id="btn-job-pause">Pause</button>
+      <button type="button" id="btn-job-resume">Resume</button>
+      <span class="speed-group" role="group" aria-label="speed">
+        <button type="button" class="speed-btn" data-speed="1">1×</button>
+        <button type="button" class="speed-btn" data-speed="2">2×</button>
+        <button type="button" class="speed-btn" data-speed="5">5×</button>
+        <button type="button" class="speed-btn" data-speed="max">max</button>
+      </span>
+      <button type="button" id="btn-start-mow" hidden>Start mow</button>
+      <button type="button" id="btn-reexplore" hidden>Re-explore</button>
+      <button type="button" id="btn-estop" class="danger">ESTOP</button>
+    </div>
+  </div>
 
   <main>
     <section id="stage">
@@ -67,6 +92,7 @@
 
       <h2>Mission</h2>
       <div id="mission-metrics" class="metrics">map — · reachable — · cut —</div>
+      <div id="session-summary" class="metrics" hidden></div>
 
       <h2>Scrub</h2>
       <input type="range" id="scrub" min="0" max="0" value="0"/>

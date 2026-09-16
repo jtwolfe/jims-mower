@@ -60,7 +60,8 @@ jims-mower-viewer --episode mission_out
 # Live owner session (observed terrain + fog, wall-clock). One command.
 # Open http://127.0.0.1:8765/ while it runs — do not wait for the folder.
 # acre_yard_demo is the Jamie live command: same ~1 acre features, short
-# calibrate confirmation, then EXPLORE at --speed 5.
+# calibrate confirmation, demo map-ready at 42% observed, then MOW.
+# Open idle → Start. Speed 1× 2× 5× max. MAP READY waits 2s or Start mow.
 jims-mower-live --config acre_yard_demo --speed 5
 jims-mower-live --config acre_yard --speed 5
 jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny

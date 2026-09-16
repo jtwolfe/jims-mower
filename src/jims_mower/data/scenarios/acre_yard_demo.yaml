@@ -7,10 +7,10 @@ kind: scenario
 name: acre_yard_demo
 description: >
   LIVE DEMO of the one-acre yard: same 70×58 m features and true-height
-  physics as acre_yard, with a slightly tighter keep-in and a short
-  calibrate confirmation so --speed 5 can reach EXPLORE in a few minutes
-  wall-clock. Map growth is still ObservedMap only. Not a mow-to-completion
-  benchmark.
+  physics as acre_yard, with a slightly tighter keep-in, a short
+  calibrate confirmation, and a demo explore_complete (0.42) so --speed 5
+  can reach MAP READY then MOW in minutes. Full acre_yard stays at 0.72
+  and a full fence lap. Not a mow-to-completion benchmark.
 base: default
 weather:
   lighting: day
@@ -164,17 +164,19 @@ planner:
   bunker_cost: 12.0
   max_replans: 6
 mission:
-  stamp_radius_m: 2.60
-  camera_range_m: 9.0
+  stamp_radius_m: 3.20
+  camera_range_m: 10.5
   max_calibrate_steps: 280
-  max_explore_steps: 2200
+  max_explore_steps: 1400
   max_mow_steps: 5000
   max_return_steps: 600
   snapshot_stride: 40
-  explore_complete: 0.58
-  explore_no_frontier: 0.40
+  # Demo threshold only. acre_yard stays at 0.72 / full lap.
+  explore_complete: 0.42
+  explore_no_frontier: 0.28
   explore_cruise: 0.98
   calibrate_stride_m: 3.2
   calibrate_cruise: 1.0
   calibrate_arrive_m: 2.0
   calibrate_confirm_m: 28.0
+  review_hold_steps: 20

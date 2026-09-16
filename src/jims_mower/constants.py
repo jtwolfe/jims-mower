@@ -136,6 +136,19 @@ DATASET_SCHEMA = "jims_mower.dataset.v1"
 SURVEY_SCHEMA = "jims_mower.survey.v1"
 VIEWER_SCHEMA = "jims_mower.viewer.v1"
 LIVE_SCHEMA = "jims_mower.live.v1"
+SESSION_SCHEMA = "jims_mower.session.v1"
+LIVE_CONTROL_CMDS = (
+    "start",
+    "pause",
+    "resume",
+    "speed",
+    "start_mow",
+    "reexplore",
+    "estop",
+    "hold",
+    "clear",
+    "yard",
+)
 YARD_PROFILE_SCHEMA = "jims_mower.yard.v1"
 MESH_SCHEMA = "jims_mower.mesh.v1"
 APP_STATUS_SCHEMA = "jims_mower.app_status.v1"

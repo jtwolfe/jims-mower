@@ -40,7 +40,14 @@ def test_viewer_static_assets_present() -> None:
     assert "tog-observed" in html
     assert "tog-fog" in html
     assert "tog-god" in html
+    assert "owner-bar" in html
+    assert "btn-job-start" in html
+    assert "btn-estop" in html
+    assert "btn-start-mow" in html
+    assert "owner-copy" in html
     assert "EventSource" in js
+    assert "postControl" in js
+    assert "/api/live/control" in js
     assert "unknownPad" in js
     assert "setOwnerMeshVis" in js
     assert "applyObservedMesh" in js

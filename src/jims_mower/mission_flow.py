@@ -21,7 +21,7 @@ from typing import Any, Optional
 import numpy as np
 
 from jims_mower.config import EnvConfig, MissionConfig
-from jims_mower.constants import MISSION_FLOW_SCHEMA, MISSION_PHASES, TERRAIN_ADVICE
+from jims_mower.constants import MISSION_FLOW_SCHEMA, MISSION_PHASES, SESSION_SCHEMA, TERRAIN_ADVICE
 from jims_mower.faults import fault_is_immobilised, fault_is_retrieve
 from jims_mower.geofence import GeofenceSpec
 from jims_mower.kinematics import unicycle_from_wheels
@@ -158,6 +158,8 @@ class MissionPolicy:
         self._last_omega = 0.0
         self._home = Pose(1.0, 1.0, 0.0)
         self._review_hold = False
+        self._mow_requested = False
+        self._owner_hold = False
         self._detour: list[tuple[float, float]] = []
         self._detour_index = 0
         self._wet = False
@@ -184,6 +186,40 @@ class MissionPolicy:
     @property
     def done(self) -> bool:
         return self.phase in {MissionPhase.COMPLETE, MissionPhase.FAULT}
+
+    def request_start_mow(self) -> bool:
+        """Owner override: leave MAP READY without waiting out the review beat."""
+        if self.phase != MissionPhase.REVIEW:
+            return False
+        self._mow_requested = True
+        self._emit("owner_start_mow", {"phase_step": self.phase_step})
+        return True
+
+    def request_reexplore(self) -> bool:
+        """Owner override: thaw the frozen map and keep exploring."""
+        if self.phase != MissionPhase.REVIEW:
+            return False
+        self._review_hold = False
+        self._mow_requested = False
+        self.snapshot = None
+        self.global_plan = None
+        self.plan = None
+        self._emit("owner_reexplore", {"phase_step": self.phase_step})
+        self._transition(MissionPhase.EXPLORE)
+        return True
+
+    def request_estop(self, reason: str = "owner estop") -> None:
+        self.safe.request_estop(reason)
+        self._owner_hold = False
+
+    def request_hold(self, reason: str = "owner hold") -> None:
+        if self.safe.mode != "estop":
+            self._owner_hold = True
+            self._emit("owner_hold", {"reason": reason})
+
+    def clear_owner_hold(self) -> None:
+        self._owner_hold = False
+        self.safe.clear_if_not_estop()
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> None:
         info = info or {}
@@ -225,6 +261,8 @@ class MissionPolicy:
         self.snapshot = None
         self.profile = None
         self._review_hold = False
+        self._mow_requested = False
+        self._owner_hold = False
         self._detour = []
         self._detour_index = 0
         self._skipped_global = []
@@ -258,6 +296,10 @@ class MissionPolicy:
         self.last_advice = advice
         if estop_requested(obs, info):
             self.safe.request_estop("software/hardware estop")
+        if self._owner_hold and self.safe.mode != "estop":
+            self.step += 1
+            self.phase_step += 1
+            return self._finish(self._hold(), "stop", info)
         fault = info.get("fault") if isinstance(info.get("fault"), dict) else None
         if fault_is_immobilised(fault) or fault_is_retrieve(fault):
             return self._fail("FAULT_IMMOBILISED", advice, info)
@@ -522,6 +564,10 @@ class MissionPolicy:
                 },
             )
             return self._hold()
+        hold_steps = max(1, int(self.settings.review_hold_steps))
+        ready = self._mow_requested or self.phase_step >= hold_steps
+        if not ready:
+            return self._hold()
         if self.global_plan is None or len(self.global_plan.waypoints) < 2:
             self._transition(MissionPhase.RETURN_HOME)
         else:
@@ -544,20 +590,39 @@ class MissionPolicy:
             return self._hold()
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
         if advice == "stop":
-            # Ridge / IMU tip-stop: reverse once, then skip and replan.
-            # Sitting still forever is what parked early mows with low cut %.
+            # Ridge / IMU tip-stop: reverse, pivot off the lip, then skip a
+            # short cluster and replan. Twelve single skips used to home the
+            # job before coverage paint could show. Do not limp-park here.
             self._calibrate_stall += 1
             if self._calibrate_stall == 1:
                 return self._reverse_nudge(pose)
+            if self._calibrate_stall == 2:
+                return self._lateral_nudge(pose)
             if self._calibrate_stall >= 3 and self.index < len(self.global_plan.waypoints):
-                skipped = self.global_plan.waypoints[self.index]
-                self._skipped_global.append(skipped)
-                self._emit("unreachable_segment", {"x": skipped[0], "y": skipped[1], "index": self.index, "reason": "stop"})
-                self.index += 1
+                cluster = min(4, max(1, len(self.global_plan.waypoints) - self.index))
+                for _ in range(cluster):
+                    if self.index >= len(self.global_plan.waypoints):
+                        break
+                    skipped = self.global_plan.waypoints[self.index]
+                    self._skipped_global.append(skipped)
+                    self._emit(
+                        "unreachable_segment",
+                        {"x": skipped[0], "y": skipped[1], "index": self.index, "reason": "stop"},
+                    )
+                    self.index += 1
                 self._calibrate_stall = 0
                 self._local_replan(obs, pose)
-            if len(self._skipped_global) >= 12:
-                self._emit("mow_budget", {"reason": "imu_stop_ridge", "waypoints_left": max(0, len(self.global_plan.waypoints) - self.index)})
+            skip_limit = 48
+            min_mow = 80
+            if len(self._skipped_global) >= skip_limit and self.phase_step >= min_mow:
+                self._emit(
+                    "mow_budget",
+                    {
+                        "reason": "imu_stop_ridge",
+                        "waypoints_left": max(0, len(self.global_plan.waypoints) - self.index),
+                        "skips": len(self._skipped_global),
+                    },
+                )
                 self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
         self._calibrate_stall = 0
@@ -896,8 +961,17 @@ class MissionPolicy:
     def _finish(self, action: np.ndarray, advice: str, info: dict[str, Any]) -> np.ndarray:
         if self.help_requested:
             self.safe.enter_safe("call-for-help")
+        # Ridge IMU stop during mow is a skip/replan, not a limp-park.
+        safe_advice = advice
+        if (
+            self.phase == MissionPhase.MOW
+            and advice == "stop"
+            and not bool(info.get("tipover"))
+            and not bool(info.get("drain_drop"))
+        ):
+            safe_advice = "slow"
         self.safe.tick(
-            advice=advice,
+            advice=safe_advice,
             estop=estop_requested(None, info),
             tipover=bool(info.get("tipover")),
             drain_drop=bool(info.get("drain_drop")),
@@ -1000,6 +1074,11 @@ class MissionPolicy:
         _ = pose
         return self._drive(-0.36, -0.36, 0.0, pose)
 
+    def _lateral_nudge(self, pose: Pose) -> np.ndarray:
+        """Pivot-reverse so the next skip is not the same ridge cell."""
+        _ = pose
+        return self._drive(-0.18, -0.46, 0.0, pose)
+
     def _teach_inset_m(self) -> float:
         short = min(float(self.cfg.world.width_m), float(self.cfg.world.height_m))
         return max(0.75, min(2.10, 0.18 * short))
@@ -1079,6 +1158,7 @@ def _fast_settings(base: MissionConfig) -> MissionConfig:
         calibrate_arrive_m=max(0.50, float(base.calibrate_arrive_m or 0.0)),
         calibrate_confirm_m=float(base.calibrate_confirm_m or 0.0),
         phase_budget_scale=1.0,
+        review_hold_steps=min(2, int(base.review_hold_steps or 2)),
     )
 
 
@@ -1237,6 +1317,37 @@ def mission_timeline(
         "frontiers": [{"x": x, "y": y} for x, y in policy._frontier_xy],
         "skipped_segments": [{"x": x, "y": y} for x, y in policy._skipped_global],
         "map_completion": omap.completion(policy.keep_in_mask) if omap is not None else 0.0,
+        "session_summary": session_summary(policy, actual_coverage=actual_coverage),
+        "not_a_benchmark": True,
+    }
+
+
+def session_summary(
+    policy: MissionPolicy,
+    *,
+    actual_coverage: float = 0.0,
+    yard: str = "",
+    duration_s: float = 0.0,
+    wall_s: float = 0.0,
+) -> dict[str, Any]:
+    """Owner end-of-job card: map / planned / cut / skips / duration."""
+    status = policy.status({"coverage_fraction": actual_coverage})
+    dt = float(getattr(policy.cfg, "dt", 0.10) or 0.10)
+    sim_s = duration_s if duration_s > 0.0 else float(policy.step) * dt
+    return {
+        "schema": SESSION_SCHEMA,
+        "yard": yard,
+        "phase": status["phase"],
+        "phase_label": status["phase_label"],
+        "map_pct": float(status["map_completion"]),
+        "planned_pct": float(status.get("planned_coverage_fraction") or 0.0),
+        "reachable": int(status.get("reachable_mowable_cells") or 0),
+        "unreachable": int(status.get("unreachable_mowable_cells") or 0),
+        "cut_pct": float(status["actual_coverage_fraction"]),
+        "skips": int(status.get("skipped_global") or 0),
+        "duration_s": float(sim_s),
+        "wall_s": float(wall_s),
+        "steps": int(status["step"]),
         "not_a_benchmark": True,
     }
 
@@ -1253,4 +1364,5 @@ __all__ = [
     "keepouts_from_env",
     "mission_timeline",
     "scale_mission_budget",
+    "session_summary",
 ]

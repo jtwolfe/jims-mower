@@ -22,7 +22,7 @@ from typing import Any, Optional, Union
 import numpy as np
 from PIL import Image
 
-from jims_mower.constants import LIVE_SCHEMA, VIEWER_SCHEMA
+from jims_mower.constants import LIVE_CONTROL_CMDS, LIVE_SCHEMA, VIEWER_SCHEMA
 from jims_mower.env import MowerEnv
 from jims_mower.mission_demo import (
     FAST_CAM_HEIGHT,
@@ -30,12 +30,13 @@ from jims_mower.mission_demo import (
     FAST_STEPS,
     resolve_mission_config,
 )
-from jims_mower.mesh import mesh_from_observed, mesh_to_payload
+from jims_mower.mesh import coverage_to_rgb, mesh_from_observed, mesh_to_payload
 from jims_mower.mission_flow import (
     PHASE_LABELS,
     MissionPolicy,
     mission_timeline,
     scale_mission_budget,
+    session_summary,
 )
 from jims_mower.planning.observed import fog_rgba
 from jims_mower.profile import write_yard_profile
@@ -63,6 +64,22 @@ CAM_WALL_S = 0.40
 POSE_FLUSH_STRIDE = 20
 ACRE_LIVE_CAM_WIDTH = 48
 ACRE_LIVE_CAM_HEIGHT = 36
+REVIEW_HOLD_WALL_S = 2.0
+LIVE_YARDS = ("acre_yard_demo", "acre_yard", "mission_tiny", "golf_rough")
+OWNER_COPY = {
+    "idle": "Yard unknown — start a job when ready.",
+    "paused": "Paused.",
+    "estop": "E-STOP — hold.",
+    "hold": "Hold.",
+    "calibrate_boundary": "Calibrating boundary…",
+    "explore": "Exploring unknown yard…",
+    "review": "Map ready — start mow?",
+    "mow": "Mowing…",
+    "return_home": "Heading home…",
+    "complete": "Done.",
+    "fault": "Fault — retrieve.",
+    "safe": "Hold — safe.",
+}
 
 SPEED_ALIASES = {
     "1": 1.0,
@@ -88,6 +105,24 @@ def parse_speed(raw: Any) -> float:
         return SPEED_ALIASES[key]
     val = float(key)
     return 0.0 if val <= 0.0 else val
+
+
+def speed_label(speed: float) -> str:
+    if speed <= 0.0:
+        return "max"
+    if abs(speed - 1.0) < 1e-6:
+        return "1"
+    if abs(speed - 2.0) < 1e-6:
+        return "2"
+    if abs(speed - 5.0) < 1e-6:
+        return "5"
+    return str(speed)
+
+
+def owner_copy_for(job_state: str, phase: str) -> str:
+    if job_state in OWNER_COPY and job_state in {"idle", "paused", "estop", "hold"}:
+        return OWNER_COPY[job_state]
+    return OWNER_COPY.get(phase, PHASE_LABELS.get(phase, phase))
 
 
 def resolve_live_config(config: Optional[Any], *, fast: bool) -> Any:
@@ -218,9 +253,16 @@ class LiveSession:
         self.observed_png = b""
         self.fog_png = b""
         self.observed_mesh_json = b""
+        self.coverage_png = b""
         self.cam_jpeg: dict[str, bytes] = {}
         self.done = False
         self.started = False
+        self.job_state = "idle"
+        self.unattended = False
+        self.estop = False
+        self._t0_wall = 0.0
+        self._review_wall0: Optional[float] = None
+        self.session_card: dict[str, Any] = {}
 
     @property
     def dt(self) -> float:
@@ -258,6 +300,11 @@ class LiveSession:
         self.poses = []
         self.done = False
         self.started = True
+        self.job_state = "idle"
+        self.estop = False
+        self._t0_wall = 0.0
+        self._review_wall0 = None
+        self.session_card = {}
         self._seq = 0
         self._map_seq = 0
         self._mesh_seq = 0
@@ -265,6 +312,9 @@ class LiveSession:
         self._last_cam_wall = 0.0
         self._n_observed = 0
         self._last_phase = self.policy.phase.value
+        if self.unattended:
+            self.job_state = "running"
+            self._t0_wall = time.perf_counter()
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self._refresh_maps(force=True)
         self._refresh_cameras(force=True)
@@ -325,6 +375,10 @@ class LiveSession:
         with self.lock:
             return self.observed_mesh_json
 
+    def coverage_png_bytes(self) -> bytes:
+        with self.lock:
+            return self.coverage_png
+
     def camera_bytes(self, name: str) -> bytes:
         with self.lock:
             return self.cam_jpeg.get(name, b"")
@@ -334,11 +388,21 @@ class LiveSession:
             raise RuntimeError("LiveSession.reset() before stepping")
         if self.done:
             return self.snapshot()
+        if self.estop:
+            self.info = dict(self.info or {})
+            self.info["estop"] = True
+        self._maybe_auto_mow()
         action = self.policy.act(self.obs, self.info)
         self.obs, _reward, terminated, truncated, self.info = self.env.step(action)
+        if self.estop:
+            self.info = dict(self.info or {})
+            self.info["estop"] = True
         if terminated or truncated or self.policy.done:
             self.done = True
+            self._capture_summary()
         force_map = self.policy.phase.value != self._last_phase
+        if self.policy.phase.value == "review" and self._last_phase != "review":
+            self._review_wall0 = time.perf_counter()
         self._last_phase = self.policy.phase.value
         self._refresh_maps(force=force_map)
         self._refresh_cameras(force=False)
@@ -350,6 +414,10 @@ class LiveSession:
         return self.snapshot()
 
     def run_n(self, n: int) -> dict[str, Any]:
+        self.unattended = True
+        if self.job_state == "idle":
+            self.job_state = "running"
+            self._t0_wall = time.perf_counter()
         last = self.snapshot() if self.started else self.reset()
         for _ in range(max(0, int(n))):
             if self.done or self._stop.is_set():
@@ -360,12 +428,25 @@ class LiveSession:
     def run_blocking(self) -> dict[str, Any]:
         if not self.started:
             self.reset()
+        if self.unattended and self.job_state == "idle":
+            self.job_state = "running"
+            self._t0_wall = time.perf_counter()
         t0 = time.perf_counter()
         step_i = 0
+        last_speed = self.speed
         last = self.snapshot()
         while not self._stop.is_set() and not self.done and step_i < self.max_steps:
+            if self.job_state not in {"running"}:
+                time.sleep(0.05)
+                t0 = time.perf_counter()
+                step_i = 0
+                continue
             last = self.step_once()
             step_i += 1
+            if self.speed != last_speed:
+                t0 = time.perf_counter()
+                step_i = 1
+                last_speed = self.speed
             if self.speed > 0.0:
                 target = t0 + step_i * (self.dt / self.speed)
                 now = time.perf_counter()
@@ -380,9 +461,121 @@ class LiveSession:
             return
         if not self.started:
             self.reset()
+        if self.policy is not None and not self.unattended:
+            self.policy.settings.review_hold_steps = max(
+                10_000, int(self.policy.settings.review_hold_steps)
+            )
         self._stop.clear()
         self._thread = threading.Thread(target=self.run_blocking, name="jims-mower-live", daemon=True)
         self._thread.start()
+
+    def control(self, cmd: str, **kwargs: Any) -> dict[str, Any]:
+        """Owner bar: start / pause / resume / speed / start_mow / ESTOP."""
+        key = str(cmd or "").strip().lower()
+        if key not in LIVE_CONTROL_CMDS:
+            return {"ok": False, "error": f"unknown command {cmd}", **self.snapshot()}
+        if not self.started:
+            self.reset()
+        if key == "start":
+            yard = kwargs.get("yard")
+            if yard:
+                self._apply_yard(str(yard))
+            if kwargs.get("speed") is not None:
+                self.speed = parse_speed(kwargs.get("speed"))
+            self.estop = False
+            if self.policy is not None:
+                self.policy.clear_owner_hold()
+                if self.policy.safe.mode == "estop":
+                    self.policy.safe.clear()
+            self.job_state = "running"
+            self._t0_wall = self._t0_wall or time.perf_counter()
+            self._stop.clear()
+            self.start_thread()
+        elif key == "pause":
+            if self.job_state == "running":
+                self.job_state = "paused"
+                if self.policy is not None:
+                    self.policy.request_hold("owner pause")
+        elif key == "resume":
+            if self.job_state in {"paused", "hold"}:
+                self.estop = False
+                if self.policy is not None:
+                    self.policy.clear_owner_hold()
+                self.job_state = "running"
+        elif key == "speed":
+            self.speed = parse_speed(kwargs.get("speed", self.speed))
+        elif key == "start_mow":
+            if self.policy is not None:
+                self.policy.request_start_mow()
+            if self.job_state == "idle":
+                self.job_state = "running"
+                self._t0_wall = time.perf_counter()
+        elif key == "reexplore":
+            if self.policy is not None:
+                self.policy.request_reexplore()
+        elif key == "estop":
+            self.estop = True
+            self.job_state = "estop"
+            if self.policy is not None:
+                self.policy.request_estop("owner estop")
+        elif key == "hold":
+            if self.job_state == "running":
+                self.job_state = "hold"
+            if self.policy is not None:
+                self.policy.request_hold("owner hold")
+        elif key == "clear":
+            self.estop = False
+            if self.policy is not None:
+                self.policy.safe.clear()
+                self.policy.clear_owner_hold()
+                if self.policy.phase.value == "safe":
+                    self.policy.phase = self.policy.phase
+            self.job_state = "paused"
+        elif key == "yard":
+            self._apply_yard(str(kwargs.get("yard") or self.config_name))
+            self.job_state = "idle"
+        return {"ok": True, "cmd": key, **self.snapshot()}
+
+    def _apply_yard(self, yard: str) -> None:
+        name = str(yard).strip()
+        if name not in LIVE_YARDS:
+            return
+        if name == self.config_name and self.started:
+            return
+        was_running = self.job_state == "running"
+        self.stop()
+        self.config_name = name
+        self.fast = name == "mission_tiny"
+        self.reset()
+        if was_running:
+            self.job_state = "running"
+            self._t0_wall = time.perf_counter()
+
+    def _maybe_auto_mow(self) -> None:
+        if self.policy is None or self.unattended:
+            return
+        if self.policy.phase.value != "review":
+            return
+        if self._review_wall0 is None:
+            self._review_wall0 = time.perf_counter()
+            return
+        if (time.perf_counter() - self._review_wall0) >= REVIEW_HOLD_WALL_S:
+            self.policy.request_start_mow()
+
+    def _capture_summary(self) -> None:
+        if self.policy is None:
+            return
+        wall = 0.0
+        if self._t0_wall:
+            wall = time.perf_counter() - self._t0_wall
+        self.session_card = session_summary(
+            self.policy,
+            actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
+            yard=str(self.config_name),
+            wall_s=wall,
+        )
+        dest = self.out_dir / "session_summary.json"
+        dest.write_text(json.dumps(self.session_card, indent=2), encoding="utf-8")
 
     def stop(self) -> None:
         self._stop.set()
@@ -429,6 +622,13 @@ class LiveSession:
         fog = coarsen2d(fog_rgba(omap.observed), MAP_MAX_SIDE)
         observed_png = _png_bytes(rgb)
         fog_png = _png_bytes(fog)
+        coverage_png = b""
+        if self.env is not None and hasattr(self.env, "_coverage"):
+            try:
+                cov = coarsen2d(coverage_to_rgb(self.env._coverage.as_float()), MAP_MAX_SIDE)
+                coverage_png = _png_bytes(cov)
+            except Exception:
+                coverage_png = b""
         mesh_json = b""
         if force or step % self.observed_mesh_stride == 0 or changed:
             mesh = mesh_from_observed(omap, stride=1, max_side=MESH_MAX_SIDE)
@@ -436,6 +636,8 @@ class LiveSession:
         with self.lock:
             self.observed_png = observed_png
             self.fog_png = fog_png
+            if coverage_png:
+                self.coverage_png = coverage_png
             self._map_seq += 1
             if mesh_json:
                 self.observed_mesh_json = mesh_json
@@ -464,7 +666,10 @@ class LiveSession:
                 "live": True,
                 "seq": 0,
                 "step": 0,
-                "phase": "calibrate_boundary",
+                "phase": "idle",
+                "phase_label": "IDLE",
+                "job_state": self.job_state,
+                "owner_copy": owner_copy_for(self.job_state, "idle"),
                 "done": False,
                 "not_a_benchmark": True,
             }
@@ -487,6 +692,15 @@ class LiveSession:
         n_obs = self._n_observed
         if policy.observed is not None:
             n_obs = int(policy.observed.observed.sum())
+        wall = 0.0
+        if self._t0_wall:
+            wall = time.perf_counter() - self._t0_wall
+        card = self.session_card or session_summary(
+            policy,
+            actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
+            yard=str(self.config_name),
+            wall_s=wall,
+        )
         return {
             "schema": LIVE_SCHEMA,
             "live": True,
@@ -496,6 +710,12 @@ class LiveSession:
             "step": status["step"],
             "phase": status["phase"],
             "phase_label": status["phase_label"],
+            "job_state": self.job_state,
+            "owner_copy": owner_copy_for(self.job_state, status["phase"]),
+            "yards": list(LIVE_YARDS),
+            "yard": str(self.config_name),
+            "can_start_mow": status["phase"] == "review",
+            "can_reexplore": status["phase"] == "review",
             "pose": pose,
             "map_pct": float(status["map_completion"]),
             "cut_pct": float(status["actual_coverage_fraction"]),
@@ -503,6 +723,9 @@ class LiveSession:
             "planned_pct": float(status.get("planned_coverage_fraction") or 0.0),
             "reachable": int(status.get("reachable_mowable_cells") or 0),
             "unreachable": int(status.get("unreachable_mowable_cells") or 0),
+            "skips": int(status.get("skipped_global") or 0),
+            "duration_s": float(card.get("duration_s") or 0.0),
+            "wall_s": float(card.get("wall_s") or 0.0),
             "n_frontiers": int(status["n_frontiers"]),
             "n_observed": n_obs,
             "mesh_seq": self._mesh_seq,
@@ -514,14 +737,19 @@ class LiveSession:
             "keep_out": keep_out,
             "trimmer_on": bool((self.info or {}).get("trimmer_enabled")),
             "trimmer_allowed": bool(status["trimmer_allowed"]),
+            "estop": bool(self.estop or status["phase"] == "safe"),
+            "safe_mode": getattr(policy.safe, "mode", "run"),
             "observed_url": f"/api/live/observed.png?v={self._map_seq}",
             "fog_url": f"/api/live/fog.png?v={self._map_seq}",
             "observed_mesh_url": f"/api/live/observed_mesh.json?v={self._mesh_seq}",
+            "coverage_url": f"/api/live/coverage.png?v={self._map_seq}",
             "cam_url": f"/api/live/cam/{cam_name}?v={self._cam_seq}",
             "cameras": list(self.camera_names),
             "done": bool(self.done),
+            "session_summary": card,
             "owner_mode": "observed_terrain",
             "speed": self.speed,
+            "speed_label": speed_label(self.speed),
             "dt": self.dt,
             "not_a_benchmark": True,
         }
@@ -551,6 +779,8 @@ class LiveSession:
             (maps_dir / "fog.png").write_bytes(self.fog_png)
         if self.observed_mesh_json:
             (maps_dir / "observed_mesh.json").write_bytes(self.observed_mesh_json)
+        if self.coverage_png:
+            (maps_dir / "coverage.png").write_bytes(self.coverage_png)
         timeline = mission_timeline(
             self.policy,
             actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
@@ -582,6 +812,8 @@ class LiveSession:
             observed_png = self.observed_png
             fog_png = self.fog_png
             observed_mesh_json = self.observed_mesh_json
+            coverage_png = self.coverage_png
+            card = dict(self.session_card)
         (dest / "poses.json").write_text(
             json.dumps({"schema": VIEWER_SCHEMA, "poses": poses}, indent=2),
             encoding="utf-8",
@@ -592,10 +824,19 @@ class LiveSession:
             (maps_dir / "fog.png").write_bytes(fog_png)
         if observed_mesh_json:
             (maps_dir / "observed_mesh.json").write_bytes(observed_mesh_json)
+        if coverage_png:
+            (maps_dir / "coverage.png").write_bytes(coverage_png)
+        if (final or self.done) and not card:
+            self._capture_summary()
+            card = dict(self.session_card)
         timeline = mission_timeline(
             self.policy,
             actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
         )
+        if card:
+            card.setdefault("yard", str(self.config_name))
+            timeline["session_summary"] = card
+            (dest / "session_summary.json").write_text(json.dumps(card, indent=2), encoding="utf-8")
         (dest / "mission.json").write_text(json.dumps(timeline, indent=2), encoding="utf-8")
         if self.policy.profile is not None:
             if not self.policy.profile.keep_out and self.env is not None:
@@ -622,6 +863,8 @@ class LiveSession:
             manifest["maps"]["fog"] = "maps/fog.png"
             if observed_mesh_json:
                 manifest["maps"]["observed_mesh"] = "maps/observed_mesh.json"
+            if coverage_png:
+                manifest["maps"]["coverage"] = "maps/coverage.png"
             (dest / "viewer.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
@@ -664,7 +907,10 @@ def run_live(
     )
     summary = session.reset()
     if prepare_only:
+        session.unattended = True
         session.speed = 0.0
+        session.job_state = "running"
+        session._t0_wall = time.perf_counter()
         last = session.run_blocking()
         session.close()
         last["out"] = str(Path(out_dir))
@@ -675,10 +921,11 @@ def run_live(
     session.start_thread()
     server = serve_viewer(session.out_dir, host=host, port=port, session=session)
     url = f"http://{host}:{port}/"
-    print(f"Live mission {session.config_name} @ {session.speed or 'max'}× → {url}")
+    print(f"Live owner session {session.config_name} @ {session.speed or 'max'}× → {url}")
+    print("Idle until Start. Speed 1× 2× 5× max. MAP READY waits 2s or Start mow.")
     print("Owner view: growing observed terrain + fog. Toggle true elev for god-view.")
     print("Physics uses true height; owner/control use ObservedMap.")
-    print(f"phase {summary.get('phase')}  map {float(summary.get('map_pct') or 0.0):.1%}")
+    print(f"{summary.get('owner_copy')}  map {float(summary.get('map_pct') or 0.0):.1%}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
