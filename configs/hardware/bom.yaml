@@ -55,7 +55,7 @@ classes:
     qty: 1
     class: LiFePO4 24 V 50 Ah class + BMS (uncertain SKU)
     buy_make: buy
-    verify_before_spin: docs/PACK_THERMAL.md — Wh + charge hours before measured: true
+    verify_before_spin: "docs/PACK_THERMAL.md — Wh + charge hours before measured: true"
     open_questions: fit in 50 cm cube with CG low and between wheels
     number_status: class
     feeds: battery_soc later
