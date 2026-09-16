@@ -547,7 +547,7 @@ def run_field_dryrun(
         "tips": int(mission["tips"]),
         "drain_entries": int(mission["drain_entries"]),
         "leftover_uncut_cells": int(mission["leftover_uncut_cells"]),
-        "leftover_uncut_m2": float(mission["leftover_uncut_m2"]),
+        "leftover_uncut_m2": round(float(mission["leftover_uncut_m2"]), 4),
         "estop_pulls": int(mission["estop_row"].get("pulls") or 0),
     }
     card["notes"] = (
