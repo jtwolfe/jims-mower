@@ -439,7 +439,13 @@ def gates_from_owner_state(
     mission_l = str(mission or "idle").strip().lower()
     machine_l = str(machine or "run").strip().lower()
     running = mission_l in {"mowing", "returning", "teach", "review"} or mission_l == "running"
-    estop = machine_l == "estop" or mission_l == "estop"
+    hw_estop = False
+    if isinstance(faults, list):
+        hw_estop = any(
+            isinstance(item, dict) and str(item.get("code") or "") == "HW_ESTOP"
+            for item in faults
+        )
+    estop = machine_l == "estop" or mission_l == "estop" or hw_estop
     return ScheduleGates(
         soc=float(soc),
         rain=bool(rain),

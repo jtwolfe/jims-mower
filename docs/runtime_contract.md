@@ -118,3 +118,7 @@ in contract version `"1"`.
 | `help_requested` | bool | safe / estop |
 | `reason` | string or null | |
 | `stamp_s` | number | |
+
+Hardware paddle latch is **not** `SafeState`. Gym `info["hw_estop"]` /
+live `estop_kind` (`software` / `hardware` / `both`) sit beside this
+message. See [`ESTOP.md`](ESTOP.md).

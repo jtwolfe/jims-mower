@@ -410,7 +410,11 @@ class ThermalConfig:
 
 @dataclass
 class WatchdogConfig:
-    """Stop wheels if IMU / vision frames freeze. Off by default in gym tests."""
+    """Stop wheels if IMU / vision stamps freeze. Off by default in gym tests.
+
+    Enable on the bench loop via ``runtime.watchdog.enabled: true``
+    (see ``configs/orin/bench.yaml``).
+    """
 
     enabled: bool = False
     imu_stall_s: float = 0.40

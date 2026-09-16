@@ -145,6 +145,8 @@ LIVE_CONTROL_CMDS = (
     "start_mow",
     "reexplore",
     "estop",
+    "hw_estop",
+    "hw_reset",
     "hold",
     "clear",
     "yard",
@@ -220,6 +222,7 @@ FAULT_CODES = (
     "IMU_FREEZE",
     "GNSS_DROPOUT",
     "RADIO_LOSS",
+    "HW_ESTOP",
 )
 MOTOR_KILL_MODES = frozenset({"cmd_ignored", "encoder_stuck", "open_circuit"})
 RADIO_CHANNELS = ("wifi", "bt", "lora")

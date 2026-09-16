@@ -388,6 +388,7 @@ def test_empty_mow_plan_is_reteach_not_hold_safe() -> None:
     assert owner_copy_for("running", "review") == "Map ready — start mow?"
     assert owner_copy_for("running", "safe") == "Hold — safe."
     assert owner_copy_for("estop", "review") == "E-STOP — hold."
+    assert "paddle" in owner_copy_for("estop", "review", hw_estop=True).lower()
 
 
 def test_taught_live_job_completes_to_idle(tmp_path: Path) -> None:

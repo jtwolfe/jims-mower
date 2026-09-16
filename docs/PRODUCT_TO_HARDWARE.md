@@ -30,7 +30,7 @@ image.
 | Observed elevation freeze | Explore stamps a local elev estimate (observer + optional gym stereo); MAP READY locks cells so they do not flop; mow plans on the frozen map, not god-view | `docs/MISSION_FLOW.md`, `docs/TERRAIN_MAPS.md`, `perception/stereo.py` |
 | teach → explore → mow → home → done on phone | Pair stub → teach keep-in → Start → MAP READY → mow → return → idle; cut % rises | `jims-mower-owner --live`, `acre_yard_demo` |
 | Acre world | `acre_yard` / `acre_yard_demo` ~70×58 m @ 0.50 m; physics grade / drains / banks | `configs/scenarios/acre_yard*.yaml` |
-| Faults / SOS UX | Immobilised (dead motor, retrieve) vs stuck (reverse / pivot / help); software ESTOP | `FaultBus`, `#/fault` |
+| Faults / SOS UX | Immobilised (dead motor, retrieve) vs stuck (reverse / pivot / help); software ESTOP vs hardware paddle latch (sim) | `FaultBus`, `HardwareEstop`, `#/fault` |
 | ICD action / obs contract | `Box(3,)` wheels + trimmer; dict obs keys listed in the ICD | [`ICD.md`](../ICD.md), `docs/runtime_contract.md` |
 | YardProfile geofence / home | Taught keep-in / keep-out / home persist as `jims_mower.yard.v1` | `profile.py`, `/yard` |
 | Weekly schedule **engine** | `YardProfile.schedule` arms / skips / duration-stops a job (this PR) | [`SCHEDULE.md`](SCHEDULE.md) |
@@ -147,9 +147,9 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | RT-1 | CSI / GStreamer capture | **stub** | `GstNvmmAdapter` raises without Gst; CI uses `FakeGstAdapter` / `FakeCsiDriver`. | Named cameras (stereo pair + mono, or 4–6 look-around) fill `obs["cameras"]` at the ICD size; `SensorWatchdog` sees fresh stamps. | HD-cam, JetPack |
 | RT-2 | IMU / GNSS / ToF drivers | **stub** | Fake I2C/UART publishers copy **gym** vectors onto in-process queues. Addresses in `drivers.py` are documentation. | Same ICD keys from real BMI/ICM + GNSS + VL53-class parts; dropout sets `gps[3]=0`. | HD-place |
 | RT-3 | TensorRT load | **stub** | See CV-6. | Engine deserializes; fallback still mock if path missing (keep that). | CV-6 |
-| RT-4 | Watchdog | **partial** | Zeros wheels if IMU/vision stall (`runtime.watchdog.enabled`, off in gym tests). | Unplug a camera; wheels stop within `vision_stall_s`. | RT-1, RT-2 |
+| RT-4 | Watchdog | **partial** (bench config + gym stamp stall this PR) | Zeros wheels if IMU/vision **stamps** freeze (`runtime.watchdog.enabled`). Off in default gym tests. Bench overlay: [`configs/orin/bench.yaml`](../configs/orin/bench.yaml). Fake adapters — not real CSI/IMU. | Gym: freeze IMU or camera stamps → wheels zero within `vision_stall_s` / configured stall (`tests/test_hardware_estop.py`, `tests/test_wave4_ops.py`). Field: unplug a camera on the wired rig (needs RT-1). | RT-1, RT-2 |
 | RT-5 | Battery / thermal telemetry | **stub** | `OrinBudget` 50 Wh class-scale RC. Not a BMS. | SOC and board °C from hardware; limp/stop match measured limits. | HD-batt |
-| RT-6 | Hardware ESTOP | **partial** | Software latch (`SafeStateMachine`) zeros wheels + trimmer. No paddle → FET/contactor wiring. | Hit the paddle; traction + trimmer rails go dead **without** Python. | HD-wire |
+| RT-6 | Hardware ESTOP | **partial** (sim + doc this PR) | Gym `HardwareEstop` drops traction + trimmer **rails** underneath policy / `SafeStateMachine`. Wiring + reset: [`ESTOP.md`](ESTOP.md), [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §10. No physical paddle. | Gym: dummy load commanding wheels+trimmer; paddle latch zeros outputs; software clear does **not** restore; only `hw_reset` does (`tests/test_hardware_estop.py`). Field: hit a real paddle while a dummy load spins — **not claimed**. | HD-wire |
 | RT-7 | On-box loop (no renderer) | **partial** | Documented; not a shipped systemd unit. | Process runs without importing `jims_mower.renderer`. | RT-1…RT-4 |
 
 ### 6. Safety / ops
@@ -209,13 +209,20 @@ Stop when only **fab + field test** remain.
    *Honesty:* no claimed mAP / IoU / FPS.  
    *Revise:* real matcher + calibrated baseline on the rig (row 7+).
 
-3. **Hardware ESTOP + power kill (RT-6, HD-wire).** Paddle drops traction
-   and trimmer rails without Python.  
-   *Test:* paddle while a dummy load spins.  
-   *Revise:* fuse map vs what actually opened.
+3. **Hardware ESTOP + power kill (RT-6, HD-wire).** Sim model + design
+   doc (this PR). Gym `HardwareEstop` is the last rail filter — policy
+   cannot soft-override a latched paddle. Field paddle + dummy-load
+   spin is still required.  
+   *Test (gym):* `pytest tests/test_hardware_estop.py tests/test_safe_state.py`.  
+   *Test (field):* paddle while a dummy load spins. Not claimed here.  
+   *Revise:* fuse map vs what actually opened on the bench.
 
-4. **Watchdog enabled on the bench loop (RT-4).**  
-   *Test:* freeze IMU or camera stamps → wheels zero.
+4. **Watchdog enabled on the bench loop (RT-4).** Gym/bench config
+   (`runtime.watchdog.enabled`, [`configs/orin/bench.yaml`](../configs/orin/bench.yaml)).
+   Freeze IMU or camera stamps → wheels zero within the stall window.
+   Fake adapters; no real CSI/IMU.  
+   *Test:* `pytest tests/test_hardware_estop.py tests/test_wave4_ops.py -k watchdog`.  
+   *Honesty:* stamps in the gym; field unplug still needs RT-1 / RT-2.
 
 5. **Real CSI / GStreamer → `obs["cameras"]` (RT-1).** Same names as
    `CameraSpec` (prefer stereo_left / stereo_right + mono). Downsample
@@ -284,13 +291,11 @@ not another WAVE of gym stubs.
 
 ## What this PR ships
 
-- This checklist (photogrammetry stack folded into CV / mapping).
-- [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) — construction math, BOM
-  *classes*, wiring sketch, **forward stereo + mono** camera layout.
-  No claimed field runtime.
-- Build-order **§1**: schedule engine. Phone Health next-run + enable
-  toggle. Tests in `tests/test_schedule.py`.
-- Build-order **§2** (gym slice): synthetic stereo stamps metric local
-  elev; `lock_observed` freezes MAP READY cells; exporter → terrain
-  seg stub is the real train path. Tests in `tests/test_stereo.py`
-  and `tests/test_learn.py`. No claimed mAP / FPS. Not live COLMAP.
+- Build-order **§3** (sim + doc): hardware ESTOP rail model
+  (`HardwareEstop`) + [`ESTOP.md`](ESTOP.md) paddle / fuse / reset.
+  Software ESTOP tests stay green. Field paddle test **not** claimed.
+- Build-order **§4** (gym / bench): `runtime.watchdog.enabled` overlay
+  [`configs/orin/bench.yaml`](../configs/orin/bench.yaml); stamp-based
+  stall; freeze IMU or camera stamps → wheels zero. No real CSI/IMU.
+- Checklist + [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §10 updated
+  honestly: sim/doc done, bench paddle still needed.

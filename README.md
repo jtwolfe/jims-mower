@@ -595,6 +595,7 @@ There are no claimed mAP / FPS numbers. Do not run the gym renderer on-box.
 | RL scaffold | `jims-mower-rl` (numpy); optional `pip install -e ".[rl]"` for SB3 |
 | Action mask | [`action_mask.py`](src/jims_mower/action_mask.py) — hazard cone |
 | ESTOP / limp / safe | [`safe_state.py`](src/jims_mower/safe_state.py) used by `TerrainPolicy` |
+| Hardware ESTOP | [`hardware_estop.py`](src/jims_mower/hardware_estop.py) — rail kill under policy; [`docs/ESTOP.md`](docs/ESTOP.md) |
 | Incident viewer | `jims-mower-incident <episode> --out viewer/` |
 | Telemetry JSON | `jims-mower-telemetry` — coverage, tip rate, drains, living near-misses |
 | Owner overlay | `jims-mower-owner --config geofence_movers` |
@@ -663,7 +664,8 @@ scripts/train_terrain_seg.py  export → numpy terrain weights
 docs/WAVE2B.md                domain-rand training note
 src/jims_mower/bc.py          numpy behaviour-cloning stub
 src/jims_mower/rl.py          REINFORCE / random-search / optional SB3
-src/jims_mower/safe_state.py  ESTOP / limp / safe
+src/jims_mower/safe_state.py  software ESTOP / limp / safe
+src/jims_mower/hardware_estop.py  hardware paddle rail kill (sim)
 src/jims_mower/incident.py    episode scrubber
 src/jims_mower/telemetry.py   ops JSON
 src/jims_mower/owner.py       phone overlay HTML

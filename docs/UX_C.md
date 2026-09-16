@@ -26,8 +26,10 @@ Matches the radio profile: **Bluetooth pair required**, **Wi-Fi optional**,
 6. **Teach keep-in** — walk or tap the yellow boundary (at least three
    vertices). Mark keep-outs (beds, pond, dog run) as red holes.
 7. **First mow** — stay in the yard. Start from the map. Use **SOS /
-   ESTOP** if anything feels wrong. Software ESTOP zeros wheels and the
-   trimmer until you Start again (operator clear).
+   ESTOP** if anything feels wrong. Software ESTOP zeros **commands**
+   until you Start again (operator clear). The hardware paddle (when
+   wired) drops **rails**; Start does not restore them — reset the
+   paddle. Gym: live `hw_estop` / `hw_reset`. See [`ESTOP.md`](ESTOP.md).
 
 Hardware bring-up (flash, wiring, field RF) is still out of this repo.
 

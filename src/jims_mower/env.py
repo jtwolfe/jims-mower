@@ -56,6 +56,7 @@ from jims_mower.safety import (
     trimmer_interlock,
 )
 from jims_mower.faults import FaultBus
+from jims_mower.hardware_estop import HardwareEstop, is_hw_estop_kind, is_hw_reset_mode
 from jims_mower.radio import RadioSim
 from jims_mower.runtime.budget import OrinBudget, budget_from_config
 from jims_mower.runtime.watchdog import SensorWatchdog
@@ -291,6 +292,9 @@ class MowerEnv(gym.Env):
         self._episode_seed: Optional[int] = None
         self.budget: OrinBudget = budget_from_config(self.cfg)
         self.watchdog = SensorWatchdog.from_config(self.cfg, dt=self.cfg.dt)
+        self.hw_estop = HardwareEstop()
+        self._imu_stamp_s = 0.0
+        self._vision_stamp_s = 0.0
         self.fault_bus = FaultBus.from_config(self.cfg)
         self.radio = RadioSim.from_config(self.cfg)
         self._occ_persist: Optional[PersistentOccupancy] = None
@@ -465,6 +469,9 @@ class MowerEnv(gym.Env):
         self.budget = budget_from_config(self.cfg)
         self.watchdog = SensorWatchdog.from_config(self.cfg, dt=self.cfg.dt)
         self.watchdog.reset()
+        self.hw_estop = HardwareEstop()
+        self._imu_stamp_s = 0.0
+        self._vision_stamp_s = 0.0
         self.fault_bus = FaultBus.from_config(self.cfg)
         if options.get("inject_fault"):
             self.fault_bus.inject(**_inject_kwargs(options["inject_fault"]))
@@ -493,7 +500,13 @@ class MowerEnv(gym.Env):
         action = np.asarray(action, dtype=np.float32).reshape(-1)
         if action.size != 3:
             raise ValueError("action must have shape (3,)")
-        self.watchdog.observe(self._last_imu, self._last_images, dt=self.cfg.dt)
+        self.watchdog.observe(
+            self._last_imu,
+            self._last_images,
+            dt=self.cfg.dt,
+            imu_stamp_s=self._imu_stamp_s,
+            vision_stamp_s=self._vision_stamp_s,
+        )
         action = self.watchdog.filter_action(action)
         self.fault_bus.tick(self._steps)
         self.radio.tick(self.cfg.dt, rng=self.np_random)
@@ -510,6 +523,10 @@ class MowerEnv(gym.Env):
             left_n *= scale
             right_n *= scale
             requested = False
+        # Hardware paddle is the last rail filter — policy / software ESTOP
+        # / limp-home cannot soft-override a latched kill.
+        left_n, right_n, requested = self.hw_estop.apply(left_n, right_n, requested)
+        self.fault_bus.last_applied = (left_n, right_n, 1.0 if requested else 0.0)
         vmax = self.cfg.robot.max_wheel_speed_mps
         self._prev_pose = self._pose
         self._prev_v = self._last_v
@@ -653,8 +670,22 @@ class MowerEnv(gym.Env):
         cameras: Optional[list[str]] = None,
         at_step: Optional[int] = None,
     ) -> None:
-        """Kill a motor / sensor mid-episode. See ``FaultBus.inject``."""
+        """Kill a motor / sensor mid-episode, or hit / reset the HW paddle."""
+        if is_hw_estop_kind(kind):
+            if is_hw_reset_mode(mode):
+                self.reset_hw_estop()
+            else:
+                self.hit_hw_estop(str(kind))
+            return
         self.fault_bus.inject(kind, mode=mode, cameras=cameras, at_step=at_step)
+
+    def hit_hw_estop(self, reason: str = "paddle") -> None:
+        """Sim paddle hit — traction + trimmer rails drop without Python."""
+        self.hw_estop.hit(reason)
+
+    def reset_hw_estop(self) -> None:
+        """Documented hardware reset. Software ESTOP clear must not call this."""
+        self.hw_estop.reset()
 
     def close(self) -> None:
         self._persist_grass()
@@ -783,6 +814,11 @@ class MowerEnv(gym.Env):
             enabled=self.cfg.sensors.imu.enabled,
         )
         imu = self.fault_bus.apply_imu(imu_to_array(imu_sample))
+        now_s = float(self._steps) * float(self.cfg.dt)
+        if not self.fault_bus.imu_frozen:
+            self._imu_stamp_s = now_s
+        if not self.fault_bus.cam_blind:
+            self._vision_stamp_s = now_s
         gps_sample = simulate_gps(
             self._pose,
             self.np_random,
@@ -998,7 +1034,10 @@ class MowerEnv(gym.Env):
             "living_reason": living.reason,
             **self.budget.as_info(),
             **self.watchdog.as_info(),
+            **self.hw_estop.as_info(),
             **self.radio.as_info(),
+            "imu_stamp_s": float(self._imu_stamp_s),
+            "vision_stamp_s": float(self._vision_stamp_s),
         }
         info["fault"] = self.fault_bus.as_info(
             self._pose, gnss_dropped=float(gps[3]) < 0.5

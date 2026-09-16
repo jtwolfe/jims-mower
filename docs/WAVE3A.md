@@ -35,6 +35,8 @@ pivots stay allowed.
 
 - `SafeStateMachine` (RUN / LIMP / ESTOP / SAFE) wraps controller
   commands. `info["estop"]` latches zeros until `clear()`.
+- Hardware paddle is a separate rail latch (`HardwareEstop`,
+  `info["hw_estop"]`). `clear()` does not restore rails.
 - `jims-mower-incident` writes a camera + hazard + advice scrubber
   (HTML slider + PNGs) from a `jims-mower-record` directory.
 - `jims-mower-telemetry` emits coverage %, tip rate, drain entries,

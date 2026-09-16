@@ -13,6 +13,7 @@ from jims_mower.runtime.bus import InProcessBus
 from jims_mower.runtime.gstreamer import FakeGstAdapter, GstNvmmAdapter, gstreamer_available
 from jims_mower.faults import FaultBus
 from jims_mower.radio import RadioSim
+from jims_mower.hardware_estop import HardwareEstop
 from jims_mower.runtime.watchdog import SensorWatchdog
 from jims_mower.runtime.drivers import (
     FakeCsiDriver,
@@ -31,6 +32,7 @@ __all__ = [
     "FakeImuDriver",
     "FakeTofDriver",
     "GstNvmmAdapter",
+    "HardwareEstop",
     "InProcessBus",
     "MultiprocessBridge",
     "OrinBudget",

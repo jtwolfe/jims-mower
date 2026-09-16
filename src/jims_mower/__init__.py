@@ -18,6 +18,7 @@ from jims_mower.runtime.budget import OrinBudget
 from jims_mower.safety import living_advice, terrain_hazards, trimmer_interlock
 from jims_mower.faults import FaultBus
 from jims_mower.radio import RadioSim
+from jims_mower.hardware_estop import HardwareEstop
 from jims_mower.safe_state import SafeStateMachine
 
 __version__ = "0.1.0"
@@ -42,6 +43,7 @@ __all__ = [
     "EpisodeScorecard",
     "FaultBus",
     "GeofenceSpec",
+    "HardwareEstop",
     "MowerEnv",
     "YardProfile",
     "OrinBudget",

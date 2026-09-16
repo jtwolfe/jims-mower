@@ -37,6 +37,8 @@ class SensorWatchdog:
         self.dt = float(dt)
         self._last_imu: Optional[np.ndarray] = None
         self._last_vision: Optional[np.ndarray] = None
+        self._last_imu_stamp: Optional[float] = None
+        self._last_vision_stamp: Optional[float] = None
         self._imu_frozen_s = 0.0
         self._vision_frozen_s = 0.0
         self.stalled = False
@@ -58,6 +60,8 @@ class SensorWatchdog:
     def reset(self) -> None:
         self._last_imu = None
         self._last_vision = None
+        self._last_imu_stamp = None
+        self._last_vision_stamp = None
         self._imu_frozen_s = 0.0
         self._vision_frozen_s = 0.0
         self.stalled = False
@@ -83,29 +87,47 @@ class SensorWatchdog:
         cameras: Optional[dict[str, np.ndarray]],
         *,
         dt: Optional[float] = None,
+        imu_stamp_s: Optional[float] = None,
+        vision_stamp_s: Optional[float] = None,
     ) -> str:
         if not self.enabled:
             self.stalled = False
             self.reason = "ok"
             return self.reason
         step = float(self.dt if dt is None else dt)
-        imu_arr = None if imu is None else np.asarray(imu, dtype=np.float32).reshape(-1)
-        if imu_arr is None or imu_arr.size < 6:
-            self._imu_frozen_s += step
-        elif self._last_imu is not None and np.allclose(imu_arr, self._last_imu, atol=1e-6):
-            self._imu_frozen_s += step
+        if imu_stamp_s is not None:
+            stamp = float(imu_stamp_s)
+            if self._last_imu_stamp is not None and abs(stamp - self._last_imu_stamp) < 1e-12:
+                self._imu_frozen_s += step
+            else:
+                self._imu_frozen_s = 0.0
+            self._last_imu_stamp = stamp
         else:
-            self._imu_frozen_s = 0.0
-            if imu_arr is not None:
-                self._last_imu = imu_arr.copy()
-        vis = self._vision_fingerprint(cameras)
-        if vis is None:
-            self._vision_frozen_s += step
-        elif self._last_vision is not None and np.allclose(vis, self._last_vision, atol=1e-4):
-            self._vision_frozen_s += step
+            imu_arr = None if imu is None else np.asarray(imu, dtype=np.float32).reshape(-1)
+            if imu_arr is None or imu_arr.size < 6:
+                self._imu_frozen_s += step
+            elif self._last_imu is not None and np.allclose(imu_arr, self._last_imu, atol=1e-6):
+                self._imu_frozen_s += step
+            else:
+                self._imu_frozen_s = 0.0
+                if imu_arr is not None:
+                    self._last_imu = imu_arr.copy()
+        if vision_stamp_s is not None:
+            stamp = float(vision_stamp_s)
+            if self._last_vision_stamp is not None and abs(stamp - self._last_vision_stamp) < 1e-12:
+                self._vision_frozen_s += step
+            else:
+                self._vision_frozen_s = 0.0
+            self._last_vision_stamp = stamp
         else:
-            self._vision_frozen_s = 0.0
-            self._last_vision = vis
+            vis = self._vision_fingerprint(cameras)
+            if vis is None:
+                self._vision_frozen_s += step
+            elif self._last_vision is not None and np.allclose(vis, self._last_vision, atol=1e-4):
+                self._vision_frozen_s += step
+            else:
+                self._vision_frozen_s = 0.0
+                self._last_vision = vis
         imu_stall = self._imu_frozen_s >= self.imu_stall_s
         vis_stall = self._vision_frozen_s >= self.vision_stall_s
         if imu_stall and vis_stall:

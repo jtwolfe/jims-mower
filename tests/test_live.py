@@ -262,6 +262,12 @@ def test_owner_copy_reads_like_a_product() -> None:
     assert owner_copy_for("running", "safe") == "Hold — safe."
     assert owner_copy_for("running", "mow") == "Mowing…"
     assert owner_copy_for("estop", "mow") == "E-STOP — hold."
+    assert owner_copy_for("running", "mow", hw_estop=True) == (
+        "Hardware E-STOP — rails dead. Reset the paddle."
+    )
+    assert owner_copy_for("estop", "mow", hw_estop=True) == (
+        "Hardware E-STOP — rails dead. Reset the paddle."
+    )
     assert owner_copy_for("running", "mow", {"code": "FAULT_IMMOBILISED", "retrieve": True}) == (
         "SOS — immobilised. Retrieve the mower."
     )

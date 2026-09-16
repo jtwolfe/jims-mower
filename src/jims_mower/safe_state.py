@@ -4,6 +4,9 @@ Software contract only — not a claimed SIL / hardware rating. A latched
 ESTOP zeros wheels and the trimmer until an operator ``clear()``. Limp
 scales cruise after repeated ``stop`` advice; exhausted limp becomes a
 SAFE hold (call-for-help).
+
+The hardware paddle is a **separate** latch (``HardwareEstop``) on the
+rails. ``clear()`` must not restore motion while that paddle is latched.
 """
 
 from __future__ import annotations

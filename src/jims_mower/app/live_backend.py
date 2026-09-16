@@ -182,7 +182,11 @@ class LiveBackend:
                 rain=rain,
                 faults=faults,
                 mission=mission,
-                machine=str(snap.get("safe_mode") or ("estop" if job_state == "estop" else "run")),
+                machine=(
+                    "estop"
+                    if snap.get("hw_estop")
+                    else str(snap.get("safe_mode") or ("estop" if job_state == "estop" else "run"))
+                ),
             ),
             start=self._arm_from_schedule,
             stop=self._stop_from_schedule,
@@ -219,7 +223,11 @@ class LiveBackend:
             },
             "state": {
                 "mission": mission,
-                "machine": snap.get("safe_mode") or ("estop" if job_state == "estop" else "run"),
+                "machine": (
+                    "estop"
+                    if snap.get("hw_estop")
+                    else snap.get("safe_mode") or ("estop" if job_state == "estop" else "run")
+                ),
                 "job_state": job_state,
                 "phase": snap.get("phase"),
                 "phase_label": snap.get("phase_label"),

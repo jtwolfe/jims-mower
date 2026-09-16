@@ -363,28 +363,45 @@ Not a must-buy list. If the SKU is uncertain, it says so.
 ## 10. Wiring / fuse / ESTOP sketch
 
 Software ESTOP (ICD `SafeState`) **zeros commands**. Hardware ESTOP must
-still drop power if Python is wedged.
+still drop power if Python is wedged. Full paddle → FET / reset write-up:
+[`ESTOP.md`](ESTOP.md).
 
 ```
    PACK+ ── PACK FUSE (e.g. 40 A) ──┬── DC/DC 24→19/5 V ── Orin FUSE (5 A) ── Orin
+                                    │
+                    ESTOP paddle (NC) ── cuts FET enables AND/OR a contactor
+                    on PACK+ after the pack fuse (Orin feed stays up).
+                                    │
                                     ├── HUB L FUSE (15 A) ── FET/driver ── left hub
                                     ├── HUB R FUSE (15 A) ── FET/driver ── right hub
    PACK− ───────────────────────────┴── TRIM FUSE (15 A) ── FET ── trimmer
-                                              ▲
-   ESTOP paddle (NC) ── cuts FET enables AND/OR a contactor on PACK+
-   after the pack fuse. Python GPIO may monitor, must not be the only path.
+
+   Python GPIO may monitor the paddle. It must not be the only path.
+   Gym model: HardwareEstop is the last rail filter in MowerEnv.step.
 
    I2C: IMU 0x68 class, ToF 0x29 class (docs only — probe the real parts)
    UART: GNSS
    CSI: stereo pair + side/rear mono (4–6) → carrier
 ```
 
+| Fuse | Class | Opens when paddle is hit? |
+| --- | --- | --- |
+| Pack 40 A | whole PACK+ | no (upstream of the contactor) |
+| Orin 5 A | compute / cameras | **no** — hotel stays up |
+| Hub L / R 15 A | drive FETs | rail **downstream** goes dead |
+| Trimmer 15 A | spindle FET | rail **downstream** goes dead |
+
 Amp numbers are **class-scale** from §3–5 (24 V, 60 W drive ≈ 2.5 A
 cruise, stall much higher; 180 W trimmer ≈ 7.5 A). **Resize fuses after
 you measure stall current.** Mark every fuse on the lid.
 
 Living interlock and watchdog zero the **command**. ESTOP paddle zeros
-the **rail**.
+the **rail**. Software Start does not restore a latched paddle — see
+[`ESTOP.md`](ESTOP.md) reset procedure.
+
+**Sim status (this PR):** `HardwareEstop` + owner `hw_estop` / `hw_reset`
++ self-test `hw_estop_rails`. **Field status:** paddle + dummy-load
+spin still required. Do not claim the physical acceptance line.
 
 ---
 
@@ -410,6 +427,8 @@ in this document and retune **software** trips.
 - Motor SKUs, camera modules, pack brand: **not picked**.
 - RF range, TRT FPS, detector mAP: **out of scope** (and forbidden as
   invented numbers).
-- Next *physical* work: PRODUCT_TO_HARDWARE build-order §3 (hardware
-  ESTOP), then capture, then stereo calibration. Gym CV terrain
-  (stereo + seg stub + frozen elev) is software build-order §2.
+- Next *physical* work: wire the real NC paddle + contactor (build-order
+  §3 field line), then capture, then stereo calibration. Gym **sim
+  model + doc** for hardware ESTOP is done; the bench paddle test is
+  not. Gym CV terrain (stereo + seg stub + frozen elev) is software
+  build-order §2.

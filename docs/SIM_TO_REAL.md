@@ -21,7 +21,9 @@ The on-box loop **must not** import `jims_mower.renderer` or call
 | `trimmer_enabled` | Interlock | After living-thing radius |
 
 `info` extras (`terrain_advice`, `living_advice`, `geofence_advice`,
-`budget_advice`, `watchdog_*`) are controller-facing, not space keys.
+`budget_advice`, `watchdog_*`, `hw_estop`) are controller-facing, not
+space keys. Hardware ESTOP is a rail filter under the command, not an
+obs key.
 
 ## What stays on the laptop
 
@@ -34,7 +36,9 @@ The on-box loop **must not** import `jims_mower.renderer` or call
 1. `FakeCsiDriver` / `FakeGstAdapter` → `GstNvmmAdapter` (when GStreamer exists)
 2. `MockDetector` → your head (`TrtDetector` is a load-weights hook)
 3. `HeuristicTerrainObserver` → your head (`TrtTerrainObserver` same)
-4. Keep `SensorWatchdog` in front of wheel commands
+4. Keep `SensorWatchdog` in front of wheel commands; enable it on the
+   bench (`runtime.watchdog.enabled` / `configs/orin/bench.yaml`)
+4b. Keep `HardwareEstop` as the last rail filter (paddle / `hw_reset`)
 5. Load [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
    (forward 6–12 cm pair + side/rear mono). The look-around file
    [`extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml) is

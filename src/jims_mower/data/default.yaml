@@ -157,8 +157,13 @@ mission:
   max_return_steps: 500
   snapshot_stride: 25
 
+# Bench watchdog: set runtime.watchdog.enabled true (configs/orin/bench.yaml).
 runtime:
   enabled: false
+  watchdog:
+    enabled: false
+    imu_stall_s: 0.40
+    vision_stall_s: 0.40
   battery:
     capacity_wh: 50.0
     soc: 1.0

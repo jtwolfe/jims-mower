@@ -1,0 +1,24 @@
+# Bench-loop overlay. Fake CSI / IMU adapters are still fine.
+# Does **not** claim a real camera or IMU driver.
+#
+# Enable the sensor watchdog so frozen IMU or camera stamps zero wheels
+# within the stall windows. Merge onto a yard config, or load as:
+#
+#   from jims_mower.config import load_config, overlay_config
+#   cfg = overlay_config(load_config("acre_yard"), {
+#       "runtime": {"watchdog": {"enabled": True, "imu_stall_s": 0.40, "vision_stall_s": 0.40}},
+#   })
+#   # or load this file as a standalone gym config (defaults + watchdog on):
+#   cfg = load_config("configs/orin/bench.yaml")
+#
+# Hardware ESTOP paddle is always modeled in the gym (`HardwareEstop`).
+# Hit it with env.hit_hw_estop() / live `hw_estop`. Software Start does
+# not restore rails — call env.reset_hw_estop() / live `hw_reset`.
+# Field paddle test is still required; this file is sim + bench config.
+
+runtime:
+  enabled: true
+  watchdog:
+    enabled: true
+    imu_stall_s: 0.40
+    vision_stall_s: 0.40
