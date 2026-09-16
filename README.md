@@ -124,9 +124,13 @@ jims-mower-owner --live
 jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
 ```
 
-Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md).
+Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md),
+[`docs/SCHEDULE.md`](docs/SCHEDULE.md), [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md),
+[`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md).
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
+Health `#/health` enable toggle arms the weekly window (SOC / rain / fault
+gates). ROADMAP checkboxes are not production CV.
 
 ```python
 import gymnasium as gym
@@ -167,17 +171,21 @@ These are **class recommendations**, not a shopping cart with fake benchmarks.
 | Compute | Jetson Orin Nano 8 GB, JetPack 6 | Fits the camera + IMU fusion stubs; do not put a desktop OpenCV GUI on-box |
 | IMU | BMI088 or ICM-42688-P class 6-axis (I2C/SPI) | Tip-over and pitch/roll; gyro for yaw rate. Optional LIS3MDL magnetometer later |
 | GNSS | u-blox M10 / NEO-M9N class UART module | Yard-scale absolute XY. RTK is optional later, not required for the gym contract |
-| RGB cameras | Existing 4–6 CSI/USB; front pair pitched ~20° down | Drain lips live in the lower third of the image |
+| RGB cameras | 4–6 CSI/USB; **calibrated forward stereo ~6–12 cm** + side/rear mono; pitch ~20° down | Metric near-field depth + lips in the lower third. Gym look-arounds are not a stereo pair. |
 | Close-range height | 4× VL53L1X (or similar) ToF under the chassis, or a cheap downward stereo pair | Wheel-drop / swale lip. The gym `tof` obs is this stub |
 | Mounting | IMU near the geometric center, GNSS on the roof with sky view | Keep camera-IMU extrinsics in YAML once you measure them |
 
-**Do not** drop a full VIO/SLAM stack into this repo. On the robot, run your
-own fusion behind `TerrainObserver` (and a real `Detector`). The gym ships
+**Do not** drop a full VIO/SLAM / COLMAP stack into the live mow loop.
+Grass is low-texture; vibration kills naive VO. On the robot, run fusion
+behind `TerrainObserver` (and a real `Detector`): near-field **stereo**
+for metric elev, a terrain **seg head** for drain/lip/bank/grass, wheel
+odom + IMU tilt (later RTK) for scale/slope. The gym ships
 `HeuristicTerrainObserver` (RGB colour + ground-plane back-projection + ToF
 + IMU; demo default), `LearnedTerrainObserver` (exporter-trained numpy
-colour+position stub), `OracleTerrainObserver` for training, and
-`BlindTerrainObserver` as the empty swap-in for a real segmentation / depth
-net. There are no claimed mAP / FPS numbers here.
+colour+position stub), synthetic stereo in `perception/stereo.py` when the
+rig is a true pair, `OracleTerrainObserver` for training, and
+`BlindTerrainObserver` as the empty swap-in. There are no claimed mAP /
+FPS numbers here.
 
 ## Terrain and recommended behaviour
 
@@ -476,7 +484,7 @@ IMU + GNSS    ─┘         ▼
 | Gym piece | On the Orin, replace with |
 | --- | --- |
 | `classify_terrain_rgb` (brown / olive palette) | A segmentation head (drain / lip / bank / grass). TensorRT INT8 is the usual path. Do **not** ship the palette heuristic as the production detector. |
-| `ground_hits` flat-plane back-projection | Camera extrinsics in YAML + a depth net, stereo, or ToF cloud. Same output: world XY cells to stamp. |
+| `ground_hits` flat-plane back-projection | Calibrated stereo (6–12 cm) or ToF cloud for metric Z; learned mono depth only as a prior. Same output: world XY cells to stamp. Not live COLMAP. |
 | `stamp_tof_corners` | Real VL53L1X (or similar) ranges at the wheel corners. Same hook. |
 | IMU slope disk | Keep; fuse with `EkfPoseFilter` (or the complementary stub). |
 | `OracleTerrainObserver` | Training / eval only. Never run on-box. |
@@ -634,7 +642,7 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo + stronger yard grade
 configs/scenarios/            WAVE 1A/1C/2A yards (suburban, gradient_yard, …)
-docs/                         WAVE notes + UX.md / UX_B.md + JETSON + runtime contract
+docs/                         WAVE notes + UX + schedule + product→hardware + JETSON
 docker/Dockerfile.aarch64     Orin / aarch64 packaging notes (not CI)
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/runtime/       fake drivers, bridge, budget, TRT placeholder

@@ -1,9 +1,11 @@
 """Persistent BEV occupancy, height-map fusion stub, loop-closure stub.
 
-None of this is a SLAM stack. Occupancy is detections + downward ToF, not
-the god-view obstacle list. Height fusion back-projects RGB terrain labels
-onto the ground plane and stamps ToF wheel corners. Loop closure only
-compares a coarse occupancy fingerprint to earlier cells.
+None of this is a SLAM / COLMAP stack. Occupancy is detections + downward
+ToF, not the god-view obstacle list. ``fuse_height_rgb_tof`` back-projects
+RGB terrain labels onto the ground plane and stamps ToF wheel corners —
+not the live metric path. Near-field stereo lives in
+``perception.stereo`` and stamps ``ObservedMap`` directly. Loop closure
+only compares a coarse occupancy fingerprint to earlier cells.
 """
 
 from __future__ import annotations

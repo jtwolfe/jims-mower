@@ -163,6 +163,17 @@ APP_COMMANDS = ("start", "stop", "return", "estop", "teach")
 APP_MISSIONS = ("idle", "mowing", "returning", "teach", "estop")
 RADIO_LINKS = ("bluetooth", "wifi", "lora")
 SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+SCHEDULE_SCHEMA = "jims_mower.schedule.v1"
+SCHEDULE_SKIP_REASONS = (
+    "disabled",
+    "no_days",
+    "soc_low",
+    "rain",
+    "fault",
+    "estop",
+    "already_running",
+    "duration",
+)
 CURRICULUM_SCHEMA = "jims_mower.curriculum.v1"
 SEQUENCE_SCHEMA = "jims_mower.sequence.v1"
 OVERLAY_SCHEMA = "jims_mower.overlay.v1"

@@ -12,7 +12,7 @@ that surface. The coverage planner does **not** see it.
 
 | Layer | What the robot is allowed to use |
 | --- | --- |
-| `elevation` / `slope` / `hazard` | RGB + ToF + **local** IMU / pose. No god-view DEM. |
+| `elevation` / `slope` / `hazard` | RGB + ToF + **local** IMU / pose. Optional gym stereo stamp if the rig is a true 6–12 cm pair. No god-view DEM. Not COLMAP. |
 | `elevation_prior` | Slow plane from pose `z` + a short XY fit, with IMU pitch/roll as a *weak* attitude prior. Costmap floor only. |
 | `structure` | Authored path / building / bunker / garden plus a colour stub. |
 
@@ -32,9 +32,13 @@ from instantaneous chassis tip.
    the chassis. Use it for tip risk (`imu_advice`). It is **not** a
    license to re-orient the mapped sheet — globally *or* as a local
    flop of the bright growing patch.
-4. **Already-observed heights stay put.** First stamp locks the cell.
-   Old cells must not leap when the robot tips on a ridge. The growing
-   edge must not reshape from a new attitude either.
+4. **Already-observed heights stay put.** First stamp sets
+   `elevation_set`. Old cells must not leap when the robot tips on a
+   ridge. The growing edge must not reshape from a new attitude either.
+5. **Near-field stereo** (true 6–12 cm pair, or gym synthetic stereo)
+   may overwrite unlocked cells with metric local elev in the 0.8–4 m
+   band. MAP READY `lock_observed()` then freezes the mow map. Not
+   COLMAP. Default gym look-arounds are not a pair.
 
 `elevation_prior` may still be a yard-scale raster so the costmap can
 floor a flattened CV slope. The **owner / control** mesh is
@@ -78,6 +82,12 @@ obvious. The broad surface could still look planar when orbited.
    elev** for the error overlay.
 
 Oracle maps still copy the height field (training / eval only).
+
+A true forward stereo pair (see `configs/orin/extrinsics_stereo.yaml`)
+can stamp metric local elev onto observed, **unlocked** cells. MAP READY
+locks those cells so the frozen mow map does not jitter. Default gym
+look-arounds are not a pair. Learned monocular depth is a future prior,
+not the live metric source.
 
 ## Paths and human structures
 

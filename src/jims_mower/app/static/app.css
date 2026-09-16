@@ -313,3 +313,26 @@ input[type="text"] {
   border-radius: 12px;
   padding: 10px 12px;
 }
+
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.toggle-row strong { margin-bottom: 0; }
+.toggle {
+  min-width: 64px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #2a2e2a;
+  color: #c8c8c8;
+}
+.toggle.on {
+  background: var(--green);
+  color: #06210c;
+}

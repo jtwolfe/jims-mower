@@ -1,7 +1,8 @@
 """Owner-app helpers on top of the UX-A ``YardProfile`` (`jims_mower.yard.v1`).
 
-Radio prefs and the schedule stub live on the same document. Do not invent
-a second schema or a second mesh stack.
+Radio prefs and the weekly schedule live on the same document. The
+schedule fields are evaluated by ``jims_mower.schedule.ScheduleEngine``.
+Do not invent a second schema or a second mesh stack.
 """
 
 from __future__ import annotations

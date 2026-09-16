@@ -54,6 +54,12 @@ from jims_mower.planning.coverage import (
 from jims_mower.planning.explore import ExplorePlan, explore_costmap, plan_explore
 from jims_mower.planning.fusion import make_pose_filter
 from jims_mower.planning.observed import ObservedMap, downsample_frontiers, frontiers
+from jims_mower.perception.stereo import (
+    find_stereo_pair,
+    height_sampler_from_raster,
+    rasterize_points,
+    synthetic_stereo_points,
+)
 from jims_mower.profile import YardProfile, keep_in_usable, trail_to_polygon
 from jims_mower.runtime.budget import budget_advice
 from jims_mower.safe_state import SafeStateMachine, estop_requested
@@ -470,8 +476,59 @@ class MissionPolicy:
             pose=pose,
             grade_radius_m=max(float(self.settings.stamp_radius_m) * 1.6, 2.2),
         )
+        self._stamp_stereo(obs, info, pose)
         if self.keep_in_mask is None or self.keep_in_mask.shape != self.observed.observed.shape:
             self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
+
+    def _stamp_stereo(self, obs: dict[str, Any], info: dict[str, Any], pose: Pose) -> None:
+        """Near-field metric elev from a true stereo pair. No-op on look-arounds.
+
+        Default gym ``front_left`` / ``front_right`` (40° yaw, ~40 cm) are
+        not a pair. ``configs/orin/extrinsics_stereo.yaml`` is. Gym uses
+        ideal disparity from the observer height raster — not a matcher,
+        not COLMAP, ``fps_claim`` / ``map_claim`` stay null.
+        """
+        if self.observed is None:
+            return
+        pair = find_stereo_pair(self.cfg.resolved_cameras())
+        if pair is None:
+            return
+        elev = obs.get("elevation")
+        if elev is None:
+            return
+        ev = np.asarray(elev, dtype=np.float32)
+        if ev.shape != self.observed.elevation.shape:
+            return
+        images = obs.get("cameras") or {}
+        width = int(self.cfg.sensors.width)
+        height = int(self.cfg.sensors.height)
+        if images:
+            sample = next(iter(images.values()), None)
+            if sample is not None and getattr(sample, "ndim", 0) >= 2:
+                height = int(sample.shape[0])
+                width = int(sample.shape[1])
+        xs, ys, zs = synthetic_stereo_points(
+            pose,
+            pair,
+            width=width,
+            height=height,
+            height_at=height_sampler_from_raster(ev, resolution_m=self.observed.resolution_m),
+            pixel_stride=3 if height > 40 else 2,
+        )
+        raster, hits = rasterize_points(
+            xs,
+            ys,
+            zs,
+            shape=self.observed.elevation.shape,
+            resolution_m=self.observed.resolution_m,
+            width_m=self.observed.width_m,
+            height_m=self.observed.height_m,
+        )
+        written = self.observed.stamp_metric_elevation(raster, hits, respect_lock=True)
+        blob = pair.as_info()
+        blob["cells_written"] = int(written)
+        blob["n_points"] = int(xs.size)
+        info["stereo"] = blob
 
     def _sense_advice(
         self,
@@ -855,6 +912,7 @@ class MissionPolicy:
             trail=trail,
         )
         snap = self.observed.copy()
+        self.observed.lock_observed()
         return YardSnapshot(
             profile=profile,
             observed=snap.observed,
