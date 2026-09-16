@@ -1,5 +1,8 @@
-# Example real-rig extrinsics for a 4–6 camera Orin install.
-# Same CameraSpec fields the gym already uses (body frame: x forward, y left, z up).
+# Gym look-around example for a 4–6 camera Orin install.
+# front_left / front_right are ±40° at ~40 cm — NOT a stereo pair.
+# For metric near-field depth use configs/orin/extrinsics_stereo.yaml
+# (6–12 cm baseline, shared yaw/pitch) + side/rear mono.
+# Same CameraSpec fields (body frame: x forward, y left, z up).
 # Copy, measure, and replace the numbers. This is not a calibrated field file.
 
 sensors:

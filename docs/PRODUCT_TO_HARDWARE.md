@@ -27,7 +27,7 @@ image.
 | Piece | What is actually true | Where |
 | --- | --- | --- |
 | Live fog map | Unknown cells stay dark; observed terrain grows as the robot looks | `ObservedMap`, `jims-mower-live`, `#/map` |
-| Observed elevation freeze | Explore stamps a local elev estimate; mow plans on the frozen observed map, not god-view | `docs/MISSION_FLOW.md`, `docs/TERRAIN_MAPS.md` |
+| Observed elevation freeze | Explore stamps a local elev estimate (observer + optional gym stereo); MAP READY locks cells so they do not flop; mow plans on the frozen map, not god-view | `docs/MISSION_FLOW.md`, `docs/TERRAIN_MAPS.md`, `perception/stereo.py` |
 | teach → explore → mow → home → done on phone | Pair stub → teach keep-in → Start → MAP READY → mow → return → idle; cut % rises | `jims-mower-owner --live`, `acre_yard_demo` |
 | Acre world | `acre_yard` / `acre_yard_demo` ~70×58 m @ 0.50 m; physics grade / drains / banks | `configs/scenarios/acre_yard*.yaml` |
 | Faults / SOS UX | Immobilised (dead motor, retrieve) vs stuck (reverse / pivot / help); software ESTOP | `FaultBus`, `#/fault` |
@@ -58,9 +58,47 @@ Status key:
 Do **not** treat exporter-oracle labels or `MockDetector` confidence as
 mAP. `fps_claim` / `map_claim` are `null` on purpose.
 
+#### Photogrammetry — robot-shaped, not drone SfM
+
+This is a **~0.5 m** multi-cam zero-turn, not a nadir survey drone.
+Do **not** plan classic offline COLMAP-style full-yard SfM as the live
+control map. Grass is low-texture / repetitive; mower vibration kills
+naive VO; monocular SfM has no metric scale or slope without IMU / GPS /
+GCPs.
+
+Recommended stack (photogrammetry *ideas*, robot-shaped):
+
+1. **Near-field metric depth (primary for tip / obstacle).** Fixed
+   forward **stereo pair** (or wide-baseline temporal stereo from one
+   forward cam across a known wheel baseline) → dense disparity → local
+   height / occupancy in the **0.8–4 m** band. Depth resolution worsens
+   with range (\(\delta Z \approx (Z^2 / fB)\,\delta d\)) — plan cell
+   size from that, not a published score. Gym path: ideal disparity
+   from known ray range (`perception/stereo.py`). That is **not** a
+   matcher.
+2. **Multi-view / SfM concepts (secondary, sparse).** Track features
+   across the 4–6 cam rig + over time for **pose assist** and sparse 3D
+   landmarks — not a dense DEM each frame. Fuse with wheel odom + IMU
+   tilt (later RTK). RTK-VIO papers exist specifically because lawn
+   mowers drift on repetitive texture.
+3. **Semantic photogrammetry.** Terrain **seg head** (drain / lip /
+   bank / grass) on RGB is still required. Geometry alone will not
+   label sand / pond / path.
+4. **Offline survey mode (optional, later).** When docked / idle, a
+   heavier multi-view densify can refine the owner mesh (true
+   photogrammetry). It must **never** block the live mow loop.
+5. **Learned monocular depth** (Orin-deployable nets) only as a
+   **prior** fused with stereo / ToF — never the sole metric source.
+
+Default gym `front_left` / `front_right` (40° yaw, ~40 cm) are
+look-arounds, **not** a stereo pair. Field preference: calibrated
+forward baseline **~6–12 cm** on a 50 cm body + side / rear mono. See
+[`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
+and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
+
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| CV-1 | Terrain segmentation (drain / lip / bank / grass) | **stub** | Heuristic RGB + `LearnedTerrainObserver` numpy MLP trained on *sim oracle* rasters. Palette will not survive daylight grass. Wrong lip → wheel in channel. | Held-out **real** frames; report IoU per class only after a locked test set. Fail if you only have sim loss. No invented IoU. | CV-8 dataset, RT-1 capture, HD-cam extrinsics |
+| CV-1 | Terrain segmentation (drain / lip / bank / grass) | **stub** | Heuristic RGB + `LearnedTerrainObserver` numpy MLP trained on *sim oracle* rasters. Palette will not survive daylight grass. Wrong lip → wheel in channel. Geometry (stereo) will not name sand / pond / path. | Held-out **real** frames; report IoU per class only after a locked test set. Fail if you only have sim loss. No invented IoU. Sim path already: exporter → numpy stub (`tests/test_learn.py`). | CV-8 dataset, RT-1 capture, HD-cam extrinsics |
 | CV-2 | Grass coverage observer | **stub** | `ColorGrassObserver` matches synthetic green; `FeatureGrassObserver` is a 6-stat mix. Cut % on the phone today is the *gym grass grid*, not this net. | On-box coverage drift vs painted/measured strips on one lawn, same day. | CV-1, MAP-1 |
 | CV-3 | Person / animal / obstacle detect | **stub** | `MockDetector` **projects** `context.obstacles` (sim-only). Appearance refine is crop-palette stats. `BlindDetector` returns `[]`. | Precision/recall on a recorded real walk-through with a person + dog + chair. Publish the set size. No fake mAP. | CV-8, RT-1 |
 | CV-4 | Tracking / tracklets | **stub** | Temporal association on projected blobs (`info["tracklets"]`). Not MOT. | ID-switch count on a 30 s real clip with one crossing. | CV-3 |
@@ -74,8 +112,11 @@ mAP. `fps_claim` / `map_claim` are `null` on purpose.
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | MAP-1 | ObservedMap | **partial** | Works in sim: unknown ≠ safe; camera hits + body/ToF disk. Stamps **observer** rasters, so garbage in → garbage map. | After a real explore, fog holes match what the cameras saw; no authored shed leaked outside the mask. | CV-1, RT-1, RT-2 |
-| MAP-2 | Local elev fusion (cameras + ToF + IMU tilt) | **stub** | `fuse_height_rgb_tof` back-projects RGB drain/bank labels onto a plane + ToF corners. Not a depth net or stereo. | Cross-section of a known kerb: fused step within a stated cm budget vs tape + IMU. | RT-2, HD-ext |
+| MAP-2 | Near-field metric stereo + frozen elev fuse | **partial** (this PR) | `find_stereo_pair` + gym synthetic stereo stamps local elev in the 0.8–4 m band onto `ObservedMap`. MAP READY `lock_observed()` so later stamps do not flop frozen cells. Default gym look-around rig is a **no-op** (not a pair). `fuse_height_rgb_tof` is still the old RGB-label + ToF-corner stub — not the live metric path. Not COLMAP. | Gym: stereo YAML stamps cells; lock holds after a flopping observer raster (`tests/test_stereo.py`). Field: kerb cross-section vs tape + IMU; no invented mAP / FPS. | CV-1, HD-cam stereo, RT-2 |
+| MAP-2b | Learned mono depth prior | **missing** | Orin-class depth net only as a prior fused with stereo / ToF. Never the sole metric source. | Ablation: stereo-only vs stereo+prior on one kerb; prior must not win when stereo is valid. | MAP-2, RT-3 |
 | MAP-3 | Loop closure / revisit | **stub** | `LoopClosureStub` occupancy fingerprint. `not_slam: true`. No pose-graph. | Return to dock after 1 acre explore; fence vertices stay inside a stated metre error vs teach. | RT-2 GNSS/IMU, MAP-1 |
+| MAP-3b | Sparse multi-view / pose assist | **missing** | Track features across the 4–6 cam rig + time; landmarks + wheel odom + IMU tilt (later RTK). Not a dense DEM each frame. | Drift vs teach vertices after a repetitive-grass loop; RTK-VIO later. | MAP-3, RT-2 |
+| MAP-3c | Offline docked densify | **missing** | Heavier multi-view pass while idle. True photogrammetry for the owner mesh only. Must not block the live mow loop. | Docked job writes a refined mesh; mow loop FPS / cycle time unchanged (measure later; do not invent). | MAP-2, RT-7 |
 | MAP-4 | Multi-session persistence | **partial** | `jims-mower-mission` saves map + uncut + pose for the **same sim process**. No day-2 load on a cold Orin with GNSS origin. | Power cycle, reload yesterday's yard, resume uncut without reteaching. | MAP-3, MAP-5 |
 | MAP-5 | Geofence on Earth | **partial** | Taught polygon in the gym metre frame. GNSS is a noisy `(x,y,z,valid)` in that frame, not WGS84. | Keep-in vertices + a surveyed origin; robot stops before the tape, not 3 m past. | RT-2 GNSS, UX teach |
 
@@ -103,7 +144,7 @@ mAP. `fps_claim` / `map_claim` are `null` on purpose.
 
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| RT-1 | CSI / GStreamer capture | **stub** | `GstNvmmAdapter` raises without Gst; CI uses `FakeGstAdapter` / `FakeCsiDriver`. | Six named cameras fill `obs["cameras"]` at the ICD size; `SensorWatchdog` sees fresh stamps. | HD-cam, JetPack |
+| RT-1 | CSI / GStreamer capture | **stub** | `GstNvmmAdapter` raises without Gst; CI uses `FakeGstAdapter` / `FakeCsiDriver`. | Named cameras (stereo pair + mono, or 4–6 look-around) fill `obs["cameras"]` at the ICD size; `SensorWatchdog` sees fresh stamps. | HD-cam, JetPack |
 | RT-2 | IMU / GNSS / ToF drivers | **stub** | Fake I2C/UART publishers copy **gym** vectors onto in-process queues. Addresses in `drivers.py` are documentation. | Same ICD keys from real BMI/ICM + GNSS + VL53-class parts; dropout sets `gps[3]=0`. | HD-place |
 | RT-3 | TensorRT load | **stub** | See CV-6. | Engine deserializes; fallback still mock if path missing (keep that). | CV-6 |
 | RT-4 | Watchdog | **partial** | Zeros wheels if IMU/vision stall (`runtime.watchdog.enabled`, off in gym tests). | Unplug a camera; wheels stop within `vision_stall_s`. | RT-1, RT-2 |
@@ -136,7 +177,7 @@ mAP. `fps_claim` / `map_claim` are `null` on purpose.
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | S2R-1 | ICD key match | **partial** | Contract is written. On-box sources are still fakes. | Laptop gym and Orin process the same key set; renderer never imported on-box. | RT-1…RT-3 |
-| S2R-2 | Extrinsics YAML | **partial** | `configs/orin/extrinsics_6cam.yaml` is an **example**, not a calibrated file. | Reproject a checkerboard / drain lip to the observed map within a stated pixel/metre error. | HD-cam |
+| S2R-2 | Extrinsics YAML | **partial** | `extrinsics_6cam.yaml` is the gym look-around **example**. Prefer `extrinsics_stereo.yaml` (6–12 cm forward pair + mono) for the field article. Neither is calibrated. | Reproject a checkerboard / drain lip; stereo pair verifies baseline + disparity vs tape. | HD-cam |
 | S2R-3 | Calibration bench | **missing** | No procedure beyond “copy, measure, replace the numbers.” | Written steps + a fixture; saved YAML committed as *measured*. | S2R-2 |
 | S2R-4 | Wheel / trimmer scale | **partial** | Action is ±1 of `max_wheel_speed_mps` (1.2). Real motors have different Kv / gearing. | 1.0 command → measured m/s within a stated %. | HD-drive |
 
@@ -155,81 +196,101 @@ Stop when only **fab + field test** remain.
 
 1. **Schedule engine (this PR).** Owner can leave a weekly window armed
    in sim / app. Justification: it was the only owner-loop item that was
-   *fields only*; CV first would be another incomplete head.  
+   *fields only*; CV first would have been another incomplete head.  
    *Test:* `pytest tests/test_schedule.py tests/test_app_api.py`.  
    *Revise:* timezone on the Orin, rain from a real sensor later (SCH-3/4).
 
-2. **Hardware ESTOP + power kill (RT-6, HD-wire).** Paddle drops traction
+2. **CV terrain = stereo + seg + frozen elev fuse (this PR).** Gym
+   slice only. Synthetic stereo (or a real pair later) stamps metric
+   local elev into `ObservedMap`; MAP READY locks those cells so they
+   do not flop. Terrain seg remains the exporter → numpy stub path
+   (real train hook, not a published head). **Not** live COLMAP.  
+   *Test:* `pytest tests/test_stereo.py tests/test_learn.py tests/test_cv_terrain.py`.  
+   *Honesty:* no claimed mAP / IoU / FPS.  
+   *Revise:* real matcher + calibrated baseline on the rig (row 7+).
+
+3. **Hardware ESTOP + power kill (RT-6, HD-wire).** Paddle drops traction
    and trimmer rails without Python.  
    *Test:* paddle while a dummy load spins.  
    *Revise:* fuse map vs what actually opened.
 
-3. **Watchdog enabled on the bench loop (RT-4).**  
+4. **Watchdog enabled on the bench loop (RT-4).**  
    *Test:* freeze IMU or camera stamps → wheels zero.
 
-4. **Real CSI / GStreamer → `obs["cameras"]` (RT-1).** Same names as
-   `CameraSpec`. Downsample to the contract size.  
-   *Test:* six (or four) live frames; watchdog happy. No FPS claim.
+5. **Real CSI / GStreamer → `obs["cameras"]` (RT-1).** Same names as
+   `CameraSpec` (prefer stereo_left / stereo_right + mono). Downsample
+   to the contract size.  
+   *Test:* named live frames; watchdog happy. No FPS claim.
 
-5. **Real IMU + GNSS + ToF (RT-2).**  
+6. **Real IMU + GNSS + ToF (RT-2).**  
    *Test:* level rest IMU ≈ `(0,0,9.81,0,0,0)`; GNSS `valid` bit; ToF
    corners change when you slide a board under a wheel.
 
-6. **Extrinsics + calibration bench (S2R-2, S2R-3).** Measure, write YAML.  
-   *Test:* lip / checkerboard lands in the right ObservedMap cells.
+7. **Extrinsics + stereo calibration bench (S2R-2, S2R-3).** Measure
+   the 6–12 cm baseline, write YAML.  
+   *Test:* lip / checkerboard lands in the right ObservedMap cells;
+   disparity vs tape in the 0.8–4 m band.
 
-7. **Dataset harness on the rig (CV-8).** Record + label protocol only.
+8. **Dataset harness on the rig (CV-8).** Record + label protocol only.
    No trained production head yet.  
    *Test:* `jims_mower.dataset.v1` from **real** cameras; train stub may
    still run; do not publish mAP.
 
-8. **Terrain seg train → ONNX → TRT (CV-1, CV-6).** Replace heuristic /
+9. **Terrain seg train → ONNX → TRT (CV-1, CV-6).** Replace heuristic /
    numpy stub.  
    *Test:* held-out **real** IoU. If you cannot measure it, do not ship
    the head.
 
-9. **Detector + tracker (CV-3, CV-4).** Replace `MockDetector`.  
-   *Test:* recorded walk-through; living interlock (PLN-4) on those dets.
+10. **Detector + tracker (CV-3, CV-4).** Replace `MockDetector`.  
+    *Test:* recorded walk-through; living interlock (PLN-4) on those dets.
 
-10. **Grass coverage observer (CV-2)** once terrain classes exist.
+11. **Grass coverage observer (CV-2)** once terrain classes exist.
 
-11. **Local elev fusion (MAP-2)** with real ToF + IMU + cameras.
+12. **Field stereo matcher + ToF / IMU fuse (MAP-2 on hardware).**
+    Replace gym ideal disparity. Learned mono depth only as a prior
+    (MAP-2b).  
+    *Test:* kerb step vs tape; locked cells still do not flop.
 
-12. **Loop-closure / revisit good enough to hold the taught fence
-    (MAP-3).** Still not “we shipped SLAM.”
+13. **Sparse pose assist / loop-closure good enough to hold the taught
+    fence (MAP-3, MAP-3b).** Still not “we shipped SLAM.” Offline
+    docked densify (MAP-3c) stays optional and off the live loop.
 
-13. **Geofence in a surveyed frame (MAP-5)** + multi-session load (MAP-4).
+14. **Geofence in a surveyed frame (MAP-5)** + multi-session load (MAP-4).
 
-14. **Re-test explore + coverage + tip recovery + resume (PLN-1…5)** on
+15. **Re-test explore + coverage + tip recovery + resume (PLN-1…5)** on
     the real maps. Retune gym constants; do not “fix” physics.
 
-15. **Self-test on hardware, incident black box, immobilised vs stuck
+16. **Self-test on hardware, incident black box, immobilised vs stuck
     (SAF-1…3).** OTA stays missing or an honest stub (SAF-4).
 
-16. **Owner notifications + multi-yard (UX-2, UX-3)** after the robot
+17. **Owner notifications + multi-yard (UX-2, UX-3)** after the robot
     can finish a job without a laptop SSE tab.
 
-17. **Measure thermal / pack (RT-5, HD-batt).** Replace the 50 Wh stub
+18. **Measure thermal / pack (RT-5, HD-batt).** Replace the 50 Wh stub
     with a measured Wh and charge time. **No claimed acre runtime** until
     this row.
 
-18. **Fab the chassis per [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md)**
+19. **Fab the chassis per [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md)**
     (or revise the math from measured mass / CG).
 
-19. **Field test** on a taught residential acre: ESTOP, living interlock,
+20. **Field test** on a taught residential acre: ESTOP, living interlock,
     rain/SOC skip, return-to-home. Scorecard is tips / drain entries /
     leftover uncut — not mAP.
 
-After row 19 the remaining work is **fab revisions + more field tests**,
+After row 20 the remaining work is **fab revisions + more field tests**,
 not another WAVE of gym stubs.
 
 ---
 
 ## What this PR ships
 
-- This checklist.
+- This checklist (photogrammetry stack folded into CV / mapping).
 - [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) — construction math, BOM
-  *classes*, wiring sketch. No claimed field runtime.
-- **One** executable slice: the schedule engine (build-order §1).
-  Phone Health next-run + enable toggle. Tests in
-  `tests/test_schedule.py`.
+  *classes*, wiring sketch, **forward stereo + mono** camera layout.
+  No claimed field runtime.
+- Build-order **§1**: schedule engine. Phone Health next-run + enable
+  toggle. Tests in `tests/test_schedule.py`.
+- Build-order **§2** (gym slice): synthetic stereo stamps metric local
+  elev; `lock_observed` freezes MAP READY cells; exporter → terrain
+  seg stub is the real train path. Tests in `tests/test_stereo.py`
+  and `tests/test_learn.py`. No claimed mAP / FPS. Not live COLMAP.

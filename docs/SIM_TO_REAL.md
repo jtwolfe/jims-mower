@@ -13,7 +13,7 @@ The on-box loop **must not** import `jims_mower.renderer` or call
 | `gps` | UART GNSS | `(x, y, z, valid)`; `valid=0` on dropout |
 | `tof` | I2C downward corners | FL, FR, RL, RR; unused stay 0 |
 | `occupancy` | Detector + ToF persist | **Not** a god-view occupancy |
-| `elevation` / `slope` / `hazard` / `confidence` | `TerrainObserver` | Heuristic / learned / TensorRT placeholder |
+| `elevation` / `slope` / `hazard` / `confidence` | `TerrainObserver` + optional stereo stamp | Heuristic / learned / TensorRT placeholder. Metric near-field elev from a true stereo pair (`perception/stereo.py`); default gym look-arounds skip it. Not COLMAP. |
 | `detections` | `Detector` | Padded `[label, cam, u, v, w, h, conf, signal]` |
 | `pose` | `EkfPoseFilter` / complementary | Planner start / attitude |
 | `coverage` | Your cut-map, or zeros | Gym writes the grass grid; on-box you own it |
@@ -35,8 +35,10 @@ The on-box loop **must not** import `jims_mower.renderer` or call
 2. `MockDetector` → your head (`TrtDetector` is a load-weights hook)
 3. `HeuristicTerrainObserver` → your head (`TrtTerrainObserver` same)
 4. Keep `SensorWatchdog` in front of wheel commands
-5. Load [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml)
-   (or a 4-cam subset) as `sensors.cameras`
+5. Load [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
+   (forward 6–12 cm pair + side/rear mono). The look-around file
+   [`extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml) is
+   the gym default and is **not** a stereo pair.
 
 See [`JETSON.md`](JETSON.md) and [`runtime_contract.md`](runtime_contract.md).
 No FPS / mAP numbers belong in that swap.

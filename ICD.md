@@ -26,7 +26,7 @@ the hub.
 
 | Key | Shape / type | Meaning |
 | --- | --- | --- |
-| `cameras` | dict name → `uint8 (H, W, 3)` | Pinhole RGB, body-frame rig |
+| `cameras` | dict name → `uint8 (H, W, 3)` | Pinhole RGB, body-frame rig. Field preference: `stereo_left` / `stereo_right` (6–12 cm, shared yaw/pitch) + side/rear mono. Default gym `front_left` / `front_right` are look-arounds, not a metric pair. |
 | `coverage` | `float32 (R, C)` | `1` cut grass, `0` uncut, `−1` non-grass |
 | `occupancy` | `float32 (R, C)` | Detection-rasterized, not god-view |
 | `detections` | `float32 (24, 8)` | Padded `[label, cam, u, v, w, h, conf, signal]` |

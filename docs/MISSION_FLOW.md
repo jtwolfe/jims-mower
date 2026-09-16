@@ -147,6 +147,12 @@ card from Teach → Save).
 * **Elevation** is fused from wheel/pose `z` and locked neighbours on
   first stamp in the neighborhood, then frozen. Already mapped cells
   do not leap, and the growing edge does not take a new IMU plane.
+* If the rig has a true 6–12 cm forward stereo pair, gym synthetic
+  stereo stamps metric local elev in the 0.8–4 m band onto unlocked
+  cells. Default look-around cams are not a pair (no-op). This is not
+  COLMAP.
+* MAP READY copies a `YardSnapshot` and `lock_observed()` on the live
+  map so later observer / stereo stamps do not flop frozen cells.
 * Authored/god-view structure in `obs["structure"]` is not a control
   input outside the observed mask.
 * Map-ready when `observed` fraction ≥ `mission.explore_complete`, or

@@ -6,6 +6,8 @@ a local sample (wheel-z + slow grade in a neighborhood), frozen after the
 first stamp — not a yard-wide plane hinged to chassis tilt. Authored /
 god-view structure leaked into ``obs["structure"]`` is ignored outside
 the observed mask.
+MAP READY calls ``lock_observed`` so later stereo / observer elev stamps
+cannot flop the frozen mow cells.
 """
 
 from __future__ import annotations
@@ -64,6 +66,7 @@ class ObservedMap:
     confidence: np.ndarray
     occupancy: np.ndarray
     elevation_set: np.ndarray
+    locked: np.ndarray
     width_m: float
     height_m: float
     resolution_m: float
@@ -92,6 +95,7 @@ class ObservedMap:
             confidence=np.zeros((rows, cols), dtype=np.float32),
             occupancy=np.zeros((rows, cols), dtype=np.float32),
             elevation_set=np.zeros((rows, cols), dtype=bool),
+            locked=np.zeros((rows, cols), dtype=bool),
             width_m=float(width_m),
             height_m=float(height_m),
             resolution_m=res,
@@ -235,6 +239,42 @@ class ObservedMap:
                 self.occupancy[mask] = np.maximum(self.occupancy[mask], ov[mask])
         self.refresh_free()
 
+    def lock_observed(self) -> int:
+        """Freeze currently observed elev/hazard cells (MAP READY).
+
+        Later stereo / observer stamps must not flop these cells.
+        """
+        self.locked |= np.asarray(self.observed, dtype=bool)
+        return int(self.locked.sum())
+
+    def stamp_metric_elevation(
+        self,
+        elev: np.ndarray,
+        hit_mask: Optional[np.ndarray] = None,
+        *,
+        respect_lock: bool = True,
+    ) -> int:
+        """Write metric local height onto observed, unlocked cells.
+
+        ``hit_mask`` marks cells the stereo (or ToF) band actually saw.
+        Locked cells stay put — the frozen mow map must not jitter.
+        """
+        ev = np.asarray(elev, dtype=np.float32)
+        if ev.shape != self.elevation.shape:
+            raise ValueError("elevation shape must match ObservedMap")
+        writable = np.asarray(self.observed, dtype=bool)
+        if hit_mask is not None:
+            writable = writable & np.asarray(hit_mask, dtype=bool)
+        if respect_lock:
+            writable = writable & ~np.asarray(self.locked, dtype=bool)
+        if not np.any(writable):
+            return 0
+        before = self.elevation[writable].copy()
+        self.elevation[writable] = ev[writable]
+        self.elevation_set[writable] = True
+        self.confidence[writable] = np.maximum(self.confidence[writable], 0.60)
+        return int(np.count_nonzero(np.abs(self.elevation[writable] - before) > 1e-6))
+
     def refresh_free(self) -> None:
         """Known-free = observed, not a drain/steep-blocked hint, not hard structure."""
         hard = np.isin(
@@ -360,7 +400,8 @@ class ObservedMap:
             elevation=self.elevation.copy(),
             confidence=self.confidence.copy(),
             occupancy=self.occupancy.copy(),
-            elevation_set=self.elevation_set.copy(),
+            elevation_set=np.asarray(self.elevation_set, dtype=bool).copy(),
+            locked=np.asarray(self.locked, dtype=bool).copy(),
             width_m=self.width_m,
             height_m=self.height_m,
             resolution_m=self.resolution_m,
@@ -398,7 +439,7 @@ class ObservedMap:
             have_meas[:, :] = True
         if pose is None:
             # Tests / callers without a chassis pose: first-stamp freeze.
-            write = mask & have_meas & ~self.elevation_set
+            write = mask & have_meas & ~self.elevation_set & ~np.asarray(self.locked, dtype=bool)
             if np.any(write):
                 self.elevation[write] = meas[write]
                 self.elevation_set[write] = True
@@ -411,7 +452,7 @@ class ObservedMap:
             self.resolution_m,
         )
         neighborhood = mask & local
-        fresh = neighborhood & ~self.elevation_set
+        fresh = neighborhood & ~self.elevation_set & ~np.asarray(self.locked, dtype=bool)
         if np.any(fresh):
             seeded = self._seed_fresh_heights(fresh, pose.z)
             self.elevation[fresh] = seeded[fresh]

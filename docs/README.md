@@ -17,8 +17,8 @@ Wave notes and the on-box message contract live here.
 | [`UX_B.md`](UX_B.md) | FaultBus, dead-motor SOS, radio sim, `jims-mower-selftest` |
 | [`UX_C.md`](UX_C.md) | Thin owner app, YardProfile API, buy→mow (BT / optional Wi-Fi / LoRa) |
 | [`SCHEDULE.md`](SCHEDULE.md) | Weekly window actually arms / skips / stops jobs |
-| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order to fab |
-| [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) | Construction math, BOM classes, ESTOP sketch (no claimed runtime) |
+| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order (schedule, then stereo+seg+frozen elev) |
+| [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) | Construction math, BOM classes, forward stereo + ESTOP sketch (no claimed runtime) |
 | [`SIM_TO_REAL.md`](SIM_TO_REAL.md) | Same ICD keys on-box; no gym renderer |
 | [`JETSON.md`](JETSON.md) | What not to run on-box; Dockerfile.aarch64; TensorRT placeholder |
 | [`runtime_contract.md`](runtime_contract.md) | Versioned CameraFrame / IMU / GPS / ToF / maps / Plan / WheelCommand / SafeState |

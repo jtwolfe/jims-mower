@@ -1,12 +1,13 @@
 # Hardware design — construction math
 
 Target: a **~50 × 50 × 50 cm** zero-turn residential mower, Jetson Orin
-Nano class compute, **4–6** RGB cameras, **front whipper-snipper**,
+Nano class compute, **forward stereo pair + side/rear mono** (4–6 RGB
+cameras), **front whipper-snipper**,
 meant to be **1-acre capable**. This note does the sizing math so fab
 is not a guess. It is **not** a measured field pack, not a must-buy
 cart, and not a SIL claim.
 
-**No claimed field runtime** until row 17 of
+**No claimed field runtime** until row 18 of
 [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) is measured.
 
 ICD keys that the wiring must feed (do not rename): `cameras`, `imu`,
@@ -273,22 +274,34 @@ Do not grow the body past ~0.55 m without changing `collision_radius_m`
 
 ## 7. Cameras, IMU, GNSS, ToF
 
-Gym / example YAML (`configs/orin/extrinsics_6cam.yaml`) — **example
-poses, not calibrated**:
+**Prefer a calibrated forward stereo pair** (baseline **~6–12 cm** on
+the 50 cm body) plus side / rear monoculars. Do **not** fab six
+independent look-around monoculars and call that a depth rig. Grass is
+low-texture; live control is near-field disparity in the 0.8–4 m band,
+not COLMAP / full-yard SfM.
 
-| Name | Body \(x,y,z\) m | yaw / pitch | FOV |
-| --- | --- | --- | --- |
-| front | 0.25, 0, 0.38 | 0° / −22° | 70° |
-| front_left / front_right | 0.20, ±0.20, 0.38 | ±40° / −18° | 70° |
-| rear | −0.25, 0, 0.38 | 180° / −12° | 70° |
-| left / right | 0, ±0.25, 0.38 | ±90° / −12° | 70° |
+Preferred example: [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
+— **example poses, not calibrated**:
 
-**4-cam subset:** drop left/right or the two fronts. Studies in-repo
-compare 4/5/6 vs **tip/drain rates in sim**, not mAP.
+| Name | Body \(x,y,z\) m | yaw / pitch | FOV | Role |
+| --- | --- | --- | --- | --- |
+| stereo_left / stereo_right | 0.24, ±0.04, 0.38 | 0° / −22° | 70° | **Metric pair**, \(B \approx 8\) cm |
+| front | 0.25, 0, 0.38 | 0° / −22° | 70° | Fill / teach |
+| rear | −0.25, 0, 0.38 | 180° / −12° | 70° | Mono |
+| left / right | 0, ±0.25, 0.38 | ±90° / −12° | 70° | Mono |
+
+Gym look-around example (`configs/orin/extrinsics_6cam.yaml`) keeps the
+old 40° / ~40 cm `front_left` / `front_right`. Those are **not** a
+stereo pair — `find_stereo_pair` rejects them. Studies that compare
+4/5/6 vs **tip/drain rates in sim** still use that look-around; they
+are not mAP.
+
+Depth resolution \(\delta Z \approx (Z^2 / fB)\,\delta d\) gets worse
+with range. Size ObservedMap cells from that in the 0.8–4 m band.
 
 Mount pitch is a **lip visibility** choice (see `jims-mower-study
---kind pitch`). After fab, replace the YAML with measured extrinsics
-(PRODUCT_TO_HARDWARE S2R-2).
+--kind pitch`). After fab, replace the YAML with **measured**
+extrinsics and a taped baseline (PRODUCT_TO_HARDWARE S2R-2).
 
 | Sensor | Placement | ICD |
 | --- | --- | --- |
@@ -335,7 +348,7 @@ Not a must-buy list. If the SKU is uncertain, it says so.
 | LFP pack + BMS | 1 | 24 V 50 Ah class | yes | `battery_soc` later |
 | Charger | 1 | 24 V 10 A class | yes | dock |
 | Orin Nano 8 GB + carrier | 1 | JetPack 6 | carrier variant yes | compute |
-| CSI cameras | 4–6 | IMX219-class, 70° | yes | `cameras` |
+| CSI cameras | 4–6 | IMX219-class, 70°; **one matched stereo pair** (6–12 cm) + mono | yes | `cameras` |
 | IMU | 1 | 6-axis I2C | yes | `imu` |
 | GNSS | 1 | UART, 1 Hz+ | yes | `gps` |
 | ToF | 0/2/4 | VL53-class downward | yes | `tof` |
@@ -363,7 +376,7 @@ still drop power if Python is wedged.
 
    I2C: IMU 0x68 class, ToF 0x29 class (docs only — probe the real parts)
    UART: GNSS
-   CSI: 4–6 cameras → carrier
+   CSI: stereo pair + side/rear mono (4–6) → carrier
 ```
 
 Amp numbers are **class-scale** from §3–5 (24 V, 60 W drive ≈ 2.5 A
@@ -382,7 +395,7 @@ the **rail**.
 | Body \(x\) forward, \(y\) left, \(z\) up | Same IMU / camera frame |
 | Action \([-1,1]\), \([-1,1]\), \([0,1]\) | Scale to real max m/s after a tape test (S2R-4) |
 | `trimmer` on if \(>0.5\) **and** interlock | Electrical cut, not only PWM 0 |
-| Camera names `front`, … | Same dict keys after Gst |
+| Camera names `stereo_left` / `stereo_right` + mono, or gym `front`, … | Same dict keys after Gst |
 | ToF order FL, FR, RL, RR | Same array |
 | `YardProfile` metres | Survey origin + GNSS lever arm |
 
@@ -397,5 +410,6 @@ in this document and retune **software** trips.
 - Motor SKUs, camera modules, pack brand: **not picked**.
 - RF range, TRT FPS, detector mAP: **out of scope** (and forbidden as
   invented numbers).
-- Next physical work: PRODUCT_TO_HARDWARE build-order §2 (hardware
-  ESTOP), then capture, then calibration.
+- Next *physical* work: PRODUCT_TO_HARDWARE build-order §3 (hardware
+  ESTOP), then capture, then stereo calibration. Gym CV terrain
+  (stereo + seg stub + frozen elev) is software build-order §2.

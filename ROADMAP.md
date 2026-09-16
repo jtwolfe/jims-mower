@@ -332,24 +332,29 @@ jims-mower-owner --live
 - [x] Pairing stub before Start; stuck vs dead-motor SOS inject
 - [x] App live control contract smoke + existing live tests
 
-## Product → hardware (schedule engine first)
+## Product → hardware (schedule first, then CV terrain)
 
 ROADMAP boxes above are **hooks**, not production CV. Honest inventory:
 [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md). Construction
 math: [`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md). No claimed
-mAP / FPS / field runtime.
+mAP / FPS / field runtime. Live control is **not** COLMAP / full-yard SfM.
 
 - [x] `YardProfile.schedule` engine arms / skips / duration-stops a job
       (wall clock in app/live; FrozenClock in tests). SOC / rain / fault
       / ESTOP gates. [`docs/SCHEDULE.md`](docs/SCHEDULE.md)
 - [x] Phone `#/health` next-run + enable toggle (`PUT /yard`)
 - [x] `/status` carries `jims_mower.schedule.v1` + `weather.rain`
+- [x] Gym CV terrain slice: forward stereo (or synthetic stereo) stamps
+      metric local elev; `lock_observed` freezes MAP READY cells; sim
+      exporter → terrain-seg stub is the train path. Not a matcher,
+      not mAP / FPS. [`perception/stereo.py`](src/jims_mower/perception/stereo.py)
 - [ ] Remaining build-order rows (ESTOP rail, CSI, IMU/GNSS/ToF, dataset,
-      real heads, fusion, fab) stay unchecked until they are the field
-      article — not another stub
+      real heads, field stereo matcher, fab) stay unchecked until they
+      are the field article — not another stub
 
 ```bash
 pytest tests/test_schedule.py tests/test_yard_profile.py tests/test_app_api.py
+pytest tests/test_stereo.py tests/test_learn.py tests/test_cv_terrain.py
 ```
 
 ## WAVE UX-B — faults + radio sim (append)

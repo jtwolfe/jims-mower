@@ -32,9 +32,12 @@ def _discover_default_config() -> Path:
 
 DEFAULT_CONFIG_PATH = _discover_default_config()
 
-# Built-in rig (body frame: x forward, y left, z up). Used when YAML
-# leaves `sensors.cameras` empty.
-# Front pair pitched a bit more down so drain lips sit in the lower image third.
+# Built-in gym look-around (body frame: x forward, y left, z up). Used
+# when YAML leaves `sensors.cameras` empty.
+# front_left / front_right are 40° yaw at ~40 cm — NOT a stereo pair.
+# Metric near-field depth wants configs/orin/extrinsics_stereo.yaml
+# (6–12 cm baseline, shared yaw/pitch). Front pair is pitched down so
+# drain lips sit in the lower image third.
 _DEFAULT_RIG = (
     CameraSpec("front", 0.25, 0.00, 0.38, 0.0, -22.0),
     CameraSpec("front_left", 0.20, 0.20, 0.38, 40.0, -18.0),
