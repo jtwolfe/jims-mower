@@ -261,6 +261,39 @@ def test_acre_yard_demo_reaches_explore_without_full_lap() -> None:
     assert "boundary_recorded" in events
 
 
+def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
+    """Demo profile only: MAP READY then MOW in a bounded budget. Not full acre."""
+    cfg, scenario = load_source("acre_yard_demo")
+    cfg.sensors.width = 16
+    cfg.sensors.height = 12
+    cfg.sensors.camera_count = 4
+    cfg.sensors.cameras = []
+    cfg.max_steps = 1100
+    env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
+    obs, info = env.reset(seed=3)
+    policy = MissionPolicy(env.cfg)
+    policy.reset(obs, info)
+    seen: list[str] = []
+    cut = 0.0
+    for _ in range(1000):
+        if policy.phase.value not in seen:
+            seen.append(policy.phase.value)
+        action = policy.act(obs, info)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        cut = float(info.get("coverage_fraction") or 0.0)
+        if policy.phase == MissionPhase.MOW and (policy.phase_step >= 6 or cut > 0.0):
+            break
+        if terminated or truncated or policy.done:
+            break
+    status = policy.status(info)
+    env.close()
+    assert "explore" in seen
+    assert "review" in seen
+    assert "mow" in seen or policy.phase.value == "mow"
+    assert status["map_completion"] >= 0.40
+    assert policy.step < 1000
+
+
 def test_review_hold_waits_until_start_mow() -> None:
     from jims_mower.config import MissionConfig
 
