@@ -1,7 +1,12 @@
-"""Multi-session mission state: coverage map + uncut grass + pose.
+"""Multi-session mission state: coverage + ObservedMap fog + pose + yard.
 
-Grass persist already writes the yard mask. This adds pose and a CLI so a
-later process can resume the same cut without replaying the episode.
+Grass persist already writes the yard mask. This bundle is the day-2
+cold load: a **new process** can resume uncut + fog + home/geofence
+without reteaching. Files on disk, not the same sim process.
+
+ICD ``gps`` stays ``(x, y, z, valid)``. When a YardProfile origin is
+set those metres are local ENU relative to the peg (default origin is
+the gym SW corner, so ENU == world).
 """
 
 from __future__ import annotations
@@ -14,8 +19,10 @@ from typing import Any, Optional, Union
 
 import numpy as np
 
-from jims_mower.constants import MISSION_SCHEMA
+from jims_mower.constants import MISSION_SCHEMA, SESSION_BUNDLE_SCHEMA, YARD_PROFILE_SCHEMA
 from jims_mower.maps import GrassCoverageMap
+from jims_mower.planning.observed import ObservedMap
+from jims_mower.profile import YardProfile, parse_yard_profile
 from jims_mower.types import Pose
 
 
@@ -27,10 +34,16 @@ class MissionState:
     scenario: str = ""
     seed: Optional[int] = None
     steps: int = 0
+    observed: Optional[ObservedMap] = None
+    profile: Optional[YardProfile] = None
+    phase: str = ""
+    home: Optional[dict[str, float]] = None
+    bundle_schema: str = SESSION_BUNDLE_SCHEMA
 
     def as_meta(self) -> dict[str, Any]:
-        return {
+        meta: dict[str, Any] = {
             "schema": self.schema,
+            "bundle_schema": self.bundle_schema,
             "pose": {
                 "x": self.pose.x,
                 "y": self.pose.y,
@@ -47,7 +60,30 @@ class MissionState:
             "resolution_m": self.coverage.resolution_m,
             "cut_cells": self.coverage.cut_cell_count(),
             "uncut_cells": self.coverage.grass_cell_count() - self.coverage.cut_cell_count(),
+            "phase": self.phase,
+            "observed_loaded": self.observed is not None,
+            "yard_loaded": self.profile is not None,
+            "home": dict(self.home) if self.home else None,
         }
+        if self.observed is not None:
+            meta["n_observed"] = int(np.asarray(self.observed.observed).sum())
+            meta["n_fog"] = int((~np.asarray(self.observed.observed)).sum())
+        if self.profile is not None:
+            meta["yard"] = self.profile.name
+            meta["origin"] = self.profile.origin.as_dict()
+        return meta
+
+
+def _yard_sidecar(dest: Path) -> Path:
+    if dest.suffix == ".npz":
+        return dest.with_name(dest.stem + ".yard.json")
+    return dest.with_suffix(".yard.json")
+
+
+def _meta_sidecar(dest: Path) -> Path:
+    if dest.suffix == ".npz":
+        return dest.with_name(dest.stem + ".json")
+    return dest.with_suffix(".json")
 
 
 def save_mission(
@@ -58,30 +94,52 @@ def save_mission(
     scenario: str = "",
     seed: Optional[int] = None,
     steps: int = 0,
+    observed: Optional[ObservedMap] = None,
+    profile: Optional[YardProfile] = None,
+    phase: str = "",
+    home: Optional[dict[str, float]] = None,
 ) -> Path:
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        dest,
-        schema=np.asarray(MISSION_SCHEMA),
-        cut=coverage.cut.astype(np.bool_),
-        grass=coverage.grass.astype(np.bool_),
-        width_m=np.float32(coverage.width_m),
-        height_m=np.float32(coverage.height_m),
-        resolution_m=np.float32(coverage.resolution_m),
-        pose=np.array(
+    payload: dict[str, Any] = {
+        "schema": np.asarray(MISSION_SCHEMA),
+        "bundle_schema": np.asarray(SESSION_BUNDLE_SCHEMA),
+        "cut": coverage.cut.astype(np.bool_),
+        "grass": coverage.grass.astype(np.bool_),
+        "width_m": np.float32(coverage.width_m),
+        "height_m": np.float32(coverage.height_m),
+        "resolution_m": np.float32(coverage.resolution_m),
+        "pose": np.array(
             [pose.x, pose.y, pose.theta, pose.z, pose.pitch, pose.roll],
             dtype=np.float32,
         ),
-        scenario=np.asarray(scenario),
-        seed=np.int64(-1 if seed is None else seed),
-        steps=np.int64(steps),
+        "scenario": np.asarray(scenario),
+        "seed": np.int64(-1 if seed is None else seed),
+        "steps": np.int64(steps),
+        "phase": np.asarray(phase or ""),
+        "has_observed": np.bool_(observed is not None),
+        "has_yard": np.bool_(profile is not None),
+    }
+    if observed is not None:
+        payload.update(observed.arrays_for_npz())
+    np.savez_compressed(dest, **payload)
+    state = MissionState(
+        MISSION_SCHEMA,
+        pose,
+        coverage,
+        scenario,
+        seed,
+        steps,
+        observed=observed,
+        profile=profile,
+        phase=phase,
+        home=home,
     )
-    sidecar = dest.with_suffix(".json")
-    if dest.suffix == ".npz":
-        sidecar = dest.with_name(dest.stem + ".json")
-    meta = MissionState(MISSION_SCHEMA, pose, coverage, scenario, seed, steps).as_meta()
-    sidecar.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    sidecar = _meta_sidecar(dest)
+    sidecar.write_text(json.dumps(state.as_meta(), indent=2), encoding="utf-8")
+    if profile is not None:
+        yard_path = _yard_sidecar(dest)
+        yard_path.write_text(json.dumps(profile.as_dict(), indent=2), encoding="utf-8")
     return dest
 
 
@@ -110,6 +168,34 @@ def load_mission(path: Union[str, Path]) -> MissionState:
         float(arr[5]) if arr.size > 5 else 0.0,
     )
     seed_raw = int(data["seed"]) if "seed" in data.files else -1
+    observed = ObservedMap.from_npz_arrays(data)
+    profile = None
+    yard_path = _yard_sidecar(src)
+    if yard_path.is_file():
+        raw = json.loads(yard_path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict) and (
+            str(raw.get("schema") or "") == YARD_PROFILE_SCHEMA or raw.get("keep_in")
+        ):
+            profile = parse_yard_profile(raw)
+    phase = str(data["phase"]) if "phase" in data.files else ""
+    home = None
+    meta_path = _meta_sidecar(src)
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            meta = {}
+        if isinstance(meta, dict):
+            if not phase:
+                phase = str(meta.get("phase") or "")
+            if isinstance(meta.get("home"), dict):
+                home = {
+                    "x": float(meta["home"].get("x", pose.x)),
+                    "y": float(meta["home"].get("y", pose.y)),
+                    "theta": float(meta["home"].get("theta", pose.theta)),
+                }
+            if profile is None and isinstance(meta.get("origin"), dict):
+                pass
     return MissionState(
         schema=schema,
         pose=pose,
@@ -117,6 +203,13 @@ def load_mission(path: Union[str, Path]) -> MissionState:
         scenario=str(data["scenario"]) if "scenario" in data.files else "",
         seed=None if seed_raw < 0 else seed_raw,
         steps=int(data["steps"]) if "steps" in data.files else 0,
+        observed=observed,
+        profile=profile,
+        phase=phase,
+        home=home,
+        bundle_schema=str(data["bundle_schema"])
+        if "bundle_schema" in data.files
+        else SESSION_BUNDLE_SCHEMA,
     )
 
 

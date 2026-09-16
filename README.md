@@ -590,6 +590,7 @@ are laptop / overnight jobs.
 | ICD / roadmap | [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md) |
 | WAVE 2B / §9 train → ONNX | [`docs/WAVE2B.md`](docs/WAVE2B.md), `jims-mower-train-terrain --onnx` |
 | §11 / §12 gym CV-2 + MAP-2 fuse | [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md), `tests/test_grass_coverage.py`, `tests/test_elev_fuse.py` |
+| §14 / §15 surveyed origin + day-2 session + PLN regression | [`docs/SURVEY_ORIGIN.md`](docs/SURVEY_ORIGIN.md), `tests/test_survey_origin.py`, `tests/test_pln_regression.py` |
 
 Exporter labels are **oracle** height-field / grass rasters. The env
 observer can still be heuristic. Dataset folder layout is written to
@@ -601,7 +602,7 @@ observer can still be heuristic. Dataset folder layout is written to
 | --- | --- |
 | Trajectories | `Obstacle.trajectory` (`patrol` / `loop` / `line` / `wander`) |
 | Living interlock | `info["living_advice"]` — slow / reroute / stop; occupancy replans |
-| Geofence | scenario `keep_in` / `keep_out`; costmap blocks outside |
+| Geofence | scenario `keep_in` / `keep_out`; costmap blocks outside. MAP-5: `YardProfile.origin` + ENU metres ([`docs/SURVEY_ORIGIN.md`](docs/SURVEY_ORIGIN.md)) |
 | Recovery | reverse → pivot → help after repeated tip / channel advice |
 | Hand signals | curriculum on → controller overrides (`stop`/`go`/`follow`/`back`) |
 | Mission resume | `jims-mower-mission` + `--save-mission` / `--load-mission` |

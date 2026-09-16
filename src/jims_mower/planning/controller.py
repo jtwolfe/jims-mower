@@ -15,7 +15,7 @@ from jims_mower.constants import (
     ID_TO_SIGNAL,
     TERRAIN_ADVICE,
 )
-from jims_mower.geofence import GeofenceSpec
+from jims_mower.geofence import GeofenceSpec, gps_world_from_enu
 from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wrap_angle
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
@@ -170,7 +170,7 @@ class TerrainPolicy:
         pose = _pose_from_obs(obs, info)
         self.fusion.reset(pose.x, pose.y, pose.theta, pose.z, pose.pitch, pose.roll)
         self.fusion.update(
-            obs.get("gps", np.zeros(4, dtype=np.float32)),
+            _gps_world(obs, info),
             obs.get("imu", np.array([0.0, 0.0, 9.81, 0.0, 0.0, 0.0], dtype=np.float32)),
             self.cfg.dt,
             seed_xy=(pose.x, pose.y),
@@ -210,7 +210,7 @@ class TerrainPolicy:
     def act(self, obs: dict[str, Any], info: dict[str, Any]) -> np.ndarray:
         pose_hint = _pose_from_obs(obs, info)
         fused = self.fusion.update(
-            obs["gps"],
+            _gps_world(obs, info),
             obs["imu"],
             self.cfg.dt,
             commanded_v=self._last_v,
@@ -670,6 +670,18 @@ def nearest_person_xy(info: dict[str, Any]) -> Optional[tuple[float, float]]:
     return best
 
 
+def _gps_world(obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> np.ndarray:
+    raw = obs.get("gps", np.zeros(4, dtype=np.float32))
+    origin = None
+    if info and isinstance(info.get("survey_origin"), dict):
+        origin = info["survey_origin"]
+    elif info and isinstance(info.get("geofence_spec"), dict):
+        spec = info["geofence_spec"]
+        if isinstance(spec.get("origin"), dict):
+            origin = spec["origin"]
+    return gps_world_from_enu(raw, origin)
+
+
 def geofence_from_info(info: dict[str, Any], cfg: EnvConfig) -> GeofenceSpec:
     raw = info.get("geofence_spec")
     inflate = cfg.planner.geofence_inflate_m
@@ -680,10 +692,17 @@ def geofence_from_info(info: dict[str, Any], cfg: EnvConfig) -> GeofenceSpec:
             for poly in (raw.get("keep_out") or [])
             if poly
         ]
-        return GeofenceSpec(keep_in=keep_in, keep_out=keep_out, inflate_m=inflate)
+        origin = raw.get("origin") if isinstance(raw.get("origin"), dict) else info.get("survey_origin")
+        return GeofenceSpec(
+            keep_in=keep_in,
+            keep_out=keep_out,
+            inflate_m=inflate,
+            origin=origin if isinstance(origin, dict) else None,
+        )
     legacy = info.get("geofence") or []
     keep_in = [_xy_tuple(p) for p in legacy if p is not None]
-    return GeofenceSpec(keep_in=keep_in, inflate_m=inflate)
+    origin = info.get("survey_origin") if isinstance(info.get("survey_origin"), dict) else None
+    return GeofenceSpec(keep_in=keep_in, inflate_m=inflate, origin=origin)
 
 
 def _xy_tuple(item: Any) -> tuple[float, float]:

@@ -32,7 +32,7 @@ the hub.
 | `detections` | `float32 (24, 8)` | Padded `[label, cam, u, v, w, h, conf, signal]` |
 | `pose` | `float32 (6,)` | `(x, y, theta, z, pitch, roll)` metres / rad |
 | `imu` | `float32 (6,)` | Body specific force + gyro; rest ≈ `(0,0,9.81,0,0,0)` |
-| `gps` | `float32 (4,)` | `(x, y, z, valid)`; `valid=0` on dropout |
+| `gps` | `float32 (4,)` | `(x, y, z, valid)` in **local ENU metres** from `YardProfile.origin` (default peg = gym SW corner, so ENU == world); `valid=0` on dropout |
 | `tof` | `float32 (4,)` | Downward ranges FL, FR, RL, RR |
 | `elevation` | `float32 (R, C)` | Observer height estimate (m) |
 | `slope` | `float32 (R, C)` | Observer slope (rad, 0–π/2) |
@@ -229,7 +229,9 @@ Not observation keys. Loaded via [`scenarios.load_source`](src/jims_mower/scenar
 - explicit `drains` / `banks` / `obstacles` (obstacles may carry a
   `trajectory`: `wander` / `patrol` / `loop` / `line`)
 - mission resume — `reset(options={"load_mission","save_mission"})` and
-  `jims-mower-mission` write map + uncut + pose (`jims_mower.mission.v1`)
+  `jims-mower-mission` write map + uncut + pose + optional ObservedMap
+  fog + YardProfile (`jims_mower.mission.v1` / session bundle). Cold
+  load is files on disk, not the same sim process.
 - `sensors.tof.count` — `0` / `2` / `4` downward corners (unused stay 0)
 - `runtime.enabled` — Orin-class battery / thermal limp stub (off by default)
 - `runtime.watchdog.enabled` — stop wheels if IMU / vision **stamps** freeze (off by default; bench overlay `configs/orin/bench.yaml`)

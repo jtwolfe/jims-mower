@@ -29,6 +29,9 @@ from jims_mower.schedule import (
     gates_from_owner_state,
     rain_from_weather,
 )
+from jims_mower.notify import NotificationLog
+from jims_mower.ota import ota_status
+from jims_mower.yards import YardStore
 from jims_mower.yard_profile import (
     YardProfile,
     YardProfileError,
@@ -291,6 +294,14 @@ class MemoryBackend:
         self._coverage = np.zeros((rows, cols), dtype=np.float32)
         self._occ = np.zeros((rows, cols), dtype=np.float32)
         self._paint_keepout()
+        self._yards: dict[str, YardProfile] = {self.yard.name: self.yard}
+        self.notify = NotificationLog(
+            (Path(yard_path).parent / "notifications.jsonl") if yard_path else None
+        )
+        self._yard_store = None
+        if yard_path:
+            self._yard_store = YardStore(Path(yard_path).parent / "yards")
+            self._yard_store.put(self.yard)
 
     def set_clock(self, clock: Clock) -> None:
         self.schedule_hook.set_clock(clock)
@@ -390,17 +401,80 @@ class MemoryBackend:
 
     def put_yard(self, profile: YardProfile) -> dict[str, Any]:
         with self._lock:
-            self.yard = profile
-            rows = max(1, int(round(profile.height_m / profile.resolution_m)))
-            cols = max(1, int(round(profile.width_m / profile.resolution_m)))
-            if self._coverage.shape != (rows, cols):
-                self._coverage = np.zeros((rows, cols), dtype=np.float32)
-                self._occ = np.zeros((rows, cols), dtype=np.float32)
-            self._paint_keepout()
-            if self.yard_path is not None:
-                save_yard_profile(profile, self.yard_path)
-            self.schedule_hook.sync(profile.schedule)
-            return profile.as_dict()
+            return self._put_yard_unlocked(profile)
+
+    def _put_yard_unlocked(self, profile: YardProfile) -> dict[str, Any]:
+        prev = getattr(self, "yard", None)
+        self.yard = profile
+        self._yards[profile.name] = profile
+        rows = max(1, int(round(profile.height_m / profile.resolution_m)))
+        cols = max(1, int(round(profile.width_m / profile.resolution_m)))
+        if self._coverage.shape != (rows, cols):
+            self._coverage = np.zeros((rows, cols), dtype=np.float32)
+            self._occ = np.zeros((rows, cols), dtype=np.float32)
+        self._coverage[:, :] = 0.0
+        self._occ[:, :] = 0.0
+        self._paint_keepout()
+        self.pose = dict(profile.home)
+        if self.yard_path is not None:
+            save_yard_profile(profile, self.yard_path)
+        if self._yard_store is not None:
+            self._yard_store.put(profile)
+            self._yard_store.select(profile.name)
+        self.schedule_hook.sync(profile.schedule)
+        if prev is not None and prev.name != profile.name:
+            self.notify.emit(
+                "info",
+                f"switched yard {prev.name} → {profile.name}",
+                yard=profile.name,
+            )
+        return profile.as_dict()
+
+    def list_yards(self) -> dict[str, Any]:
+        with self._lock:
+            if self._yard_store is not None:
+                return self._yard_store.as_info()
+            return {
+                "schema": "jims_mower.yards.v1",
+                "active": self.yard.name,
+                "yards": [
+                    {
+                        "name": p.name,
+                        "active": p.name == self.yard.name,
+                        "keep_in_vertices": len(p.keep_in),
+                        "home": dict(p.home),
+                    }
+                    for p in self._yards.values()
+                ],
+                "note": "switch replaces keep-in/home — no fence bleed",
+            }
+
+    def select_yard(self, name: str) -> dict[str, Any]:
+        with self._lock:
+            key = str(name or "").strip()
+            profile = self._yards.get(key)
+            if profile is None and self._yard_store is not None:
+                profile = self._yard_store.select(key)
+                self._yards[profile.name] = profile
+            if profile is None:
+                raise YardProfileError(f"yard not found: {name}")
+            return self._put_yard_unlocked(profile)
+
+    def notifications(self, *, last_n: int = 50) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "schema": "jims_mower.notify.v1",
+                "items": self.notify.list(last_n=last_n),
+                "sms": False,
+                "channel": "in_app",
+            }
+
+    def notify_event(self, kind: str, reason: str) -> dict[str, Any]:
+        with self._lock:
+            return self.notify.emit(kind, reason, yard=self.yard.name)
+
+    def ota(self) -> dict[str, Any]:
+        return ota_status()
 
     def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
@@ -411,14 +485,17 @@ class MemoryBackend:
                 self.safe.request_estop(reason or "owner estop")
                 self.mission = "estop"
                 self.faults = [{"code": "ESTOP", "detail": reason or "owner estop"}]
+                self.notify.emit("fault", reason or "owner estop", yard=self.yard.name)
             elif key == "start":
                 if self.safe.mode == "estop":
                     self.safe.clear()
                 self.faults = []
                 self.mission = "mowing"
+                self.notify.emit("info", reason or "owner start", yard=self.yard.name)
             elif key == "stop":
                 if self.safe.mode != "estop":
                     self.mission = "idle"
+                    self.notify.emit("finish", reason or "owner stop", yard=self.yard.name)
             elif key == "return":
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot return while ESTOP is latched")

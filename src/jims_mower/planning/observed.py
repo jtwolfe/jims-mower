@@ -13,7 +13,8 @@ cannot flop the frozen mow cells.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional
+from pathlib import Path
+from typing import Any, Iterable, Optional, Union
 
 import numpy as np
 
@@ -443,6 +444,93 @@ class ObservedMap:
             width_m=self.width_m,
             height_m=self.height_m,
             resolution_m=self.resolution_m,
+        )
+
+    def save_npz(self, path: Union[str, Path]) -> Path:
+        """Write fog / elev / lock rasters. Cold-load companion to mission.npz."""
+        dest = Path(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            dest,
+            observed=np.asarray(self.observed, dtype=bool),
+            explored=np.asarray(self.explored, dtype=bool),
+            free=np.asarray(self.free, dtype=bool),
+            hazard=np.asarray(self.hazard, dtype=np.float32),
+            structure=np.asarray(self.structure, dtype=np.uint8),
+            elevation=np.asarray(self.elevation, dtype=np.float32),
+            confidence=np.asarray(self.confidence, dtype=np.float32),
+            occupancy=np.asarray(self.occupancy, dtype=np.float32),
+            elevation_set=np.asarray(self.elevation_set, dtype=bool),
+            locked=np.asarray(self.locked, dtype=bool),
+            width_m=np.float32(self.width_m),
+            height_m=np.float32(self.height_m),
+            resolution_m=np.float32(self.resolution_m),
+        )
+        return dest
+
+    @classmethod
+    def load_npz(cls, path: Union[str, Path]) -> "ObservedMap":
+        src = Path(path)
+        data = np.load(src, allow_pickle=False)
+        omap = cls(
+            observed=np.asarray(data["observed"], dtype=bool),
+            explored=np.asarray(data["explored"], dtype=bool),
+            free=np.asarray(data["free"], dtype=bool),
+            hazard=np.asarray(data["hazard"], dtype=np.float32),
+            structure=np.asarray(data["structure"], dtype=np.uint8),
+            elevation=np.asarray(data["elevation"], dtype=np.float32),
+            confidence=np.asarray(data["confidence"], dtype=np.float32),
+            occupancy=np.asarray(data["occupancy"], dtype=np.float32),
+            elevation_set=np.asarray(data["elevation_set"], dtype=bool)
+            if "elevation_set" in data.files
+            else np.zeros_like(data["observed"], dtype=bool),
+            locked=np.asarray(data["locked"], dtype=bool)
+            if "locked" in data.files
+            else np.zeros_like(data["observed"], dtype=bool),
+            width_m=float(data["width_m"]),
+            height_m=float(data["height_m"]),
+            resolution_m=float(data["resolution_m"]),
+        )
+        return omap
+
+    def arrays_for_npz(self) -> dict[str, np.ndarray]:
+        """Prefix-free arrays for embedding in a mission bundle."""
+        return {
+            "omap_observed": np.asarray(self.observed, dtype=bool),
+            "omap_explored": np.asarray(self.explored, dtype=bool),
+            "omap_free": np.asarray(self.free, dtype=bool),
+            "omap_hazard": np.asarray(self.hazard, dtype=np.float32),
+            "omap_structure": np.asarray(self.structure, dtype=np.uint8),
+            "omap_elevation": np.asarray(self.elevation, dtype=np.float32),
+            "omap_confidence": np.asarray(self.confidence, dtype=np.float32),
+            "omap_occupancy": np.asarray(self.occupancy, dtype=np.float32),
+            "omap_elevation_set": np.asarray(self.elevation_set, dtype=bool),
+            "omap_locked": np.asarray(self.locked, dtype=bool),
+        }
+
+    @classmethod
+    def from_npz_arrays(cls, data: Any) -> Optional["ObservedMap"]:
+        files = set(getattr(data, "files", []) or [])
+        if "omap_observed" not in files:
+            return None
+        return cls(
+            observed=np.asarray(data["omap_observed"], dtype=bool),
+            explored=np.asarray(data["omap_explored"], dtype=bool),
+            free=np.asarray(data["omap_free"], dtype=bool),
+            hazard=np.asarray(data["omap_hazard"], dtype=np.float32),
+            structure=np.asarray(data["omap_structure"], dtype=np.uint8),
+            elevation=np.asarray(data["omap_elevation"], dtype=np.float32),
+            confidence=np.asarray(data["omap_confidence"], dtype=np.float32),
+            occupancy=np.asarray(data["omap_occupancy"], dtype=np.float32),
+            elevation_set=np.asarray(data["omap_elevation_set"], dtype=bool)
+            if "omap_elevation_set" in files
+            else np.zeros_like(data["omap_observed"], dtype=bool),
+            locked=np.asarray(data["omap_locked"], dtype=bool)
+            if "omap_locked" in files
+            else np.zeros_like(data["omap_observed"], dtype=bool),
+            width_m=float(data["width_m"]),
+            height_m=float(data["height_m"]),
+            resolution_m=float(data["resolution_m"]),
         )
 
     def _fuse_elevation(

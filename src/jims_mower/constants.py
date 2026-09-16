@@ -179,6 +179,12 @@ LIVE_CONTROL_CMDS = (
 )
 APP_LIVE_PORT = 8766
 YARD_PROFILE_SCHEMA = "jims_mower.yard.v1"
+SURVEY_ORIGIN_FRAME = "local_enu"
+NOTIFY_SCHEMA = "jims_mower.notify.v1"
+OTA_SCHEMA = "jims_mower.ota.v1"
+BLACKBOX_SCHEMA = "jims_mower.blackbox.v1"
+YARD_STORE_SCHEMA = "jims_mower.yards.v1"
+SESSION_BUNDLE_SCHEMA = "jims_mower.session_bundle.v1"
 MESH_SCHEMA = "jims_mower.mesh.v1"
 APP_STATUS_SCHEMA = "jims_mower.app_status.v1"
 COVERAGE_MAP_SCHEMA = "jims_mower.coverage.v1"

@@ -16,13 +16,14 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, Union
 
 import numpy as np
 
 from jims_mower.config import EnvConfig, MissionConfig
 from jims_mower.faults import fault_is_immobilised, fault_is_retrieve
-from jims_mower.geofence import GeofenceSpec
+from jims_mower.geofence import GeofenceSpec, gps_world_from_enu
 from jims_mower.kinematics import unicycle_from_wheels
 from jims_mower.planning.controller import (
     combine_advice,
@@ -270,6 +271,77 @@ class MissionPolicy:
         )
         self._transition(MissionPhase.EXPLORE)
 
+    def attach_to_env(self, env: Any) -> None:
+        """Copy fog + yard onto the env so ``save_mission`` is a full day-2 bundle."""
+        if env is None:
+            return
+        env._observed_map = self.observed.copy() if self.observed is not None else None
+        env._yard_profile = self.profile
+        env._mission_phase = self.phase.value if isinstance(self.phase, MissionPhase) else str(self.phase)
+
+    def save_session(
+        self,
+        path: Union[str, Path],
+        coverage: Any,
+        pose: Pose,
+        *,
+        scenario: str = "",
+        seed: Optional[int] = None,
+    ) -> Path:
+        from jims_mower.mission import save_mission
+
+        return save_mission(
+            path,
+            coverage,
+            pose,
+            scenario=scenario,
+            seed=seed,
+            steps=self.step,
+            observed=self.observed,
+            profile=self.profile,
+            phase=self.phase.value if isinstance(self.phase, MissionPhase) else str(self.phase),
+            home={"x": self._home.x, "y": self._home.y, "theta": self._home.theta},
+        )
+
+    def restore_session(
+        self,
+        obs: dict[str, Any],
+        info: dict[str, Any],
+        state: Any,
+    ) -> None:
+        """Cold-start: load yesterday's map + yard without reteaching."""
+        profile = getattr(state, "profile", None)
+        self.reset(obs, info, profile=profile)
+        observed = getattr(state, "observed", None)
+        if observed is not None:
+            self.observed = observed.copy()
+            self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
+        phase_raw = str(getattr(state, "phase", "") or "")
+        if phase_raw:
+            try:
+                restored = MissionPhase(phase_raw)
+                if restored != MissionPhase.CALIBRATE_BOUNDARY:
+                    self.phase = restored
+                    self.phase_step = 0
+            except ValueError:
+                pass
+        if (
+            self.phase == MissionPhase.CALIBRATE_BOUNDARY
+            and profile is not None
+            and len(getattr(profile, "keep_in", []) or []) >= 3
+        ):
+            self.phase = MissionPhase.EXPLORE
+            self.phase_step = 0
+        pose = _pose_from_obs(obs, info)
+        if self.phase in {MissionPhase.REVIEW, MissionPhase.MOW}:
+            if self.snapshot is None and self.observed is not None:
+                self.snapshot = self._freeze(info)
+            self.global_plan = self._plan_global_mow(pose)
+            self.plan = self.global_plan
+            self.index = 0
+        elif self.phase == MissionPhase.EXPLORE and self.observed is not None:
+            self.explore_plan = None
+
     def reset(
         self,
         obs: dict[str, Any],
@@ -281,7 +353,7 @@ class MissionPolicy:
         pose = _pose_from_obs(obs, info)
         self.fusion.reset(pose.x, pose.y, pose.theta, pose.z, pose.pitch, pose.roll)
         self.fusion.update(
-            obs.get("gps", np.zeros(4, dtype=np.float32)),
+            _gps_world(obs, info, self.profile),
             obs.get("imu", np.array([0.0, 0.0, 9.81, 0.0, 0.0, 0.0], dtype=np.float32)),
             self.cfg.dt,
             seed_xy=(pose.x, pose.y),
@@ -363,7 +435,7 @@ class MissionPolicy:
     def act(self, obs: dict[str, Any], info: dict[str, Any]) -> np.ndarray:
         pose_hint = _pose_from_obs(obs, info)
         fused = self.fusion.update(
-            obs["gps"],
+            _gps_world(obs, info, self.profile),
             obs["imu"],
             self.cfg.dt,
             commanded_v=self._last_v,
@@ -1598,6 +1670,27 @@ def _inset_polygon(ring: list[tuple[float, float]], margin_m: float) -> list[tup
         step = min(float(margin_m), 0.45 * dist)
         out.append((x + step * dx / dist, y + step * dy / dist))
     return out
+
+
+def _origin_from_info(info: Optional[dict[str, Any]], profile: Optional[YardProfile] = None) -> dict[str, Any]:
+    if info and isinstance(info.get("survey_origin"), dict):
+        return info["survey_origin"]
+    spec = (info or {}).get("geofence_spec") if info else None
+    if isinstance(spec, dict) and isinstance(spec.get("origin"), dict):
+        return spec["origin"]
+    if profile is not None:
+        return profile.origin.as_dict()
+    return {"e_m": 0.0, "n_m": 0.0, "u_m": 0.0}
+
+
+def _gps_world(
+    obs: dict[str, Any],
+    info: Optional[dict[str, Any]],
+    profile: Optional[YardProfile] = None,
+) -> np.ndarray:
+    raw = obs.get("gps", np.zeros(4, dtype=np.float32))
+    origin = _origin_from_info(info, profile)
+    return gps_world_from_enu(raw, origin)
 
 
 def _pose_from_obs(obs: dict[str, Any], info: dict[str, Any]) -> Pose:

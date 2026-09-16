@@ -42,9 +42,10 @@ bad schema, short polygons, and parent-traversing `mesh` paths.
 
 | Field | Meaning |
 | --- | --- |
-| `home` | Dock / return pose `{x, y, theta}` metres / rad |
-| `keep_in` | Allowed work polygon (`[x, y]` vertices) |
+| `home` | Dock / return pose `{x, y, theta}` metres east/north of `origin` |
+| `keep_in` | Allowed work polygon (`[e, n]` metres from `origin`) |
 | `keep_out` | List of no-go polygons |
+| `origin` | Surveyed/local-ENU peg (`e_m/n_m/u_m`, optional lat/lon). Default gym SW corner. **Not** a WGS84 field survey unless `surveyed: true`. See [`SURVEY_ORIGIN.md`](SURVEY_ORIGIN.md). |
 | `mesh` | Relative mesh path (`yard.glb` / JSON). Alias: `mesh_path` |
 | `radio` | `bluetooth`, `wifi.enabled` / `ssid`, `lora.enabled` / `channel`, `primary` |
 | `schedule` | Weekly window: `enabled`, `days`, `start_local` (`HH:MM`), `duration_min`, `timezone`, `min_soc`, `skip_rain`, `arm_window_min`. Evaluated by `ScheduleEngine` — arms / skips / duration-stops a job. Not a cloud calendar. |
@@ -63,6 +64,10 @@ JSON in / JSON out. Same origin as the static shell.
 | `GET` | `/status` | pose, battery, state machine, radio link, faults |
 | `GET` | `/yard` | current YardProfile |
 | `PUT` | `/yard` | full YardProfile (validated) |
+| `GET` | `/yards` | multi-yard list + active name (UX-3) |
+| `POST` | `/yards/select` | `{name}` — switch profile; keep-in/home replace (no fence bleed) |
+| `GET` | `/notifications` | in-app skip/finish list (not SMS; UX-2) |
+| `GET` | `/ota` | SAF-4 documented no-op (`available: false`) |
 | `POST` | `/command` | `{cmd, reason?}` — `start` / `stop` / `return` / `estop` / `teach` |
 | `GET` | `/map/mesh` | coarse occupancy mesh + `ux_a_href` |
 | `GET` | `/map/coverage` | downsampled cut/uncut raster |
