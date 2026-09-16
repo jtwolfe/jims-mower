@@ -72,9 +72,10 @@ def samples_from_export(
     meta_path = root / "meta.json"
     if not meta_path.is_file():
         raise FileNotFoundError(f"export meta.json missing: {meta_path}")
-    from jims_mower.dataset import load_dataset_meta
+    from jims_mower.dataset import load_dataset_meta, train_frame_set
 
     meta = load_dataset_meta(root)
+    train_only = train_frame_set(meta)
     cameras = {c.name: c for c in _cameras_from_meta(meta)}
     if not cameras:
         raise ValueError(
@@ -93,8 +94,13 @@ def samples_from_export(
 
     xs: list[np.ndarray] = []
     ys: list[np.ndarray] = []
+    used_frames = 0
     for sidecar_path in sidecars:
         sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        frame_i = sidecar.get("frame")
+        if train_only is not None and frame_i is not None and int(frame_i) not in train_only:
+            continue
+        used_frames += 1
         pose = _pose_from_sidecar(sidecar.get("pose"))
         haz_rel = (sidecar.get("labels") or {}).get("hazard")
         if not haz_rel:
@@ -156,6 +162,8 @@ def samples_from_export(
         "n_pixels": int(x_all.shape[0]),
         "class_counts": np.bincount(y_all, minlength=N_CLASSES).astype(int).tolist(),
         "n_frames": len(sidecars),
+        "n_train_frames": used_frames,
+        "split": meta.get("split"),
         "schema": meta.get("schema"),
         "domain_randomization": meta.get("domain_randomization"),
         "n_features": N_FEATURES,

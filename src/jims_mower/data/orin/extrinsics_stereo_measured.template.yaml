@@ -1,24 +1,18 @@
-# EXAMPLE — not a measured calibration.
-# Copy to extrinsics_stereo_measured.yaml, replace every pose with tape /
-# checkerboard numbers, set calibration.measured: true.
-# See docs/CALIBRATION.md.
+# MEASURED TEMPLATE — placeholder numbers, not taped hardware.
+# Copy to extrinsics_stereo_measured.yaml after the bench in docs/CALIBRATION.md.
+# Then: replace every pose, set template: false, fill tape_baseline_cm and
+# measured_at. Do not commit this file renamed until the numbers are measured.
 #
-# Preferred field rig for a ~0.5 m zero-turn: calibrated forward stereo
-# (~8 cm baseline, inside the 6–12 cm band) + side/rear mono.
 # Body frame: x forward, y left, z up.
-#
-# The default gym 6-cam look-around (front_left/right at ±40° / ±20 cm)
-# is NOT a stereo pair — find_stereo_pair rejects it.
-#
-# Live control uses near-field disparity in the 0.8–4 m band.
-# Not COLMAP. Not a full-yard SfM DEM. fps_claim / map_claim stay null.
+# Forward stereo baseline must stay in the 6–12 cm band.
+# Live control: near-field disparity 0.8–4 m. Not COLMAP. fps_claim null.
 
 calibration:
-  measured: false
-  template: false
-  measured_at: ""
-  tape_baseline_cm: null
-  notes: "EXAMPLE poses. Do not treat as taped hardware."
+  measured: true
+  template: true
+  measured_at: ""          # ISO date after the bench, e.g. 2026-09-16
+  tape_baseline_cm: null   # fill with the taped optical-centre distance
+  notes: "TEMPLATE. Replace poses before treating as MEASURED."
 
 sensors:
   width: 80

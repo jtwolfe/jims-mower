@@ -109,6 +109,21 @@ class ToFConfig:
 
 
 @dataclass
+class CalibrationConfig:
+    """Extrinsics provenance. Example YAML stays ``measured: false``.
+
+    See ``docs/CALIBRATION.md``. A human on the rig still has to tape
+    the baseline and commit ``extrinsics_stereo_measured.yaml``.
+    """
+
+    measured: bool = False
+    template: bool = False
+    measured_at: str = ""
+    tape_baseline_cm: Optional[float] = None
+    notes: str = ""
+
+
+@dataclass
 class SensorsConfig:
     width: int = 80
     height: int = 60
@@ -499,6 +514,7 @@ class EnvConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     faults: FaultsConfig = field(default_factory=FaultsConfig)
     radio: RadioConfig = field(default_factory=RadioConfig)
+    calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
 
     def resolved_cameras(self) -> list[CameraSpec]:
         """Return the 4–6 camera rig, applying the default FOV when needed."""
@@ -889,6 +905,9 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     names = [c.name for c in cams]
     if len(names) != len(set(names)):
         raise ConfigError(f"Camera names must be unique: {names}")
+    cal = cfg.calibration
+    if cal.tape_baseline_cm is not None and float(cal.tape_baseline_cm) <= 0.0:
+        raise ConfigError("calibration.tape_baseline_cm must be positive when set")
     return cfg
 
 

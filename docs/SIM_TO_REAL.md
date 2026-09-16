@@ -40,9 +40,13 @@ obs key.
    bench (`runtime.watchdog.enabled` / `configs/orin/bench.yaml`)
 4b. Keep `HardwareEstop` as the last rail filter (paddle / `hw_reset`)
 5. Load [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
-   (forward 6–12 cm pair + side/rear mono). The look-around file
+   (forward 6–12 cm pair + side/rear mono) as the **EXAMPLE**. After the
+   bench in [`CALIBRATION.md`](CALIBRATION.md), load
+   `extrinsics_stereo_measured.yaml` (`calibration.measured: true`).
+   The look-around file
    [`extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml) is
    the gym default and is **not** a stereo pair.
+   `jims-mower-calibrate` prints the checklist and rejects non-pairs.
 
 See [`JETSON.md`](JETSON.md) and [`runtime_contract.md`](runtime_contract.md).
 No FPS / mAP numbers belong in that swap.
