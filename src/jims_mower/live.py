@@ -150,6 +150,7 @@ def owner_copy_for(
     *,
     taught: bool = False,
     fence_unusable: bool = False,
+    done: bool = False,
 ) -> str:
     if job_state == "estop":
         return OWNER_COPY["estop"]
@@ -160,6 +161,8 @@ def owner_copy_for(
             return OWNER_COPY["immobilised"]
         if code == "STUCK":
             return OWNER_COPY["stuck"]
+    if done and job_state == "idle":
+        return OWNER_COPY["complete"]
     if job_state == "teach" or phase == "teach":
         return OWNER_COPY["teach"]
     if fence_unusable:
@@ -510,6 +513,8 @@ class LiveSession:
         if terminated or truncated or self.policy.done:
             self.done = True
             self._capture_summary()
+            if self.policy.phase.value == "complete":
+                self.job_state = "idle"
         force_map = self.policy.phase.value != self._last_phase
         if self.policy.phase.value == "review" and self._last_phase != "review":
             self._review_wall0 = time.perf_counter()
@@ -525,6 +530,7 @@ class LiveSession:
 
     def run_n(self, n: int) -> dict[str, Any]:
         self.unattended = True
+        self._stop.clear()
         if self.job_state == "idle":
             self.job_state = "running"
             self._t0_wall = time.perf_counter()
@@ -593,8 +599,8 @@ class LiveSession:
             if kwargs.get("speed") is not None:
                 self.speed = parse_speed(kwargs.get("speed"))
             self.estop = False
-            if self._needs_taught_job_reset():
-                self._reset_for_taught_job()
+            if self._needs_job_rebuild():
+                self._reset_for_next_job()
             if self.policy is not None:
                 self.policy.clear_owner_hold()
                 if self.policy.safe.mode == "estop":
@@ -611,8 +617,8 @@ class LiveSession:
         elif key == "resume":
             if self.job_state in {"paused", "hold"} or self.done:
                 self.estop = False
-                if self._needs_taught_job_reset():
-                    self._reset_for_taught_job()
+                if self._needs_job_rebuild():
+                    self._reset_for_next_job()
                 if self.policy is not None:
                     self.policy.clear_owner_hold()
                 self.job_state = "running"
@@ -713,6 +719,33 @@ class LiveSession:
             self.job_state = "running"
             self._t0_wall = time.perf_counter()
 
+    def _needs_job_rebuild(self) -> bool:
+        """Start/resume must rebuild after a finished job or a taught fence."""
+        if self.done:
+            return True
+        if self.policy is not None and self.policy.phase.value in {"complete", "fault", "safe"}:
+            return True
+        return self._needs_taught_job_reset()
+
+    def _reset_for_next_job(self) -> None:
+        """Rebuild env/policy for a new Start. Keeps the taught yard if any."""
+        paired = self.paired
+        taught = self.owner_taught
+        profile = self.yard_profile
+        first = self.first_run
+        dest = self.yard_path
+        self.stop()
+        self.yard_profile = profile
+        self.owner_taught = taught
+        self.first_run = first
+        self.yard_path = dest
+        if taught and profile is not None:
+            self._apply_usable_keep_in(profile)
+            self._snap_home_inside_keep_in(profile)
+        self.reset()
+        self.paired = paired
+        self.done = False
+
     def _needs_taught_job_reset(self) -> bool:
         """True when Start must rebuild so a saved fence skips authored calibrate.
 
@@ -741,21 +774,7 @@ class LiveSession:
         """Rebuild the env/policy so Start uses the saved YardProfile as fence."""
         if not self.owner_taught or self.yard_profile is None:
             return
-        self._apply_usable_keep_in(self.yard_profile)
-        self._snap_home_inside_keep_in(self.yard_profile)
-        paired = self.paired
-        taught = self.owner_taught
-        profile = self.yard_profile
-        first = self.first_run
-        dest = self.yard_path
-        self.stop()
-        self.yard_profile = profile
-        self.owner_taught = taught
-        self.first_run = first
-        self.yard_path = dest
-        self.reset()
-        self.paired = paired
-        self.done = False
+        self._reset_for_next_job()
 
     def _snap_home_inside_keep_in(self, profile: YardProfile) -> None:
         """Keep spawn inside the taught fence so Start does not OOB/drain-drop."""
@@ -1039,6 +1058,7 @@ class LiveSession:
             actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
             yard=str(self.config_name),
             wall_s=wall,
+            info=self.info if isinstance(self.info, dict) else None,
         )
 
     def _capture_summary(self) -> None:
@@ -1206,6 +1226,7 @@ class LiveSession:
                 fault,
                 taught=self.owner_taught,
                 fence_unusable=fence_unusable,
+                done=self.done,
             ),
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
@@ -1227,6 +1248,7 @@ class LiveSession:
             "map_pct": float(status["map_completion"]),
             "cut_pct": float(status["actual_coverage_fraction"]),
             "coverage_pct": float(status["actual_coverage_fraction"]),
+            "world_cut_pct": float(status.get("world_coverage_fraction") or 0.0),
             "planned_pct": float(status.get("planned_coverage_fraction") or 0.0),
             "reachable": int(status.get("reachable_mowable_cells") or 0),
             "unreachable": int(status.get("unreachable_mowable_cells") or 0),

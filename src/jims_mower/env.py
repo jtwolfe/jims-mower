@@ -551,7 +551,11 @@ class MowerEnv(gym.Env):
         cord_hit = None
         if self._trimmer_on:
             hx, hy = trimmer_xy(self._pose, self.cfg.robot.trimmer.offset_m)
-            newly = self._coverage.mark_circle(hx, hy, self.cfg.robot.trimmer.radius_m)
+            radius = float(self.cfg.robot.trimmer.radius_m)
+            cover = float(getattr(self.cfg.mission, "cover_radius_m", 0.0) or 0.0)
+            if cover > 0.0:
+                radius = max(radius, cover)
+            newly = self._coverage.mark_circle(hx, hy, radius)
             cord_hit = cutter_risk_hit(
                 (hx, hy),
                 self._yard.obstacles,
@@ -954,6 +958,9 @@ class MowerEnv(gym.Env):
                 "roll": self._pose.roll,
             },
             "coverage_fraction": self._coverage.coverage_fraction(),
+            "coverage_cut_cells": self._coverage.cut_cell_count(),
+            "coverage_grass_cells": self._coverage.grass_cell_count(),
+            "coverage_cut": (self._coverage.cut & self._coverage.grass),
             "detections": [d.as_dict() for d in detections],
             "tracklets": [t.as_dict() for t in tracklets],
             "grass_vision": vision,

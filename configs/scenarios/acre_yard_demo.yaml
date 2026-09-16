@@ -8,9 +8,10 @@ name: acre_yard_demo
 description: >
   LIVE DEMO of the one-acre yard: same 70×58 m features and true-height
   physics as acre_yard, with a slightly tighter keep-in, a short
-  calibrate confirmation, and a demo explore_complete (0.42) so --speed 5
-  can reach MAP READY then MOW in minutes. Full acre_yard stays at 0.72
-  and a full fence lap. Not a mow-to-completion benchmark.
+  calibrate confirmation, demo explore_complete (0.42), then a demo mow
+  budget (max_mow_steps / mow_complete_frac) so --speed 5 can paint and
+  return_home → complete. Full acre_yard stays at 0.72 / full fence lap
+  and is the honest long run. Not a coverage benchmark.
 base: default
 weather:
   lighting: day
@@ -168,13 +169,19 @@ mission:
   camera_range_m: 10.5
   max_calibrate_steps: 280
   max_explore_steps: 1400
-  max_mow_steps: 5000
-  max_return_steps: 600
+  # Demo mow budget. acre_yard stays at 8000 / no early home.
+  max_mow_steps: 1600
+  max_return_steps: 400
   snapshot_stride: 40
   # Demo threshold only. acre_yard stays at 0.72 / full lap.
   explore_complete: 0.42
   explore_no_frontier: 0.28
   explore_cruise: 0.98
+  mow_cruise: 0.92
+  mow_complete_frac: 0.10
+  cover_radius_m: 0.70
+  mow_skip_cluster: 8
+  mow_stop_cool: 12
   calibrate_stride_m: 3.2
   calibrate_cruise: 1.0
   calibrate_arrive_m: 2.0

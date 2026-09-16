@@ -155,6 +155,9 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "Teach boundary" in js
         assert "Save yard" in js
         assert "Inject SOS" in js
+        assert "session-card" in js
+        assert "cut-pct" in js
+        assert "session_summary" in js
 
         conn = HTTPConnection(host, port, timeout=6.0)
         conn.request("GET", "/viewer")

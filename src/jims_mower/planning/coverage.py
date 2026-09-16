@@ -35,6 +35,7 @@ class CoveragePlan:
     planned_mowable_cells: int = 0
     reachable_mowable_cells: int = 0
     unreachable_mowable_cells: int = 0
+    unmapped_mowable_cells: int = 0
     planned_coverage_fraction: float = 0.0
     unreachable_cells: list[tuple[int, int]] = field(default_factory=list)
     orientation_rad: float = 0.0
@@ -51,6 +52,7 @@ class CoveragePlan:
             "planned_mowable_cells": int(self.planned_mowable_cells),
             "reachable_mowable_cells": int(self.reachable_mowable_cells),
             "unreachable_mowable_cells": int(self.unreachable_mowable_cells),
+            "unmapped_mowable_cells": int(self.unmapped_mowable_cells),
             "planned_coverage_fraction": float(self.planned_coverage_fraction),
             "n_waypoints": len(self.waypoints),
             "orientation_rad": float(self.orientation_rad),
@@ -269,10 +271,16 @@ def connected_components(mask: np.ndarray) -> list[list[tuple[int, int]]]:
     return comps
 
 
-def reachable_mask(costmap: Costmap, start: tuple[int, int]) -> np.ndarray:
+def reachable_mask(
+    costmap: Costmap,
+    start: tuple[int, int],
+    *,
+    blocked: Optional[np.ndarray] = None,
+) -> np.ndarray:
     """8-connected flood of unblocked cells from ``start``."""
+    block = costmap.blocked if blocked is None else np.asarray(blocked, dtype=bool)
     reach = np.zeros((costmap.rows, costmap.cols), dtype=bool)
-    if costmap.blocked[start]:
+    if block[start]:
         return reach
     stack = [start]
     reach[start] = True
@@ -283,11 +291,40 @@ def reachable_mask(costmap: Costmap, start: tuple[int, int]) -> np.ndarray:
             nr, nc = r + dr, c + dc
             if not (0 <= nr < rows and 0 <= nc < cols):
                 continue
-            if reach[nr, nc] or costmap.blocked[nr, nc]:
+            if reach[nr, nc] or block[nr, nc]:
                 continue
             reach[nr, nc] = True
             stack.append((nr, nc))
     return reach
+
+
+def drop_unmapped_islands(
+    costmap: Costmap,
+    sweep: np.ndarray,
+    start: tuple[int, int],
+    soft_transit: Optional[np.ndarray] = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Drop fog islands that are only cut off by unknown, not a real obstacle.
+
+    Camera stamps on a taught rectangle leave disconnected observed patches.
+    Those are unmapped leftover, not ``unreachable`` grass the job failed to
+    reach. A drain / shed / pond that still blocks after treating unknown as
+    transit stays unreachable.
+    """
+    mask = np.asarray(sweep, dtype=bool)
+    reach = reachable_mask(costmap, start)
+    isolated = mask & ~reach
+    if soft_transit is None or not np.any(isolated):
+        return mask, np.zeros_like(mask, dtype=bool)
+    soft = np.asarray(soft_transit, dtype=bool)
+    if soft.shape != mask.shape:
+        return mask, np.zeros_like(mask, dtype=bool)
+    opened = costmap.blocked & ~soft
+    reach_if = reachable_mask(costmap, start, blocked=opened)
+    fog = isolated & reach_if
+    cleaned = mask.copy()
+    cleaned[fog] = False
+    return cleaned, fog
 
 
 def _strips_on_mask(
@@ -339,6 +376,7 @@ def plan_coverage(
     energy_aware: bool = False,
     orientation_rad: Optional[float] = None,
     elevation: Optional[np.ndarray] = None,
+    soft_transit: Optional[np.ndarray] = None,
 ) -> CoveragePlan:
     """Lawnmower (boustrophedon) strips on free cells, A* across gaps.
 
@@ -346,8 +384,10 @@ def plan_coverage(
     sweep targets — typically uncut grass. Transit A* may still cross any
     unblocked cell so the robot can go around a drain.
 
-    Disconnected components that A* cannot reach are counted as
-    ``unreachable_mowable_cells`` instead of being dropped silently.
+    Disconnected components that A* cannot reach because of a real
+    obstacle are counted as ``unreachable_mowable_cells``. Fog islands
+    that are only cut off by unknown (``soft_transit``) are dropped from
+    the planned set instead of inflating unreachable.
     Strip axis follows ``orientation_rad`` (0 = east–west travel) or a
     principal-axis / slope choice when ``elevation`` is given.
     """
@@ -369,16 +409,20 @@ def plan_coverage(
     )
     axis = "col" if abs(math.sin(heading)) > abs(math.cos(heading)) else "row"
 
-    planned_n = int(sweep.sum())
     start_cell = costmap.nearest_free(*start_xy)
+    unmapped_n = 0
     unreachable: list[tuple[int, int]] = []
-    if start_cell is not None and planned_n:
+    if start_cell is not None and int(sweep.sum()):
+        cleaned, fog = drop_unmapped_islands(costmap, sweep, start_cell, soft_transit)
+        unmapped_n = int(fog.sum())
+        sweep = cleaned
         reach = reachable_mask(costmap, start_cell)
         isolated = sweep & ~reach
         if np.any(isolated):
             ys, xs = np.where(isolated)
             unreachable.extend((int(r), int(c)) for r, c in zip(ys.tolist(), xs.tolist()))
             sweep[isolated] = False
+    planned_n = int(sweep.sum()) + len(unreachable)
 
     segments: list[list[tuple[int, int]]] = _strips_on_mask(sweep, strip_step, axis=axis)
 
@@ -445,6 +489,7 @@ def plan_coverage(
         planned_mowable_cells=planned_n,
         reachable_mowable_cells=reachable_n,
         unreachable_mowable_cells=unreach_n,
+        unmapped_mowable_cells=unmapped_n,
         planned_coverage_fraction=frac,
         unreachable_cells=unreachable,
         orientation_rad=heading,

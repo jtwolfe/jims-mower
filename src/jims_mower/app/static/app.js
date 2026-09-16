@@ -265,7 +265,11 @@
 
   function sessionCardHtml(st, live) {
     const card = (live && live.session_summary) || st.session_summary || {};
-    const done = !!(st.done || (live && (live.done || live.phase === "complete" || live.phase === "return_home")));
+    const done = !!(
+      st.done ||
+      (live && (live.done || live.phase === "complete" || live.phase === "return_home")) ||
+      card.phase === "complete"
+    );
     if (!done || !card || !card.schema) return "";
     const reach = card.reachable || 0;
     const unreach = card.unreachable || 0;
@@ -505,6 +509,15 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (mapEl && frame.map_pct != null) mapEl.textContent = `${(100 * Number(frame.map_pct)).toFixed(1)}%`;
     const cutEl = $("#cut-pct");
     if (cutEl && frame.cut_pct != null) cutEl.textContent = `${(100 * Number(frame.cut_pct)).toFixed(1)}%`;
+    if (state.status) {
+      state.status.cut_pct = 100 * Number(frame.cut_pct || 0);
+      state.status.done = !!(frame.done || frame.phase === "complete");
+      if (frame.session_summary) state.status.session_summary = frame.session_summary;
+    }
+    if (frame.done && !$("#session-card") && route() === "map") {
+      render();
+      return;
+    }
     const fog = $("#fog-img");
     if (fog && frame.fog_url) fog.src = frame.fog_url;
     const obs = $("#obs-img");

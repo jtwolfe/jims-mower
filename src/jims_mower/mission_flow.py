@@ -21,7 +21,6 @@ from typing import Any, Optional
 import numpy as np
 
 from jims_mower.config import EnvConfig, MissionConfig
-from jims_mower.constants import MISSION_FLOW_SCHEMA, MISSION_PHASES, SESSION_SCHEMA, TERRAIN_ADVICE
 from jims_mower.faults import fault_is_immobilised, fault_is_retrieve
 from jims_mower.geofence import GeofenceSpec
 from jims_mower.kinematics import unicycle_from_wheels
@@ -33,6 +32,18 @@ from jims_mower.planning.controller import (
     tracking_action,
 )
 from jims_mower.planning.costmap import build_costmap
+from jims_mower.constants import (
+    HAZARD_DRAIN,
+    MISSION_FLOW_SCHEMA,
+    MISSION_PHASES,
+    SESSION_SCHEMA,
+    STRUCTURE_BUILDING,
+    STRUCTURE_BUNKER,
+    STRUCTURE_GARDEN,
+    STRUCTURE_GREEN,
+    STRUCTURE_POND,
+    TERRAIN_ADVICE,
+)
 from jims_mower.planning.coverage import (
     CoveragePlan,
     choose_strip_orientation,
@@ -166,6 +177,7 @@ class MissionPolicy:
         self._skipped_global: list[tuple[float, float]] = []
         self._frontier_xy: list[tuple[float, float]] = []
         self._replan_cool = 0
+        self._stop_cool = 0
         self._calibrate_stall = 0
         self._authored_structure: Optional[np.ndarray] = None
         self.fence_unusable = False
@@ -304,6 +316,7 @@ class MissionPolicy:
         self._skipped_global = []
         self._frontier_xy = []
         self._replan_cool = 0
+        self._stop_cool = 0
         self._calibrate_stall = 0
         self.fence_unusable = False
         self.safe.reset()
@@ -405,7 +418,8 @@ class MissionPolicy:
         conf = omap.mean_confidence(keep) if omap is not None else 0.0
         mowable_n = int(omap.mowable_mask(keep).sum()) if omap is not None else 0
         plan = self.global_plan
-        actual = float((info or {}).get("coverage_fraction") or 0.0)
+        world = float((info or {}).get("coverage_fraction") or 0.0)
+        actual = self._job_cut_fraction(info, plan, world)
         reachable = plan.reachable_mowable_cells if plan is not None else 0
         unreachable = plan.unreachable_mowable_cells if plan is not None else 0
         planned = plan.planned_mowable_cells if plan is not None else mowable_n
@@ -421,8 +435,10 @@ class MissionPolicy:
             "planned_mowable_cells": planned,
             "reachable_mowable_cells": reachable,
             "unreachable_mowable_cells": unreachable,
+            "unmapped_mowable_cells": int(plan.unmapped_mowable_cells) if plan else 0,
             "planned_coverage_fraction": plan.planned_coverage_fraction if plan else 0.0,
             "actual_coverage_fraction": actual,
+            "world_coverage_fraction": world,
             "n_frontiers": len(self._frontier_xy),
             "n_waypoints": len(self.waypoints),
             "waypoint_index": self.index,
@@ -677,18 +693,35 @@ class MissionPolicy:
             self._emit("mow_budget", {"waypoints_left": max(0, len(self.global_plan.waypoints) - self.index)})
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
+        if self._mow_paint_done(info):
+            self._emit(
+                "mow_complete",
+                {
+                    **self.global_plan.as_metrics(),
+                    "reason": "demo_cut",
+                    "cut_pct": self._job_cut_fraction(
+                        info, self.global_plan, float((info or {}).get("coverage_fraction") or 0.0)
+                    ),
+                },
+            )
+            self._transition(MissionPhase.RETURN_HOME)
+            return self._hold()
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
+        if advice == "stop" and self._stop_cool > 0:
+            # After a ridge skip, keep painting instead of crawling reverse.
+            advice = "slow"
+            self._stop_cool -= 1
         if advice == "stop":
             # Ridge / IMU tip-stop: reverse, pivot off the lip, then skip a
-            # short cluster and replan. Twelve single skips used to home the
-            # job before coverage paint could show. Do not limp-park here.
+            # short cluster and keep tracking. Do not limp-park here.
             self._calibrate_stall += 1
             if self._calibrate_stall == 1:
                 return self._reverse_nudge(pose)
             if self._calibrate_stall == 2:
                 return self._lateral_nudge(pose)
+            skipped_now = False
             if self._calibrate_stall >= 3 and self.index < len(self.global_plan.waypoints):
-                cluster = min(4, max(1, len(self.global_plan.waypoints) - self.index))
+                cluster = self._mow_skip_count()
                 for _ in range(cluster):
                     if self.index >= len(self.global_plan.waypoints):
                         break
@@ -700,7 +733,9 @@ class MissionPolicy:
                     )
                     self.index += 1
                 self._calibrate_stall = 0
+                self._stop_cool = max(1, int(self.settings.mow_stop_cool))
                 self._local_replan(obs, pose)
+                skipped_now = True
             skip_limit = 48
             min_mow = 80
             if len(self._skipped_global) >= skip_limit and self.phase_step >= min_mow:
@@ -713,6 +748,20 @@ class MissionPolicy:
                     },
                 )
                 self._transition(MissionPhase.RETURN_HOME)
+                return self._hold()
+            if skipped_now:
+                # Skip landed — drive the next waypoint this step.
+                if self.index >= len(self.global_plan.waypoints):
+                    self._emit("mow_complete", self.global_plan.as_metrics())
+                    self._transition(MissionPhase.RETURN_HOME)
+                    return self._hold()
+                return self._track_list(
+                    self.global_plan.waypoints,
+                    pose,
+                    cruise=float(self.settings.mow_cruise),
+                    advice="slow",
+                    trimmer=1.0,
+                )
             return self._hold()
         self._calibrate_stall = 0
         if self.index >= len(self.global_plan.waypoints):
@@ -879,6 +928,7 @@ class MissionPolicy:
             mowable=mowable,
             orientation_rad=heading,
             elevation=elevation,
+            soft_transit=self._soft_transit_mask(keep, structure, raw_hazard),
         )
 
     def _local_replan(self, obs: dict[str, Any], pose: Pose) -> None:
@@ -963,6 +1013,82 @@ class MissionPolicy:
 
     def _body_ignore_m(self) -> float:
         return float(self.cfg.robot.collision_radius_m) + 0.45
+
+    def _soft_transit_mask(
+        self,
+        keep: Optional[np.ndarray],
+        structure: np.ndarray,
+        hazard: np.ndarray,
+    ) -> Optional[np.ndarray]:
+        """Unknown cells inside keep-in that are not a real obstacle.
+
+        Used only to classify fog islands vs drain/shed islands.
+        """
+        if self.observed is None:
+            return None
+        unknown = ~np.asarray(self.observed.observed, dtype=bool)
+        hard = np.isin(
+            np.asarray(structure),
+            (
+                STRUCTURE_BUILDING,
+                STRUCTURE_BUNKER,
+                STRUCTURE_GARDEN,
+                STRUCTURE_GREEN,
+                STRUCTURE_POND,
+            ),
+        )
+        channel = np.asarray(hazard, dtype=np.float32) >= HAZARD_DRAIN
+        soft = unknown & ~hard & ~channel
+        if keep is not None:
+            soft = soft & np.asarray(keep, dtype=bool)
+        return soft
+
+    def _job_cut_fraction(
+        self,
+        info: Optional[dict[str, Any]],
+        plan: Optional[CoveragePlan],
+        world: float,
+    ) -> float:
+        """Cut of the planned reachable lawn when a plan exists.
+
+        World grass on an acre is thousands of cells; 1% world looks stuck
+        even while strips paint. Owner cut % is job progress on the frozen
+        plan. ``world_coverage_fraction`` stays on status for honesty.
+        """
+        blob = info or {}
+        reachable = int(getattr(plan, "reachable_mowable_cells", 0) or 0) if plan is not None else 0
+        if plan is None or reachable <= 0:
+            return float(world)
+        denom = max(1, reachable)
+        raster = blob.get("coverage_cut")
+        keep = self.keep_in_mask
+        painted = 0
+        if raster is not None and keep is not None:
+            cut = np.asarray(raster)
+            if cut.shape == keep.shape:
+                painted = int((cut.astype(bool) & np.asarray(keep, dtype=bool)).sum())
+        cut_cells = int(blob.get("coverage_cut_cells") or 0)
+        n = max(painted, cut_cells)
+        if n > 0:
+            return float(min(1.0, n / denom))
+        return float(world)
+
+    def _mow_paint_done(self, info: Optional[dict[str, Any]]) -> bool:
+        target = float(self.settings.mow_complete_frac or 0.0)
+        if target <= 0.0 or self.global_plan is None:
+            return False
+        world = float((info or {}).get("coverage_fraction") or 0.0)
+        return self._job_cut_fraction(info, self.global_plan, world) >= target
+
+    def _mow_skip_count(self) -> int:
+        n = max(1, int(self.settings.mow_skip_cluster or 4))
+        if self.global_plan is None:
+            return n
+        left = max(1, len(self.global_plan.waypoints) - self.index)
+        short = min(float(self.cfg.world.width_m), float(self.cfg.world.height_m))
+        if short >= 24.0:
+            n = max(n, 8)
+        return min(n, left)
 
     def _safe_path(
         self,
@@ -1069,7 +1195,7 @@ class MissionPolicy:
         # Ridge IMU stop during mow is a skip/replan, not a limp-park.
         safe_advice = advice
         if (
-            self.phase == MissionPhase.MOW
+            self.phase in {MissionPhase.MOW, MissionPhase.RETURN_HOME}
             and advice == "stop"
             and not bool(info.get("tipover"))
             and not bool(info.get("drain_drop"))
@@ -1097,6 +1223,7 @@ class MissionPolicy:
                 MissionPhase.EXPLORE,
                 MissionPhase.REVIEW,
                 MissionPhase.MOW,
+                MissionPhase.RETURN_HOME,
             }
             and not self.help_requested
             and not bool(info.get("tipover"))
@@ -1270,6 +1397,10 @@ def _fast_settings(base: MissionConfig) -> MissionConfig:
         calibrate_confirm_m=float(base.calibrate_confirm_m or 0.0),
         phase_budget_scale=1.0,
         review_hold_steps=min(2, int(base.review_hold_steps or 2)),
+        mow_complete_frac=float(base.mow_complete_frac or 0.0),
+        cover_radius_m=float(base.cover_radius_m or 0.0),
+        mow_skip_cluster=max(4, int(base.mow_skip_cluster or 4)),
+        mow_stop_cool=max(6, int(base.mow_stop_cool or 10)),
     )
 
 
@@ -1440,9 +1571,14 @@ def session_summary(
     yard: str = "",
     duration_s: float = 0.0,
     wall_s: float = 0.0,
+    info: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Owner end-of-job card: map / planned / cut / skips / duration."""
-    status = policy.status({"coverage_fraction": actual_coverage})
+    extra: dict[str, Any] = {"coverage_fraction": actual_coverage}
+    if info:
+        extra.update(info)
+        extra["coverage_fraction"] = actual_coverage
+    status = policy.status(extra)
     dt = float(getattr(policy.cfg, "dt", 0.10) or 0.10)
     sim_s = duration_s if duration_s > 0.0 else float(policy.step) * dt
     return {
@@ -1455,6 +1591,7 @@ def session_summary(
         "reachable": int(status.get("reachable_mowable_cells") or 0),
         "unreachable": int(status.get("unreachable_mowable_cells") or 0),
         "cut_pct": float(status["actual_coverage_fraction"]),
+        "world_cut_pct": float(status.get("world_coverage_fraction") or 0.0),
         "skips": int(status.get("skipped_global") or 0),
         "duration_s": float(sim_s),
         "wall_s": float(wall_s),
