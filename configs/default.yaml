@@ -105,6 +105,12 @@ perception:
   weights_path: ""
   onnx_path: ""
   temporal: false
+  # color: palette uncut fraction (default). class: terrain-seg grass vs
+  # non-grass when labels exist, colour fallback. feature: 6-stat mix.
+  grass_mode: color
+  # Phone cut % source. gym_grid is the live default (god-view grass
+  # raster). observer is opt-in CV-2 BEV — still not a field strip test.
+  coverage_source: gym_grid
   detector_backend: mock
 
 planner:

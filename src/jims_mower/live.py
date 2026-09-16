@@ -1397,6 +1397,7 @@ class LiveSession:
             "map_pct": float(status["map_completion"]),
             "cut_pct": float(status["actual_coverage_fraction"]),
             "coverage_pct": float(status["actual_coverage_fraction"]),
+            "coverage_source": str(status.get("coverage_source") or (self.info or {}).get("coverage_source") or "gym_grid"),
             "world_cut_pct": float(status.get("world_coverage_fraction") or 0.0),
             "planned_pct": float(status.get("planned_coverage_fraction") or 0.0),
             "reachable": int(status.get("reachable_mowable_cells") or 0),

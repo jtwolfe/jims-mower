@@ -16,7 +16,7 @@ The on-box loop **must not** import `jims_mower.renderer` or call
 | `elevation` / `slope` / `hazard` / `confidence` | `TerrainObserver` + optional stereo stamp | Heuristic (live default) / learned / onnx / TensorRT placeholder. Metric near-field elev from a true stereo pair (`perception/stereo.py`); default gym look-arounds skip it. Not COLMAP. Sim ONNX is `sim_only`. |
 | `detections` | `Detector` | Padded `[label, cam, u, v, w, h, conf, signal]`. Mock projects obstacles; `AppearanceDetector` does not. |
 | `pose` | `EkfPoseFilter` / complementary | Planner start / attitude |
-| `coverage` | Your cut-map, or zeros | Gym writes the grass grid; on-box you own it |
+| `coverage` | Your cut-map, or zeros | Gym writes the grass grid (`coverage_source: gym_grid`). Opt-in observer BEV is not the phone default. |
 | `hand_signal` | Classifier stub or none | Discrete 0–4 |
 | `trimmer_enabled` | Interlock | After living-thing radius |
 

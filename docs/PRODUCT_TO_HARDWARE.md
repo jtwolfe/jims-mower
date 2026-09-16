@@ -99,7 +99,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | CV-1 | Terrain segmentation (drain / lip / bank / grass) | **partial** (software path this PR) | Trainable gym path: `jims_mower.dataset.v1` → numpy (or optional torch) MLP → optional ONNX. `OnnxTerrainObserver` loads via onnxruntime when present. Heuristic remains the **live default**. Sim weights are `sim_only` / not field-ready. Palette heuristic will not survive daylight grass. | Held-out **real** frames; report IoU per class only after a locked test set. Fail if you only have sim loss. **No invented IoU.** `iou_claim` stays null. Software tests: `tests/test_onnx.py`. | CV-8 dataset, RT-1 capture, HD-cam extrinsics |
-| CV-2 | Grass coverage observer | **stub** | `ColorGrassObserver` matches synthetic green; `FeatureGrassObserver` is a 6-stat mix. Cut % on the phone today is the *gym grass grid*, not this net. | On-box coverage drift vs painted/measured strips on one lawn, same day. | CV-1, MAP-1 |
+| CV-2 | Grass coverage observer | **partial** (gym this PR) | `ClassAwareGrassObserver` (`grass_mode: class`) uses terrain-seg classes (grass vs drain/lip/bank) when labels exist, else the palette heuristic. `ColorGrassObserver` / `FeatureGrassObserver` stay as fallbacks. Gym painted-strip error is in `tests/test_grass_coverage.py` — **not** field mAP. Phone cut % default is still the *gym grass grid* (`coverage_source: gym_grid`). Opt-in `coverage_source: observer` uses the class-aware BEV and sets `info["coverage_source"]`. Field strip test still needed. | Gym: coverage drift vs a painted cut/uncut/path fixture (report error in tests). Field: on-box vs painted/measured strips on one lawn, same day. No invented IoU. | CV-1, MAP-1 |
 | CV-3 | Person / animal / obstacle detect | **stub** | `MockDetector` **projects** `context.obstacles` (sim-only) and stays the gym default. `AppearanceDetector` (`detector_backend: appearance\|onnx`) ignores that list and returns `[]` until a real ONNX box head exists. `BlindDetector` returns `[]`. | Precision/recall on a recorded real walk-through with a person + dog + chair. Publish the set size. No fake mAP. | CV-8, RT-1 |
 | CV-4 | Tracking / tracklets | **stub** | Temporal association on whatever `detections` the detector emitted (`info["tracklets"]`). Not MOT. Still consumes the ICD `detections` key for living interlock. | ID-switch count on a 30 s real clip with one crossing. | CV-3 |
 | CV-5 | Hand signals | **stub** | Oracle person labels or crop brightness / red-bias classifier. | Confusion matrix on real stop/go/back clips, or **drop the feature** until CV-3 works. | CV-3 |
@@ -112,10 +112,10 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | MAP-1 | ObservedMap | **partial** | Works in sim: unknown ≠ safe; camera hits + body/ToF disk. Stamps **observer** rasters, so garbage in → garbage map. | After a real explore, fog holes match what the cameras saw; no authored shed leaked outside the mask. | CV-1, RT-1, RT-2 |
-| MAP-2 | Near-field metric stereo + frozen elev fuse | **partial** (this PR) | `find_stereo_pair` + gym synthetic stereo stamps local elev in the 0.8–4 m band onto `ObservedMap`. MAP READY `lock_observed()` so later stamps do not flop frozen cells. Default gym look-around rig is a **no-op** (not a pair). `fuse_height_rgb_tof` is still the old RGB-label + ToF-corner stub — not the live metric path. Not COLMAP. | Gym: stereo YAML stamps cells; lock holds after a flopping observer raster (`tests/test_stereo.py`). Field: kerb cross-section vs tape + IMU; no invented mAP / FPS. | CV-1, HD-cam stereo, RT-2 |
-| MAP-2b | Learned mono depth prior | **missing** | Orin-class depth net only as a prior fused with stereo / ToF. Never the sole metric source. | Ablation: stereo-only vs stereo+prior on one kerb; prior must not win when stereo is valid. | MAP-2, RT-3 |
-| MAP-3 | Loop closure / revisit | **stub** | `LoopClosureStub` occupancy fingerprint. `not_slam: true`. No pose-graph. | Return to dock after 1 acre explore; fence vertices stay inside a stated metre error vs teach. | RT-2 GNSS/IMU, MAP-1 |
-| MAP-3b | Sparse multi-view / pose assist | **missing** | Track features across the 4–6 cam rig + time; landmarks + wheel odom + IMU tilt (later RTK). Not a dense DEM each frame. | Drift vs teach vertices after a repetitive-grass loop; RTK-VIO later. | MAP-3, RT-2 |
+| MAP-2 | Near-field metric stereo + frozen elev fuse | **partial** (gym fuse this PR) | `fuse_elev_stereo_tof_imu` / `fuse_height_rgb_tof` unify gym **ideal** stereo (when a 6–12 cm pair exists) + ToF corners + local IMU grade onto `ObservedMap`. MAP READY `lock_observed()` so later stamps do not flop frozen cells. Default gym look-around rig is a **no-op** (not a pair). **Not** a field stereo matcher. Not COLMAP. `fps_claim` / `map_claim` stay null. | Gym: kerb/lip step vs known geometry (`tests/test_elev_fuse.py`); lock holds after a flopping observer raster. Field: kerb cross-section vs tape + IMU; no invented mAP / FPS. | CV-1, HD-cam stereo, RT-2 |
+| MAP-2b | Learned mono depth prior | **stub** (interface this PR) | `MonoDepthPrior` / `apply_mono_prior` fill *gaps* only. Valid stereo cells stay. No Orin depth net shipped. | Gym: prior cannot win when stereo is valid (`tests/test_elev_fuse.py`). Field: ablation stereo-only vs stereo+prior on one kerb. | MAP-2, RT-3 |
+| MAP-3 | Loop closure / revisit | **stub** | `LoopClosureStub` occupancy fingerprint + optional taught-vertex pull. `not_slam: true`. No pose-graph optimizer. | Gym: fence vertices stay inside a stated metre error on a loop (`tests/test_pose_assist.py`, 0.75 m). Field: return to dock after 1 acre explore. | RT-2 GNSS/IMU, MAP-1 |
+| MAP-3b | Sparse multi-view / pose assist | **stub** (gym this PR) | Landmark revisit on taught fence vertices (2-D translation, capped). Not feature tracks across the 4–6 cam rig. Not a dense DEM. | Gym: drifted revisit pulled toward teach vertices. Field: RTK-VIO later. | MAP-3, RT-2 |
 | MAP-3c | Offline docked densify | **missing** | Heavier multi-view pass while idle. True photogrammetry for the owner mesh only. Must not block the live mow loop. | Docked job writes a refined mesh; mow loop FPS / cycle time unchanged (measure later; do not invent). | MAP-2, RT-7 |
 | MAP-4 | Multi-session persistence | **partial** | `jims-mower-mission` saves map + uncut + pose for the **same sim process**. No day-2 load on a cold Orin with GNSS origin. | Power cycle, reload yesterday's yard, resume uncut without reteaching. | MAP-3, MAP-5 |
 | MAP-5 | Geofence on Earth | **partial** | Taught polygon in the gym metre frame. GNSS is a noisy `(x,y,z,valid)` in that frame, not WGS84. | Keep-in vertices + a surveyed origin; robot stops before the tape, not 3 m past. | RT-2 GNSS, UX teach |
@@ -279,16 +279,24 @@ Stop when only **fab + field test** remain.
     *Test (field):* recorded walk-through; living interlock (PLN-4) on
     those dets. No fake mAP.
 
-11. **Grass coverage observer (CV-2)** once terrain classes exist.
+11. **Grass coverage observer (CV-2)** (gym this PR). Class-aware
+    observer + painted-strip fixture. Phone cut % default remains
+    `gym_grid`; opt-in `observer`. Field strip test still needed.  
+    *Test:* `pytest tests/test_grass_coverage.py tests/test_perception.py`.  
+    *Honesty:* no field mAP / IoU. `map_claim` / `iou_claim` stay null.
 
-12. **Field stereo matcher + ToF / IMU fuse (MAP-2 on hardware).**
-    Replace gym ideal disparity. Learned mono depth only as a prior
-    (MAP-2b).  
-    *Test:* kerb step vs tape; locked cells still do not flop.
+12. **Gym elev fuse (MAP-2 gym this PR).** Stereo (ideal) + ToF + local
+    IMU onto `ObservedMap`; lock holds. Field stereo matcher still
+    later. MAP-2b is an interface only (prior cannot override stereo).  
+    *Test:* `pytest tests/test_elev_fuse.py tests/test_stereo.py`.  
+    *Honesty:* no matcher / FPS / mAP. Kerb vs tape in gym only.
 
-13. **Sparse pose assist / loop-closure good enough to hold the taught
-    fence (MAP-3, MAP-3b).** Still not “we shipped SLAM.” Offline
-    docked densify (MAP-3c) stays optional and off the live loop.
+13. **Sparse pose assist / loop-closure (focused, this PR).** Taught
+    fence vertices + occupancy fingerprint; 2-D pull, `not_slam: true`.
+    Offline docked densify (MAP-3c) stays optional and off the live
+    loop.  
+    *Test:* `pytest tests/test_pose_assist.py tests/test_wave4_mapping.py`.  
+    *Honesty:* not SLAM. Stated gym band 0.75 m.
 
 14. **Geofence in a surveyed frame (MAP-5)** + multi-session load (MAP-4).
 
@@ -319,17 +327,18 @@ not another WAVE of gym stubs.
 
 ## What this PR ships
 
-- Build-order **§9** (CV-1 / CV-6): train → ONNX → TRT **software
-  pipeline**. `jims-mower-train-terrain --onnx` writes a sim_only
-  Gemm graph when `pip install -e ".[onnx]"` is available.
-  `OnnxTerrainObserver` / `terrain_mode: onnx|trt|learned|heuristic`.
-  Heuristic remains the live mow default. `trtexec` dry-run unchanged.
-  **Not** a field-ready head. No held-out real IoU. `iou_claim` /
-  `map_claim` / `fps_claim` stay null.
-- Build-order **§10** (CV-3 / CV-4, focused scaffolding):
-  `AppearanceDetector` ignores `context.obstacles` and can load ONNX
-  later. `MockDetector` stays the gym default. Tracklets remain a stub.
-  Living interlock still reads the `detections` ICD key. No fake mAP.
-- Honest leftover: collect real labels per [`DATASET.md`](DATASET.md)
-  before any IoU claim. Do not start §11 (grass coverage field net) or
-  §12 (field stereo matcher) from this PR.
+- Build-order **§11** (CV-2, gym): `ClassAwareGrassObserver` uses
+  terrain-seg classes when available, colour heuristic otherwise.
+  Painted-strip fixture reports coverage error in tests. Owner cut %
+  default is still `coverage_source: gym_grid`. Opt-in `observer`.
+  **Not** a field grass net. No IoU / mAP.
+- Build-order **§12** (MAP-2 gym fuse): `fuse_elev_stereo_tof_imu`
+  unifies gym ideal stereo + ToF corners + local IMU. Locked cells
+  do not flop. MAP-2b `MonoDepthPrior` cannot override valid stereo.
+  **Not** a field stereo matcher.
+- Build-order **§13** (focused): `LoopClosureStub` landmark revisit
+  on taught fence vertices. `not_slam: true`. Stated gym error band
+  0.75 m. Not a pose-graph SLAM stack.
+- Honest leftover: field grass strips, real stereo matcher, real
+  kerb tape. Do not start §14+ (surveyed geofence Earth frame,
+  owner notifications, fab).

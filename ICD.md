@@ -122,6 +122,10 @@ class GrassObserver(Protocol):
 
 Per-camera uncut-grass fraction. Default: `ColorGrassObserver`.
 `FeatureGrassObserver` (`perception.grass_mode: feature`) is a numpy stub.
+`ClassAwareGrassObserver` (`perception.grass_mode: class`) uses terrain-seg
+classes when provided, else the palette heuristic. Owner cut % default is
+the gym grass grid (`info["coverage_source"] == "gym_grid"`). Opt-in
+`perception.coverage_source: observer` uses the class-aware BEV. Not field mAP.
 Optional `info["semantic"]` raster: grass / non-grass / drain / bank / static
 plus path / building / bunker / garden when a structure layer is present.
 
