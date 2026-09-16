@@ -229,7 +229,7 @@ See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
 ## Orin runtime
 
 - [x] Fake I2C / UART / CSI publishers matching the runtime contract (WAVE 3B)
-- [x] GStreamer / NVMM capture adapter that fills `obs["cameras"]` (WAVE 4 stub; Gst not in CI)
+- [x] GStreamer / NVMM capture adapter that fills `obs["cameras"]` (software path: FakeGst / FakeCsi at ICD size; `GstNvmmAdapter` raises without Gst; physical CSI still needs JetPack)
 - [x] TensorRT export **placeholder** (no ONNX shipped, no FPS) (WAVE 3B)
 - [x] TensorRT (or similar) behind `Detector` / `TerrainObserver` (WAVE 4 load-weights placeholder)
 - [x] Complementary filter / small EKF behind `ComplementaryPoseFilter` (WAVE 1B)

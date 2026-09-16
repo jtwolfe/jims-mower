@@ -162,8 +162,12 @@ mission:
 # WAVE 3B — Orin-class battery / thermal stub. Off by default so short
 # gym tests do not limp. Enable to scale / stop the policy when hot or empty.
 # Bench watchdog: set runtime.watchdog.enabled true (configs/orin/bench.yaml).
+# CSI adapter: "" / renderer (gym), fake_csi / fake_gst (CI), gst (raises
+# without JetPack). Downsample: runtime.capture.downsample_rgb.
 runtime:
   enabled: false
+  cameras:
+    adapter: ""
   watchdog:
     enabled: false
     imu_stall_s: 0.40

@@ -34,7 +34,11 @@ trained TensorRT engine.
 On-box loop (your code, not shipped):
 
 ```
-CSI / GStreamer / NVMM  →  CameraFrame   (`GstNvmmAdapter` stub; not in CI)
+CSI / GStreamer / NVMM  →  CameraFrame   (`GstNvmmAdapter` raises without Gst;
+                           CI uses FakeGstAdapter / FakeCsiDriver → obs["cameras"]
+                           at sensors.width × sensors.height. Downsample:
+                           runtime.capture.downsample_rgb. Prefer stereo_left /
+                           stereo_right + mono. Not physical CSI.)
 I2C IMU                 →  ImuSample
 UART GNSS               →  GpsFix
 I2C ToF                 →  TofArray
@@ -73,11 +77,16 @@ runtime:
     vision_stall_s: 0.40
 ```
 
-or load [`configs/orin/bench.yaml`](../configs/orin/bench.yaml). Fake
-adapters are fine; do not claim real CSI/IMU. Hardware ESTOP is a
-separate rail latch (`HardwareEstop`) — see [`ESTOP.md`](ESTOP.md).
+or load [`configs/orin/bench.yaml`](../configs/orin/bench.yaml) (also
+sets `runtime.cameras.adapter: fake_csi`). Fake adapters fill named
+`obs["cameras"]` at the ICD size; `GstNvmmAdapter` raises without Gst.
+Do not claim real CSI/IMU. Hardware ESTOP is a separate rail latch
+(`HardwareEstop`) — see [`ESTOP.md`](ESTOP.md).
 
-Example body-frame extrinsics: [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml).
+Prefer [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
+(`stereo_left` / `stereo_right` + mono). The look-around file
+[`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml)
+is the gym default and is **not** a stereo pair.
 
 ## Optional ROS 2
 
@@ -99,5 +108,6 @@ jims-mower-replay /tmp/ep --mode offline
 jims-mower-bridge /tmp/ep
 ```
 
-Downsample real cameras to the gym contract (default 80×60 in sim) before
-the observer. Keep rasters small.
+Downsample real cameras to the gym contract (default 80×60 in sim)
+in `jims_mower.runtime.capture.downsample_rgb` **before**
+`obs["cameras"]`. Keep rasters small. No FPS claim.

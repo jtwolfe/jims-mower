@@ -14,6 +14,7 @@ from jims_mower.sensors import (
     simulate_gps,
     simulate_imu,
     simulate_tof,
+    slide_board_under_wheel,
 )
 from jims_mower.types import Pose
 
@@ -108,6 +109,54 @@ def test_tof_count_masks_unused_corners() -> None:
     assert two[3] == pytest.approx(0.0)
     none = simulate_tof(raw, rng, noise_std_m=0.0, max_range_m=1.2, count=0)
     assert np.allclose(none, 0.0)
+
+
+def test_gym_tof_board_under_wheel_changes_corner() -> None:
+    env = MowerEnv(
+        config={
+            "sensors": {
+                "width": 16,
+                "height": 12,
+                "camera_count": 4,
+                "tof": {"count": 4, "noise_std_m": 0.0},
+                "imu": {"accel_noise_std": 0.0, "gyro_noise_std": 0.0, "accel_bias_std": 0.0},
+                "gps": {"dropout_prob": 0.0},
+            },
+            "world": {
+                "width_m": 8.0,
+                "height_m": 8.0,
+                "resolution_m": 0.20,
+                "n_people": 0,
+                "n_dogs": 0,
+                "n_cats": 0,
+                "n_birds": 0,
+                "n_trees": 0,
+                "n_furniture": 0,
+                "n_toys": 0,
+                "terrain": {"enabled": False},
+            },
+            "perception": {"terrain_mode": "blind"},
+        }
+    )
+    obs, _info = env.reset(seed=11)
+    before = np.asarray(obs["tof"], dtype=np.float32).copy()
+    assert before.shape == (4,)
+    refreshed = env.slide_board_under_wheel("FL", thickness_m=0.04)
+    after = np.asarray(refreshed["obs"]["tof"], dtype=np.float32)
+    assert after[0] < before[0] - 0.01
+    env.close()
+
+
+def test_slide_board_helper_raises_disk() -> None:
+    from jims_mower.terrain import HeightField
+    from jims_mower.types import Pose
+
+    hf = HeightField.empty(4.0, 4.0, 0.25)
+    pose = Pose(2.0, 2.0, 0.0)
+    wx, wy = slide_board_under_wheel(
+        hf, pose, "FR", length_m=0.50, track_m=0.40, thickness_m=0.05
+    )
+    assert hf.sample(wx, wy) > 0.02
 
 
 def test_env_obs_sensor_shapes() -> None:

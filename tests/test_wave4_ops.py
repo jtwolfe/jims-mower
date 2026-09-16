@@ -131,8 +131,9 @@ def test_gstreamer_stub_not_required() -> None:
     with pytest.raises(GstNotAvailable):
         real.capture()
     fake = FakeGstAdapter(["front"])
-    frames = fake.capture({"front": np.ones((6, 6, 3), dtype=np.uint8)})
-    assert frames["front"].shape == (6, 6, 3)
+    frames = fake.capture({"front": np.ones((24, 32, 3), dtype=np.uint8)})
+    assert frames["front"].shape == (60, 80, 3)
+    assert fake.fps_claim is None
 
 
 def test_trt_placeholder_falls_back() -> None:

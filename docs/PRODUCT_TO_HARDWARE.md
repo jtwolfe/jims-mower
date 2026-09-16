@@ -144,8 +144,8 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| RT-1 | CSI / GStreamer capture | **stub** | `GstNvmmAdapter` raises without Gst; CI uses `FakeGstAdapter` / `FakeCsiDriver`. | Named cameras (stereo pair + mono, or 4–6 look-around) fill `obs["cameras"]` at the ICD size; `SensorWatchdog` sees fresh stamps. | HD-cam, JetPack |
-| RT-2 | IMU / GNSS / ToF drivers | **stub** | Fake I2C/UART publishers copy **gym** vectors onto in-process queues. Addresses in `drivers.py` are documentation. | Same ICD keys from real BMI/ICM + GNSS + VL53-class parts; dropout sets `gps[3]=0`. | HD-place |
+| RT-1 | CSI / GStreamer capture | **partial** (software path this PR) | `FakeGstAdapter` / `FakeCsiDriver` fill named `obs["cameras"]` at the ICD contract size with fresh stamps. Downsample is `runtime.capture.downsample_rgb`. `GstNvmmAdapter` still raises without Gst. **Not** physical CSI — JetPack + real cameras still required. No FPS. | Named cameras (prefer `stereo_left` / `stereo_right` + mono) fill `obs["cameras"]` at `sensors.width` × `sensors.height`; `SensorWatchdog` stays happy on fresh stamps; freeze stamps → wheels zero. Field: plug CSI on the Orin (needs JetPack). | HD-cam, JetPack |
+| RT-2 | IMU / GNSS / ToF drivers | **partial** (gym stubs this PR) | Fake I2C/UART publishers still copy gym vectors onto in-process queues. Level-rest IMU, GNSS `valid` toggle, and ToF board-under-wheel fixture are writable. Addresses in `drivers.py` remain documentation. | Gym: rest IMU ≈ `(0,0,9.81,0,0,0)`; `valid` bit toggles; ToF corner shortens when a board is slid under a wheel. Field: same ICD keys from real BMI/ICM + GNSS + VL53-class parts. | HD-place |
 | RT-3 | TensorRT load | **stub** | See CV-6. | Engine deserializes; fallback still mock if path missing (keep that). | CV-6 |
 | RT-4 | Watchdog | **partial** (bench config + gym stamp stall this PR) | Zeros wheels if IMU/vision **stamps** freeze (`runtime.watchdog.enabled`). Off in default gym tests. Bench overlay: [`configs/orin/bench.yaml`](../configs/orin/bench.yaml). Fake adapters — not real CSI/IMU. | Gym: freeze IMU or camera stamps → wheels zero within `vision_stall_s` / configured stall (`tests/test_hardware_estop.py`, `tests/test_wave4_ops.py`). Field: unplug a camera on the wired rig (needs RT-1). | RT-1, RT-2 |
 | RT-5 | Battery / thermal telemetry | **stub** | `OrinBudget` 50 Wh class-scale RC. Not a BMS. | SOC and board °C from hardware; limp/stop match measured limits. | HD-batt |
@@ -176,7 +176,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| S2R-1 | ICD key match | **partial** | Contract is written. On-box sources are still fakes. | Laptop gym and Orin process the same key set; renderer never imported on-box. | RT-1…RT-3 |
+| S2R-1 | ICD key match | **partial** | Contract is written. Camera software path fills `obs["cameras"]`; IMU/GNSS/ToF/Gst chips are still fakes. | Laptop gym and Orin process the same key set; renderer never imported on-box. | RT-1…RT-3 |
 | S2R-2 | Extrinsics YAML | **partial** | `extrinsics_6cam.yaml` is the gym look-around **example**. Prefer `extrinsics_stereo.yaml` (6–12 cm forward pair + mono) for the field article. Neither is calibrated. | Reproject a checkerboard / drain lip; stereo pair verifies baseline + disparity vs tape. | HD-cam |
 | S2R-3 | Calibration bench | **missing** | No procedure beyond “copy, measure, replace the numbers.” | Written steps + a fixture; saved YAML committed as *measured*. | S2R-2 |
 | S2R-4 | Wheel / trimmer scale | **partial** | Action is ±1 of `max_wheel_speed_mps` (1.2). Real motors have different Kv / gearing. | 1.0 command → measured m/s within a stated %. | HD-drive |
@@ -224,14 +224,23 @@ Stop when only **fab + field test** remain.
    *Test:* `pytest tests/test_hardware_estop.py tests/test_wave4_ops.py -k watchdog`.  
    *Honesty:* stamps in the gym; field unplug still needs RT-1 / RT-2.
 
-5. **Real CSI / GStreamer → `obs["cameras"]` (RT-1).** Same names as
-   `CameraSpec` (prefer stereo_left / stereo_right + mono). Downsample
-   to the contract size.  
-   *Test:* named live frames; watchdog happy. No FPS claim.
+5. **Real CSI / GStreamer → `obs["cameras"]` (RT-1).** Software path
+   (this PR): same names as `CameraSpec` (prefer `stereo_left` /
+   `stereo_right` + mono). Downsample to the contract size in
+   `runtime.capture.downsample_rgb`. `GstNvmmAdapter` raises without
+   Gst; CI / bench use `FakeGstAdapter` / `FakeCsiDriver`. Physical
+   CSI on Orin still needs JetPack + real cameras.  
+   *Test:* `pytest tests/test_capture.py tests/test_wave4_ops.py -k gst`.
+   Named live frames; watchdog happy on fresh stamps; freeze stamps →
+   wheels zero (reuses §4). No FPS claim.
 
-6. **Real IMU + GNSS + ToF (RT-2).**  
-   *Test:* level rest IMU ≈ `(0,0,9.81,0,0,0)`; GNSS `valid` bit; ToF
-   corners change when you slide a board under a wheel.
+6. **Real IMU + GNSS + ToF (RT-2).** Gym stubs (this PR): Fake
+   publishers + a board-under-wheel fixture so the acceptance tests
+   are writable. Addresses stay documentation. Hardware chips still
+   required for the physical line.  
+   *Test:* `pytest tests/test_drivers.py tests/test_sensors.py -k "imu or gnss or tof or board"`.
+   Level rest IMU ≈ `(0,0,9.81,0,0,0)`; GNSS `valid` bit toggles; ToF
+   corners change when a board is slid under a wheel.
 
 7. **Extrinsics + stereo calibration bench (S2R-2, S2R-3).** Measure
    the 6–12 cm baseline, write YAML.  
@@ -291,11 +300,17 @@ not another WAVE of gym stubs.
 
 ## What this PR ships
 
-- Build-order **§3** (sim + doc): hardware ESTOP rail model
-  (`HardwareEstop`) + [`ESTOP.md`](ESTOP.md) paddle / fuse / reset.
-  Software ESTOP tests stay green. Field paddle test **not** claimed.
-- Build-order **§4** (gym / bench): `runtime.watchdog.enabled` overlay
-  [`configs/orin/bench.yaml`](../configs/orin/bench.yaml); stamp-based
-  stall; freeze IMU or camera stamps → wheels zero. No real CSI/IMU.
-- Checklist + [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §10 updated
-  honestly: sim/doc done, bench paddle still needed.
+- Build-order **§5** (software path): CSI / GStreamer → `obs["cameras"]`
+  (`runtime.capture`, `FakeGstAdapter` / `FakeCsiDriver`,
+  `GstNvmmAdapter` still raises without Gst). Named frames at the ICD
+  contract size with fresh stamps. Bench overlay
+  [`configs/orin/bench.yaml`](../configs/orin/bench.yaml) sets
+  `runtime.cameras.adapter: fake_csi`. Prefer
+  [`extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
+  names. **Not** physical CSI. No FPS.
+- Build-order **§6** (gym stubs): Fake IMU level-rest, GNSS `valid`
+  toggle, ToF board-under-wheel fixture so the gym acceptance tests
+  are green. Addresses remain documentation. **Not** real BMI / GNSS /
+  VL53.
+- Honest leftover: JetPack + cameras + chips still required for the
+  physical acceptance lines. Calibration bench (S2R-3) is the next PR.

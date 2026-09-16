@@ -26,7 +26,7 @@ the hub.
 
 | Key | Shape / type | Meaning |
 | --- | --- | --- |
-| `cameras` | dict name → `uint8 (H, W, 3)` | Pinhole RGB, body-frame rig. Field preference: `stereo_left` / `stereo_right` (6–12 cm, shared yaw/pitch) + side/rear mono. Default gym `front_left` / `front_right` are look-arounds, not a metric pair. |
+| `cameras` | dict name → `uint8 (H, W, 3)` | Pinhole RGB, body-frame rig. Field preference: `stereo_left` / `stereo_right` (6–12 cm, shared yaw/pitch) + side/rear mono. Default gym `front_left` / `front_right` are look-arounds, not a metric pair. Downsample to `sensors.width` × `sensors.height` (sim default 80×60) in `runtime.capture.downsample_rgb` before this key is filled. |
 | `coverage` | `float32 (R, C)` | `1` cut grass, `0` uncut, `−1` non-grass |
 | `occupancy` | `float32 (R, C)` | Detection-rasterized, not god-view |
 | `detections` | `float32 (24, 8)` | Padded `[label, cam, u, v, w, h, conf, signal]` |
@@ -141,6 +141,10 @@ with the other advice strings so a hot / low-SOC stub can limp or hold.
 
 On a laptop, `jims_mower.runtime.drivers` publish the same IMU / GNSS /
 camera / ToF contract kinds onto in-process queues (fake I2C / UART / CSI).
+`FakeGstAdapter` / `FakeCsiDriver` also write named `obs["cameras"]` at the
+contract size with fresh stamps (`runtime.cameras.adapter: fake_csi`).
+`GstNvmmAdapter` raises without GStreamer. Addresses in `drivers.py` are
+documentation.
 `jims-mower-bridge` replays a recorded episode through those queues. CI
 does not install ROS 2; optional `[ros2]` node stubs are import-guarded.
 `sensors.tof.count` is one of `{0, 2, 4}`. `runtime.enabled` defaults

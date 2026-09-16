@@ -10,6 +10,13 @@ without a circular import through record/replay.
 
 from jims_mower.runtime.budget import OrinBudget, budget_advice, budget_from_config
 from jims_mower.runtime.bus import InProcessBus
+from jims_mower.runtime.capture import (
+    CaptureResult,
+    downsample_rgb,
+    field_rig_yaml_path,
+    load_field_camera_specs,
+    names_from_specs,
+)
 from jims_mower.runtime.gstreamer import FakeGstAdapter, GstNvmmAdapter, gstreamer_available
 from jims_mower.faults import FaultBus
 from jims_mower.radio import RadioSim
@@ -21,10 +28,12 @@ from jims_mower.runtime.drivers import (
     FakeImuDriver,
     FakeTofDriver,
     SensorRig,
+    level_rest_imu,
     publish_obs,
 )
 
 __all__ = [
+    "CaptureResult",
     "FaultBus",
     "FakeCsiDriver",
     "FakeGnssDriver",
@@ -41,7 +50,12 @@ __all__ = [
     "SensorWatchdog",
     "budget_advice",
     "budget_from_config",
+    "downsample_rgb",
+    "field_rig_yaml_path",
     "gstreamer_available",
+    "level_rest_imu",
+    "load_field_camera_specs",
+    "names_from_specs",
     "publish_obs",
     "replay_through_bridge",
 ]

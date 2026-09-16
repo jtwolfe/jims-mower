@@ -77,6 +77,24 @@ def test_rejects_bad_dt() -> None:
         load_config({"dt": 0.0})
 
 
+def test_rejects_bad_camera_adapter() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"runtime": {"cameras": {"adapter": "webcam"}}})
+
+
+def test_field_stereo_yaml_names() -> None:
+    from pathlib import Path
+
+    from jims_mower.config import field_stereo_cameras
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = load_config(root / "configs" / "orin" / "extrinsics_stereo.yaml")
+    names = [c.name for c in cfg.resolved_cameras()]
+    assert names[0] == "stereo_left"
+    assert names[1] == "stereo_right"
+    assert [c.name for c in field_stereo_cameras()] == names
+
+
 def test_rejects_unknown_key() -> None:
     with pytest.raises(ConfigError):
         load_config({"not_a_field": 1})

@@ -59,6 +59,7 @@ from jims_mower.faults import FaultBus
 from jims_mower.hardware_estop import HardwareEstop, is_hw_estop_kind, is_hw_reset_mode
 from jims_mower.radio import RadioSim
 from jims_mower.runtime.budget import OrinBudget, budget_from_config
+from jims_mower.runtime.capture import adapter_kind, ensure_contract_rgb
 from jims_mower.runtime.watchdog import SensorWatchdog
 from jims_mower.sensors import (
     imu_to_array,
@@ -66,6 +67,7 @@ from jims_mower.sensors import (
     simulate_gps,
     simulate_imu,
     simulate_tof,
+    slide_board_under_wheel,
 )
 from jims_mower.terrain import HeightField, generate_terrain
 from jims_mower.types import CameraSpec, Detection, PerceptionContext, Pose
@@ -141,6 +143,7 @@ class MowerEnv(gym.Env):
         self.render_mode = render_mode
         self.cameras: list[CameraSpec] = self.cfg.resolved_cameras()
         self.camera_index = {c.name: i for i, c in enumerate(self.cameras)}
+        self._camera_adapter = None
         inner_det: Detector = detector or MockDetector()
         backend = str(self.cfg.perception.detector_backend or "mock").strip().lower()
         if backend in {"trt", "tensorrt"}:
@@ -472,6 +475,7 @@ class MowerEnv(gym.Env):
         self.hw_estop = HardwareEstop()
         self._imu_stamp_s = 0.0
         self._vision_stamp_s = 0.0
+        self._camera_adapter = None
         self.fault_bus = FaultBus.from_config(self.cfg)
         if options.get("inject_fault"):
             self.fault_bus.inject(**_inject_kwargs(options["inject_fault"]))
@@ -730,6 +734,70 @@ class MowerEnv(gym.Env):
             terrain=self._terrain,
         )
 
+    def _ensure_camera_adapter(self) -> None:
+        """Build FakeGst / GstNvmm when ``runtime.cameras.adapter`` is set."""
+        kind = adapter_kind(getattr(self.cfg.runtime.cameras, "adapter", ""))
+        if kind == "renderer":
+            self._camera_adapter = None
+            return
+        if self._camera_adapter is not None:
+            return
+        names = [cam.name for cam in self.cameras]
+        width = int(self.cfg.sensors.width)
+        height = int(self.cfg.sensors.height)
+        if kind in {"fake_gst", "fake_csi"}:
+            from jims_mower.runtime.gstreamer import FakeGstAdapter
+
+            self._camera_adapter = FakeGstAdapter(
+                names, width=width, height=height, dt=self.cfg.dt
+            )
+            return
+        if kind == "gst":
+            from jims_mower.runtime.gstreamer import GstNvmmAdapter
+
+            self._camera_adapter = GstNvmmAdapter(
+                names, width=width, height=height, dt=self.cfg.dt
+            )
+
+    def _camera_images(self) -> dict[str, np.ndarray]:
+        """Named RGB at the ICD contract size (downsample in ``runtime.capture``)."""
+        width = int(self.cfg.sensors.width)
+        height = int(self.cfg.sensors.height)
+        kind = adapter_kind(getattr(self.cfg.runtime.cameras, "adapter", ""))
+        if kind in {"fake_gst", "fake_csi", "gst"}:
+            self._ensure_camera_adapter()
+            assert self._camera_adapter is not None
+            result = self._camera_adapter.grab()
+            images = {
+                name: ensure_contract_rgb(frame, width, height)
+                for name, frame in result.cameras.items()
+            }
+            return self.fault_bus.apply_cameras(images)
+        images = {
+            name: ensure_contract_rgb(frame, width, height)
+            for name, frame in self._render_cameras().items()
+        }
+        return self.fault_bus.apply_cameras(images)
+
+    def slide_board_under_wheel(
+        self, corner: str = "FL", thickness_m: float = 0.04
+    ) -> dict[str, Any]:
+        """Gym fixture: raise ground under one wheel and refresh ToF.
+
+        Not a real VL53 board. Addresses stay documentation. Re-observe
+        without sitting so that corner's downward range shrinks.
+        """
+        slide_board_under_wheel(
+            self._terrain,
+            self._pose,
+            corner,
+            length_m=self.cfg.robot.length_m,
+            track_m=self.cfg.robot.track_m,
+            thickness_m=thickness_m,
+        )
+        obs, info = self._observe()
+        return {"obs": obs, "info": info, "corner": str(corner).upper()}
+
     def _render_cameras(self) -> dict[str, np.ndarray]:
         yard = (self.cfg.world.width_m, self.cfg.world.height_m)
         images = {}
@@ -798,7 +866,7 @@ class MowerEnv(gym.Env):
         }
 
     def _observe(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        images = self.fault_bus.apply_cameras(self._render_cameras())
+        images = self._camera_images()
         self._last_images = images
         imu_sample = simulate_imu(
             self._pose,
@@ -818,7 +886,11 @@ class MowerEnv(gym.Env):
         if not self.fault_bus.imu_frozen:
             self._imu_stamp_s = now_s
         if not self.fault_bus.cam_blind:
-            self._vision_stamp_s = now_s
+            adapter = self._camera_adapter
+            if adapter is not None and hasattr(adapter, "last_stamp_s"):
+                self._vision_stamp_s = float(adapter.last_stamp_s)
+            else:
+                self._vision_stamp_s = now_s
         gps_sample = simulate_gps(
             self._pose,
             self.np_random,
