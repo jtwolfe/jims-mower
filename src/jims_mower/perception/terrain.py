@@ -17,7 +17,7 @@ from jims_mower.perception.cv_terrain import (
     stamp_tof_corners,
 )
 from jims_mower.perception.fuse import fuse_camera_labels, gate_isolated_lips, paint_geometry_from_hazard
-from jims_mower.perception.grade import PlanarGradeModel, paint_planar_grade
+from jims_mower.perception.grade import LOCAL_GRADE_RADIUS_M, PlanarGradeModel, paint_planar_grade
 from jims_mower.perception.learn import TerrainMLP, classify_image, load_weights
 from jims_mower.perception.temporal import HazardHysteresis
 from jims_mower.terrain import HeightField
@@ -128,12 +128,12 @@ class HeuristicTerrainObserver:
 
     Colour cues match the gym renderer's ditch/bank palette. Pixels are
     back-projected onto the seated tangent plane (the onboard approximation;
-    this class ignores ``context.terrain``). IMU pitch/roll + pose recover a
-    yard-scale planar grade so elevation/slope maps are not flattened.
-    Downward ToF stamps a local wheel drop. Isolated brown lips (dirt /
-    shade on a smooth grade) are gated unless they sit next to a channel.
-    Maps persist for the episode so the planner can replan as new lips enter
-    the cameras.
+    this class ignores ``context.terrain``). IMU pitch/roll is the *local*
+    chassis normal (tip + a slow prior for nearby cells) — not a hinge
+    that re-orients the whole yard every frame. Downward ToF stamps a
+    local wheel drop. Isolated brown lips (dirt / shade on a smooth grade)
+    are gated unless they sit next to a channel. Maps persist for the
+    episode so the planner can replan as new lips enter the cameras.
     """
 
     def __init__(
@@ -154,6 +154,7 @@ class HeuristicTerrainObserver:
         self._confidence: Optional[np.ndarray] = None
         self._prior: Optional[np.ndarray] = None
         self._structure: Optional[np.ndarray] = None
+        self._height_set: Optional[np.ndarray] = None
         self._grade = PlanarGradeModel()
 
     def reset(self) -> None:
@@ -163,6 +164,7 @@ class HeuristicTerrainObserver:
         self._confidence = None
         self._prior = None
         self._structure = None
+        self._height_set = None
         self._grade.reset()
         if self._filter is not None:
             self._filter.reset()
@@ -179,6 +181,7 @@ class HeuristicTerrainObserver:
             # Unobserved cells stay cheap-but-uncertain (not a hard block).
             self._confidence = np.full(shape, 0.08, dtype=np.float32)
             self._structure = np.zeros(shape, dtype=np.uint8)
+            self._height_set = np.zeros(shape, dtype=bool)
 
     def estimate(
         self,
@@ -198,12 +201,17 @@ class HeuristicTerrainObserver:
         )
         pose: Pose = context.pose
         self._grade.update(pose, imu, gps)
+        if self._height_set is None or self._height_set.shape != context.map_shape:
+            self._height_set = np.zeros(context.map_shape, dtype=bool)
         self._prior = paint_planar_grade(
             self._grade,
             self._elevation,
             self._slope,
             resolution_m=context.resolution_m,
             confidence=self._confidence,
+            origin_xy=(pose.x, pose.y),
+            radius_m=max(LOCAL_GRADE_RADIUS_M, self.radius_m * 2.0),
+            committed=self._height_set,
         )
         prev_hazard = self._hazard.copy()
         fused, conf = fuse_camera_labels(
@@ -231,6 +239,7 @@ class HeuristicTerrainObserver:
             slope=self._slope,
             pose_z=pose.z,
             steep_rad=max(self.steep_rad, context.steep_slope_rad),
+            base=self._prior,
         )
         self._grow_drain_gaps(prev_hazard)
         self._raise_confidence(self._hazard > 0.0, 0.72)
@@ -378,6 +387,7 @@ class LearnedTerrainObserver:
         self._hazard: Optional[np.ndarray] = None
         self._confidence: Optional[np.ndarray] = None
         self._prior: Optional[np.ndarray] = None
+        self._height_set: Optional[np.ndarray] = None
         self._grade = PlanarGradeModel()
 
     def reset(self) -> None:
@@ -386,6 +396,7 @@ class LearnedTerrainObserver:
         self._hazard = None
         self._confidence = None
         self._prior = None
+        self._height_set = None
         self._grade.reset()
         if self._filter is not None:
             self._filter.reset()
@@ -399,6 +410,7 @@ class LearnedTerrainObserver:
         ):
             self._elevation, self._slope, self._hazard = _empty_maps(shape)
             self._confidence = np.full(shape, 0.08, dtype=np.float32)
+            self._height_set = np.zeros(shape, dtype=bool)
 
     def estimate(
         self,
@@ -417,12 +429,17 @@ class LearnedTerrainObserver:
         )
         pose: Pose = context.pose
         self._grade.update(pose, imu, gps)
+        if self._height_set is None or self._height_set.shape != context.map_shape:
+            self._height_set = np.zeros(context.map_shape, dtype=bool)
         self._prior = paint_planar_grade(
             self._grade,
             self._elevation,
             self._slope,
             resolution_m=context.resolution_m,
             confidence=self._confidence,
+            origin_xy=(pose.x, pose.y),
+            radius_m=max(LOCAL_GRADE_RADIUS_M, self.radius_m * 2.0),
+            committed=self._height_set,
         )
         prev_hazard = self._hazard.copy()
 
@@ -461,6 +478,7 @@ class LearnedTerrainObserver:
             slope=self._slope,
             pose_z=pose.z,
             steep_rad=max(self.steep_rad, context.steep_slope_rad),
+            base=self._prior,
         )
         self._grow_drain_gaps(prev_hazard)
         tof = _tof_from_context(context)

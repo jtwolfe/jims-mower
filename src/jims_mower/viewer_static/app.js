@@ -550,20 +550,61 @@ function disposeMesh(mesh) {
 function applyObservedMesh(payload) {
   if (!payload || !payload.positions || (payload.vertex_count || 0) < 3) return;
   if ((payload.indices || []).length < 3) return;
-  const mesh = applyMeshPayload(payload);
-  mesh.name = "observedTerrain";
-  mesh.userData.kind = "observed";
-  if (state.observedTerrain) {
-    if (state.meshGroup) state.meshGroup.remove(state.observedTerrain);
-    else scene.remove(state.observedTerrain);
-    disposeMesh(state.observedTerrain);
+  // Overlay fog / observed planes stay flat (texture on z≈0). This mesh
+  // carries real metres of learned height. Same viewer relief as the
+  // true-field group — not a second IMU hinge.
+  const pos = new Float32Array(payload.positions);
+  const idx = new Uint32Array(payload.indices);
+  const existing = state.observedTerrain;
+  const sameVerts =
+    existing &&
+    existing.geometry &&
+    existing.geometry.getAttribute("position") &&
+    existing.geometry.getAttribute("position").count === pos.length / 3;
+  if (sameVerts) {
+    const geo = existing.geometry;
+    const prev = geo.getAttribute("position").array;
+    const locked = existing.userData.lockedVerts;
+    if (locked && locked.size) {
+      // Interior Y stays put. New verts (not yet in a quad) take payload
+      // height so the patch grows without a local re-tilt of old cells.
+      for (const vi of locked) {
+        const y = vi * 3 + 1;
+        pos[y] = prev[y];
+      }
+    }
+    const nextLocked = new Set(locked || []);
+    for (let i = 0; i < idx.length; i += 1) nextLocked.add(idx[i]);
+    existing.userData.lockedVerts = nextLocked;
+    geo.getAttribute("position").array.set(pos);
+    geo.getAttribute("position").needsUpdate = true;
+    if (payload.normals && geo.getAttribute("normal") && payload.normals.length) {
+      geo.getAttribute("normal").array.set(new Float32Array(payload.normals));
+      geo.getAttribute("normal").needsUpdate = true;
+    }
+    if (payload.colors && geo.getAttribute("color") && payload.colors.length) {
+      geo.getAttribute("color").array.set(new Float32Array(payload.colors));
+      geo.getAttribute("color").needsUpdate = true;
+    }
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeBoundingSphere();
+  } else {
+    const mesh = applyMeshPayload(payload);
+    mesh.name = "observedTerrain";
+    mesh.userData.kind = "observed";
+    mesh.userData.lockedVerts = new Set(idx);
+    if (state.observedTerrain) {
+      if (state.meshGroup) state.meshGroup.remove(state.observedTerrain);
+      else scene.remove(state.observedTerrain);
+      disposeMesh(state.observedTerrain);
+    }
+    state.observedTerrain = mesh;
+    if (state.meshGroup) state.meshGroup.add(mesh);
+    else scene.add(mesh);
   }
-  state.observedTerrain = mesh;
-  if (state.meshGroup) state.meshGroup.add(mesh);
-  else scene.add(mesh);
   const chip = $("mesh-chip");
   if (chip && payload.vertex_count) {
-    chip.textContent = `observed ${payload.vertex_count} v / ${payload.triangle_count || 0} t`;
+    chip.textContent = `observed ${payload.triangle_count || 0} t · ${payload.vertex_count} v`;
   }
   setOverlayVis();
 }
@@ -863,8 +904,10 @@ async function boot() {
   camera.position.set(state.width * 0.15, Math.max(state.width, state.height) * 0.9, state.height * 1.15);
 
   state.meshGroup = await loadTerrain(manifest);
-  // Viewer-only lift so a ~5% yard grade and 10–20 cm drains read on a 12 m pad.
-  state.meshGroup.scale.y = 4;
+  // Viewer-only Y lift so a ~5% yard grade and 10–20 cm drains read on a
+  // 12 m pad. Applies to true + observed meshes equally. Fog / observed
+  // *overlays* are flat planes (holes, not a hinged sheet).
+  state.meshGroup.scale.y = state.relief || 4;
   scene.add(state.meshGroup);
   if (manifest.maps && manifest.maps.observed_mesh) {
     try {

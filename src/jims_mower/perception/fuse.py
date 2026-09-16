@@ -256,24 +256,29 @@ def paint_geometry_from_hazard(
     pose_z: float,
     steep_rad: float,
     relative: bool = True,
+    base: Optional[np.ndarray] = None,
 ) -> None:
     """Fill elevation / slope from a fused hazard raster (in-place).
 
-    When ``relative`` is set, drain drops sit on the already-painted grade
-    instead of flattening the cell to ``pose_z``.
+    When ``relative`` is set, drain drops sit on ``base`` (the slow grade
+    prior) or the current elevation — never accumulate on last frame's
+    already-dropped cells. Instantaneous IMU is not a second subtract.
     """
+    src = elevation if base is None else np.asarray(base, dtype=np.float32)
+    if src.shape != elevation.shape:
+        src = elevation
     drain = hazard >= HAZARD_DRAIN_EDGE
     if np.any(drain):
         drop = np.where(hazard >= HAZARD_DRAIN, 0.14, 0.05).astype(np.float32)
         if relative:
-            elevation[drain] = elevation[drain] - drop[drain]
+            elevation[drain] = src[drain] - drop[drain]
         else:
             elevation[drain] = np.minimum(elevation[drain], np.float32(pose_z) - drop[drain])
         slope[drain] = np.maximum(slope[drain], np.float32(steep_rad))
     bank = hazard == HAZARD_STEEP
     if np.any(bank):
         if relative:
-            elevation[bank] = elevation[bank] + np.float32(0.08)
+            elevation[bank] = src[bank] + np.float32(0.08)
         else:
             elevation[bank] = np.maximum(elevation[bank], np.float32(pose_z + 0.08))
         slope[bank] = np.maximum(slope[bank], np.float32(steep_rad))

@@ -54,6 +54,10 @@ def test_viewer_static_assets_present() -> None:
     assert "setOwnerMeshVis" in js
     assert "applyObservedMesh" in js
     assert "observedTerrain" in js
+    assert "sameVerts" in js
+    assert "lockedVerts" in js
+    assert "not a second IMU hinge" in js
+    assert "Interior Y stays put" in js
     assert "observed_mesh" in js
     assert "observed_fog" in js or "fog of war" in html.lower() or "fog" in js
 

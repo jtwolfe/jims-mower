@@ -92,11 +92,14 @@ class TerrainObserver(Protocol):
 ```
 
 - Returns `TerrainEstimate(elevation, slope, hazard, source)` at `context.map_shape`.
-  Optional `elevation_prior` (yard-scale IMU plane) and `structure`.
+  Optional `elevation_prior` (slow plane for the costmap; not a flopping
+  owner mesh) and `structure`.
 - A real head **must ignore** `context.terrain` (god-view `HeightField`).
-- Modes: `heuristic` (default, RGB+ToF+IMU plane, no `context.terrain`), `oracle`
+- Modes: `heuristic` (default, RGB+ToF+local IMU tilt, no `context.terrain`), `oracle`
   (training), `blind` (zeros), `learned` (exporter-trained numpy stub;
   weights via `perception.weights_path` or `LearnedTerrainObserver(...)`).
+- IMU pitch/roll is local chassis attitude. `elevation` is a neighborhood
+  sample; already-mapped cells stay put. See `docs/TERRAIN_MAPS.md`.
 - Heuristic isolated drain-lip stamps are gated unless they sit next to a
   channel (or a ToF drop). Not a published detector score.
 - Optional `TerrainEstimate.confidence` is a **relative merge weight** from

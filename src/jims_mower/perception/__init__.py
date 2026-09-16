@@ -18,7 +18,7 @@ from jims_mower.perception.cv_terrain import (
     classify_terrain_rgb,
     drain_pixel_fraction,
 )
-from jims_mower.perception.grade import PlanarGradeModel, gradients_from_attitude
+from jims_mower.perception.grade import PlanarGradeModel, gradients_from_attitude, paint_planar_grade
 from jims_mower.perception.fuse import fuse_camera_labels, fuse_stamps
 from jims_mower.perception.learn import TerrainMLP, load_weights, save_weights
 from jims_mower.perception.temporal import DetectionTracklets, HazardHysteresis
@@ -57,6 +57,7 @@ __all__ = [
     "classify_terrain_rgb",
     "gradients_from_attitude",
     "PlanarGradeModel",
+    "paint_planar_grade",
     "detection_from_obstacle",
     "drain_pixel_fraction",
     "fuse_camera_labels",

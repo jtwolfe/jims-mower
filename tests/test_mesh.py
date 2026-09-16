@@ -126,6 +126,9 @@ def test_mesh_from_observed_grows_and_leaves_holes() -> None:
         stride=1,
     )
     assert grown.triangle_count < full.triangle_count
+    # Vertex grid is the downsampled yard, not a growing point cloud.
+    # Triangle count grows; swapping grids mid-session looks like a flop.
+    assert grown.vertex_count == empty.vertex_count
     # Used vertices sit on observed elevation, not a z=0 unknown pad.
     used = np.unique(grown.indices)
     ys = grown.positions[used, 1]

@@ -136,13 +136,19 @@ card from Teach → Save).
 ## Unknown-space semantics
 
 `ObservedMap` keeps explicit `observed` / `explored` / `free` / `hazard`
-/ `structure` / `elevation` / `confidence`.
+/ `structure` / `elevation` / `confidence` / `elevation_set`.
 
 * Unknown is **not** mowable and **not** safe transit.
 * Frontiers are known-free cells adjacent to unknown, inside keep-in.
-* Observer rasters are copied only onto cells this robot has stamped
-  (camera ground hits + body/ToF disk). Authored/god-view structure in
-  `obs["structure"]` is not a control input outside that mask.
+* **Cameras** grow the seen mask (ground-plane hits). That is occupancy,
+  not height.
+* **IMU pitch/roll** is local chassis attitude / tip. It is a slow prior
+  for a neighborhood around the robot, not a global hinge.
+* **Elevation** is fused from wheel/pose `z` and locked neighbours on
+  first stamp in the neighborhood, then frozen. Already mapped cells
+  do not leap, and the growing edge does not take a new IMU plane.
+* Authored/god-view structure in `obs["structure"]` is not a control
+  input outside the observed mask.
 * Map-ready when `observed` fraction ≥ `mission.explore_complete`, or
   there are no frontiers and the fraction is at least
   `mission.explore_no_frontier`, or `max_explore_steps` elapses
@@ -182,20 +188,27 @@ match that: a finished god-view `yard.glb` is the true height field
 used by physics, not what the robot has learned.
 
 **Learning terrain** in the live viewer means a **partial observed
-elevation mesh** that grows with `ObservedMap`. Camera / body stamps
-lift cells into a 3D surface (grade, sheds as low boxes, ponds as
-slightly sunken cyan water). Unknown stays a dark pad + fog veil —
-not painted holes on a finished mesh. Physics still uses the true
-field; owner view and `MissionPolicy` use observed elevation only.
+elevation mesh** that grows with `ObservedMap`. Camera stamps lift the
+fog (seen mask) — the orange/green/gray *overlay* footprint is not the
+3D hinge. Body / pose `z` plus locked neighbours lift cells into a 3D
+surface once they have a height sample (grade, sheds as low boxes,
+ponds as slightly sunken cyan water). The mesh must not flop when the
+IMU tips: old cells keep their first height, and the growing edge
+inherits neighbours instead of a new attitude plane. The vertex grid
+stays fixed (triangles grow). Unknown stays a dark pad + fog veil.
+Physics still uses the true field; owner view and `MissionPolicy` use
+observed elevation only.
 
 Live / owner mode **hides the true height-field mesh** by default.
 Toggle **true elev (god-view debug)** to reveal the physics mesh —
 evaluation only, same idea as **observer vs true elev**. The `yard.glb`
 on disk is still the true field so debug / replay can show it.
 
-Acre rasters coarsen to ≤96 px (2D) / ≤48 (observed mesh). Mesh
-rebuilds every `--observed-mesh-stride` steps (default 8). Cameras are
-JPEG-throttled (~2.5 Hz). Full acre explore→mow need not finish in CI.
+Acre rasters coarsen to ≤96 px (2D). Observed mesh stays ≤48 on a
+**fixed** vertex grid (high speed only skips rebuilds; it does not
+swap 32↔48). Mesh rebuilds every `--observed-mesh-stride` steps
+(default 8). Cameras are JPEG-throttled (~2.5 Hz). Full acre
+explore→mow need not finish in CI.
 
 ## Viewer
 

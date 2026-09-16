@@ -467,6 +467,8 @@ class MissionPolicy:
             obs,
             only_observed=True,
             authored_structure=self._authored_structure,
+            pose=pose,
+            grade_radius_m=max(float(self.settings.stamp_radius_m) * 1.6, 2.2),
         )
         if self.keep_in_mask is None or self.keep_in_mask.shape != self.observed.observed.shape:
             self.keep_in_mask = self.observed.keep_in_mask(self._geofence)

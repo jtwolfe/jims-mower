@@ -218,7 +218,8 @@ clip only covers a few metres. For a visual yard job use
 `jims-mower-mission-demo` (writes a finished episode, then scrub it):
 calibrate the keep-in, explore unknown space, freeze the map, then mow
 every reachable mowable cell. Unknown cells are not assumed safe. The
-owner mesh is the **observed** elevation surface (holes stay fog);
+owner mesh is the **observed** elevation surface (holes stay fog;
+already-mapped cells do not re-tilt with the IMU);
 physics still uses the true height field. See
 [`docs/MISSION_FLOW.md`](docs/MISSION_FLOW.md).
 
@@ -340,8 +341,8 @@ flowchart LR
 | `cameras` | Dict of uint8 RGB frames, one per configured camera |
 | `coverage` | Grass map: `1` cut, `0` uncut, `-1` non-grass |
 | `occupancy` | Occupancy rasterized from detections |
-| `elevation` | Height-field estimate (metres) — heuristic recovers a yard-scale plane |
-| `elevation_prior` | Low-frequency planar grade from IMU + pose |
+| `elevation` | Local height-field estimate (metres) — neighborhood around the chassis, frozen once sampled |
+| `elevation_prior` | Slow planar grade from pose `z` + a weak IMU tilt prior (costmap floor, not the owner mesh) |
 | `slope` | Slope raster (radians, 0–π/2) |
 | `hazard` | `0` free, `1` steep, `2` drain lip, `3` drain channel |
 | `structure` | `0` none, `1` path_paved, `2` building, `3` bunker, `4` garden_bed, `5` green |

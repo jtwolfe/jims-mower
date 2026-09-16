@@ -12,31 +12,69 @@ that surface. The coverage planner does **not** see it.
 
 | Layer | What the robot is allowed to use |
 | --- | --- |
-| `elevation` / `slope` / `hazard` | RGB + ToF + IMU / pose. No god-view DEM. |
-| `elevation_prior` | Rolling yard-scale plane from IMU pitch/roll + pose (and a short XY fit). |
+| `elevation` / `slope` / `hazard` | RGB + ToF + **local** IMU / pose. No god-view DEM. |
+| `elevation_prior` | Slow plane from pose `z` + a short XY fit, with IMU pitch/roll as a *weak* attitude prior. Costmap floor only. |
 | `structure` | Authored path / building / bunker / garden plus a colour stub. |
 
-**What went wrong on `gradient_yard`:** the heuristic used to stamp only a
-local disk of `pose.z` and treat brown-ish pixels as drain lips. On a
-~0.14 rad grade the true field is about ±0.85 m, but the observer map sat
-near `[-0.14, 0]` (MAE ≈ 0.43 m) and painted thousands of false lips.
-The costmap then blocked or detoured as if the yard were flat and pitted.
-The World Viewer mesh used **true** elevation while the plan overlay sat
-on z ≈ 0, so routing looked divorced from the sloping mesh.
+### Sensor model (cameras / IMU / height)
+
+A real mower does **not** rebuild a global tilted plane of the whole yard
+from instantaneous chassis tip.
+
+1. **Cameras** stamp where the ground was seen (footprint / ground-plane
+   hits) → `ObservedMap.observed`. That is occupancy of known cells,
+   not a height field.
+2. **Local height at the robot**: wheel / pose `z` (and short-range ToF)
+   is a local sample. The first neighborhood is `pose.z`. After that,
+   new cells inherit locked neighbours (85%) plus a little `pose.z`
+   (15%) so a climb creeps. They do **not** take the current IMU plane.
+3. **IMU tilt (pitch/roll, not yaw)** is the local surface normal under
+   the chassis. Use it for tip risk (`imu_advice`). It is **not** a
+   license to re-orient the mapped sheet — globally *or* as a local
+   flop of the bright growing patch.
+4. **Already-observed heights stay put.** First stamp locks the cell.
+   Old cells must not leap when the robot tips on a ridge. The growing
+   edge must not reshape from a new attitude either.
+
+`elevation_prior` may still be a yard-scale raster so the costmap can
+floor a flattened CV slope. The **owner / control** mesh is
+`ObservedMap.elevation` on cells with `elevation_set` — a growing
+surface, not a sheet hinged to the IMU. Physics still uses the true
+height field.
+
+**What went wrong on `gradient_yard` (first pass):** the heuristic used
+to stamp only a local disk of `pose.z` and treat brown-ish pixels as
+drain lips. On a ~0.14 rad grade the true field is about ±0.85 m, but
+the observer map sat near `[-0.14, 0]` (MAE ≈ 0.43 m) and painted
+thousands of false lips. The costmap then blocked or detoured as if the
+yard were flat and pitted.
+
+**What went wrong after that (flopping sheet / local patch):**
+`paint_planar_grade` wrote the current IMU plane into **every**
+elevation cell each step, and `ObservedMap.ingest_observer` copied
+`obs["elevation"]` onto **all** seen cells. Live owner view on acre
+often read as a **local** flop — the bright orange/green patch
+reshaping and its edge expanding on each `mesh_seq` — more than a
+single rigid yard hinge. 4× viewer relief plus a full mesh replace
+(and a 32↔48 `mesh_side` swap, 696→1920 verts) made that rewrite
+obvious. The broad surface could still look planar when orbited.
 
 **Fix:**
 
-1. Recover a yard-scale plane from IMU + seated pose (optional rolling
-   least-squares as the robot moves). Paint that prior into elevation /
-   slope every step. Drain drops are residuals on the plane, not a flat
-   `pose.z`.
+1. Recover a *slow* plane from seated pose `z` + a short XY fit (IMU
+   attitude is blended weakly, never “whichever tilt is larger”). Keep
+   that raster as `elevation_prior`. Paint height only in a local
+   neighborhood; freeze cells once sampled.
 2. Gate isolated lip stamps: a lip must sit next to a channel (or a ToF
    drop). Tighten the brown heuristic so shaded grass / dirt is not a ditch.
 3. Optional `planner.blend_elevation_prior`: the costmap floors observer
    slope with the low-frequency prior so a flattened CV map cannot fight
    physics.
 4. Viewer: plan waypoints carry world `z` from the same height field as
-   the mesh; `relief_scale` is applied to both. Toggle **observer vs true
+   the mesh; `relief_scale` is applied to both. The observed-mesh
+   **vertex grid stays fixed** for the session (grow triangles, freeze
+   interior Y, do not swap 32↔48 mid-run). Fog / observed overlays stay
+   flat (footprint colour ≠ mesh hinge). Toggle **observer vs true
    elev** for the error overlay.
 
 Oracle maps still copy the height field (training / eval only).

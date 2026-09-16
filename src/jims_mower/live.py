@@ -3,7 +3,9 @@
 This is the owner loop that ``jims-mower-mission-demo`` + the World Viewer
 scrubber were missing. The sim still uses the true height field for
 physics. Control stays on ``ObservedMap``. The default owner view is a
-fog veil over unknown cells — not a finished god-view mesh from step 0.
+fog veil over unknown cells plus a growing observed elevation mesh —
+already-mapped heights stay put when the IMU tips. Not a finished
+god-view mesh from step 0, and not a sheet hinged to chassis tilt.
 
 No claimed mAP / FPS. Not a coverage benchmark.
 
@@ -79,6 +81,8 @@ MESH_STRIDE_FAST = 16
 FLUSH_STRIDE_FAST = 40
 CAM_WALL_FAST_S = 0.80
 MAP_MAX_SIDE_FAST = 64
+# Do not swap this in for MESH_MAX_SIDE mid-session — a 32↔48 grid
+# change rebuilds acre verts (696→1920) and looks like a local flop.
 MESH_MAX_SIDE_FAST = 32
 MAP_STRIDE_MAX = 16
 MESH_STRIDE_MAX = 32
@@ -1130,6 +1134,9 @@ class LiveSession:
         flush_stride = POSE_FLUSH_STRIDE
         cam_wall = CAM_WALL_S
         map_side = MAP_MAX_SIDE
+        # Keep the observed-mesh vertex grid fixed for the session.
+        # Switching 32↔48 mid-run rebuilds the decimation (696→1920 verts
+        # on acre) and looks like a local flop even when heights are stable.
         mesh_side = MESH_MAX_SIDE
         cheap = False
         skip_coverage = False
@@ -1139,7 +1146,6 @@ class LiveSession:
             flush_stride = FLUSH_STRIDE_MAX
             cam_wall = CAM_WALL_MAX_S
             map_side = MAP_MAX_SIDE_FAST
-            mesh_side = MESH_MAX_SIDE_FAST
             cheap = True
             skip_coverage = True
         elif speed >= 4.5:
@@ -1148,7 +1154,6 @@ class LiveSession:
             flush_stride = FLUSH_STRIDE_FAST
             cam_wall = CAM_WALL_FAST_S
             map_side = MAP_MAX_SIDE_FAST
-            mesh_side = MESH_MAX_SIDE_FAST
             cheap = True
             skip_coverage = True
         return {
