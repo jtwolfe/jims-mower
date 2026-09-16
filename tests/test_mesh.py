@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from jims_mower.constants import POND_RGB, STRUCTURE_POND
 from jims_mower.mesh import (
     export_mesh,
     mesh_from_elevation,
@@ -36,6 +37,22 @@ def test_mesh_from_elevation_non_empty() -> None:
     assert mesh.triangle_count >= 8
     assert not mesh.is_empty()
     assert mesh.positions.shape == (mesh.vertex_count, 3)
+
+
+def test_mesh_structure_colors_pond() -> None:
+    elev = np.zeros((8, 8), dtype=np.float32)
+    structure = np.zeros((8, 8), dtype=np.uint8)
+    structure[2:5, 2:5] = STRUCTURE_POND
+    mesh = mesh_from_elevation(
+        elev,
+        width_m=1.6,
+        height_m=1.6,
+        resolution_m=0.20,
+        structure=structure,
+        stride=1,
+    )
+    want = np.asarray(POND_RGB, dtype=np.float32) / 255.0
+    assert np.any(np.linalg.norm(mesh.colors - want, axis=1) < 0.02)
 
 
 def test_mesh_export_files(tmp_path: Path) -> None:

@@ -9,12 +9,12 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional, Union
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import numpy as np
 from PIL import Image
 
-from jims_mower.constants import VIEWER_SCHEMA
+from jims_mower.constants import LIVE_SCHEMA, VIEWER_SCHEMA
 from jims_mower.mesh import (
     coverage_to_rgb,
     export_mesh,
@@ -105,6 +105,7 @@ def write_viewer_bundle(
     policy: str = "",
     stride: int = 2,
     mission: Optional[dict[str, Any]] = None,
+    live: bool = False,
 ) -> dict[str, Any]:
     """Write mesh + rasters + viewer.json so the HTTP UI can open this run."""
     dest = Path(out_dir)
@@ -226,7 +227,11 @@ def write_viewer_bundle(
             if (maps_dir / "elevation_error.png").is_file()
             else None,
             "observed": "maps/observed.png" if (maps_dir / "observed.png").is_file() else None,
+            "fog": "maps/fog.png" if (maps_dir / "fog.png").is_file() else None,
         },
+        "live": bool(live),
+        "owner_mode": "observed_fog" if live else "",
+        "fog": bool(live) or (maps_dir / "fog.png").is_file(),
         "relief_scale": 4.0,
         "poses": "poses.json" if pose_rows else None,
         "plan": "plan.json" if (dest / "plan.json").is_file() else None,
@@ -241,7 +246,11 @@ def write_viewer_bundle(
         "health": {"placeholder": True, "label": "health", "value": None},
         "radio": {"placeholder": True, "label": "radio", "value": None},
         "not_a_benchmark": True,
-        "note": "World Viewer bundle — mesh + cameras from sim, no mAP/FPS.",
+        "note": (
+            "Live owner session — fog-of-war over unknown cells, no mAP/FPS."
+            if live
+            else "World Viewer bundle — mesh + cameras from sim, no mAP/FPS."
+        ),
     }
     (dest / "viewer.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest
@@ -357,6 +366,7 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 
     data_dir: Path
     static_root: Path
+    session: Any = None
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
@@ -393,8 +403,28 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             self._send_file(self.static_root / "index.html", "text/html; charset=utf-8")
             return
         if path == "/api/manifest":
+            if self.session is not None and hasattr(self.session, "manifest"):
+                body = json.dumps(self.session.manifest()).encode("utf-8")
+                self._send_bytes(body, "application/json")
+                return
             manifest = self.data_dir / "viewer.json"
             self._send_file(manifest, "application/json")
+            return
+        if path in {"/api/live", "/api/live/"}:
+            self._sse_live()
+            return
+        if path == "/api/live/snapshot":
+            self._send_live_snapshot()
+            return
+        if path == "/api/live/observed.png":
+            self._send_live_bytes(self._live_observed(), "image/png")
+            return
+        if path == "/api/live/fog.png":
+            self._send_live_bytes(self._live_fog(), "image/png")
+            return
+        if path.startswith("/api/live/cam/"):
+            name = path[len("/api/live/cam/") :].split("?")[0]
+            self._send_live_bytes(self._live_camera(name), "image/jpeg")
             return
         if path == "/api/profile":
             dest = self.data_dir / "profile.json"
@@ -418,6 +448,69 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             self._send_file(target, _guess_type(target))
             return
         self.send_error(404, "not found")
+
+    def _send_live_bytes(self, payload: bytes, content_type: str) -> None:
+        if not payload:
+            self.send_error(404, "live asset not ready")
+            return
+        self._send_bytes(payload, content_type)
+
+    def _live_observed(self) -> bytes:
+        session = self.session
+        if session is None:
+            path = self.data_dir / "maps" / "observed.png"
+            return path.read_bytes() if path.is_file() else b""
+        return session.observed_png_bytes()
+
+    def _live_fog(self) -> bytes:
+        session = self.session
+        if session is None:
+            path = self.data_dir / "maps" / "fog.png"
+            return path.read_bytes() if path.is_file() else b""
+        return session.fog_png_bytes()
+
+    def _live_camera(self, name: str) -> bytes:
+        session = self.session
+        if session is None:
+            return b""
+        return session.camera_bytes(name)
+
+    def _send_live_snapshot(self) -> None:
+        session = self.session
+        if session is None:
+            self.send_error(404, "no live session")
+            return
+        body = json.dumps(session.snapshot()).encode("utf-8")
+        self._send_bytes(body, "application/json")
+
+    def _sse_live(self) -> None:
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        try:
+            limit = int((qs.get("n") or ["0"])[0])
+        except ValueError:
+            limit = 0
+        session = self.session
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close" if limit > 0 else "keep-alive")
+        self.end_headers()
+        import time
+
+        n = 0
+        try:
+            while limit <= 0 or n < limit:
+                if session is None:
+                    payload = json.dumps({"schema": LIVE_SCHEMA, "live": False})
+                else:
+                    payload = json.dumps(session.snapshot())
+                self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                n += 1
+                time.sleep(0.04 if limit > 0 else 0.12)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -459,10 +552,12 @@ def serve_viewer(
     *,
     host: str = "127.0.0.1",
     port: int = 8765,
+    session: Any = None,
 ) -> ThreadingHTTPServer:
     handler = partial(ViewerHandler)
     ViewerHandler.data_dir = data_dir.resolve()
     ViewerHandler.static_root = static_dir().resolve()
+    ViewerHandler.session = session
     server = ThreadingHTTPServer((host, port), handler)
     return server
 
