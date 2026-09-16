@@ -667,6 +667,12 @@ function setOwnerBar(frame) {
     const want = frame.speed_label != null ? String(frame.speed_label) : "1";
     btn.classList.toggle("active", btn.dataset.speed === want);
   });
+  const start = $("btn-job-start");
+  if (start) start.disabled = frame.job_state === "running";
+  const pause = $("btn-job-pause");
+  if (pause) pause.disabled = frame.job_state !== "running";
+  const resume = $("btn-job-resume");
+  if (resume) resume.disabled = frame.job_state !== "paused" && frame.job_state !== "hold";
   const startMow = $("btn-start-mow");
   if (startMow) startMow.hidden = !frame.can_start_mow;
   const reexplore = $("btn-reexplore");
@@ -739,9 +745,11 @@ function applyLiveFrame(frame) {
   if (state.followLive && frame.pose && state.poseMarker) {
     state.poseMarker.position.copy(worldToScene(frame.pose.x, frame.pose.y, frame.pose.z || 0));
     state.poseMarker.rotation.y = -(frame.pose.theta || 0);
-    const phase = frame.phase || "";
+    const idle = frame.job_state === "idle";
+    const phase = idle ? "" : (frame.phase || "");
+    const phaseLabel = idle ? "idle" : (frame.phase_label || phase);
     $("scrub").value = String(Math.max(0, state.poses.length - 1));
-    $("scrub-label").textContent = `LIVE step ${frame.step || 0} · ${frame.phase_label || phase}`;
+    $("scrub-label").textContent = `LIVE step ${frame.step || 0} · ${phaseLabel}`;
     setPhaseBar(phase);
     const el = $("mission-metrics");
     if (el) {
@@ -757,7 +765,7 @@ function applyLiveFrame(frame) {
         `skips ${frame.skips || 0}`;
     }
     const chip = $("phase-chip");
-    if (chip) chip.textContent = `LIVE ${frame.phase_label || frame.phase || "—"}`;
+    if (chip) chip.textContent = idle ? "IDLE" : `LIVE ${frame.phase_label || frame.phase || "—"}`;
     const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
     if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
     if (phase === "mow" && $("tog-coverage")) $("tog-coverage").checked = true;

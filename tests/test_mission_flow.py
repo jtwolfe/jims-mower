@@ -281,7 +281,7 @@ def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
         action = policy.act(obs, info)
         obs, _reward, terminated, truncated, info = env.step(action)
         cut = float(info.get("coverage_fraction") or 0.0)
-        if policy.phase == MissionPhase.MOW and (policy.phase_step >= 6 or cut > 0.0):
+        if policy.phase == MissionPhase.MOW and (cut > 0.0 or policy.phase_step >= 80):
             break
         if terminated or truncated or policy.done:
             break
@@ -292,6 +292,8 @@ def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
     assert "mow" in seen or policy.phase.value == "mow"
     assert status["map_completion"] >= 0.40
     assert policy.step < 1000
+    # Ridge recovery must leave a first paint, not park on tip-stop.
+    assert cut > 0.0
 
 
 def test_review_hold_waits_until_start_mow() -> None:
