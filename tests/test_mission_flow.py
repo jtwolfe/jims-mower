@@ -187,3 +187,93 @@ def test_mission_cli_help() -> None:
     assert resolve_mission_config(None, fast=True) == "mission_tiny"
     assert resolve_mission_config("golf_rough", fast=True) == "mission_tiny"
     assert resolve_mission_config("golf_rough", fast=False) == "golf_rough"
+
+
+def test_scale_mission_budget_shrinks_caps() -> None:
+    from jims_mower.config import MissionConfig
+    from jims_mower.mission_flow import scale_mission_budget
+
+    base = MissionConfig(max_calibrate_steps=1000, max_explore_steps=2000)
+    scaled = scale_mission_budget(base, 0.4)
+    assert scaled.max_calibrate_steps == 400
+    assert scaled.max_explore_steps == 800
+    assert scaled.phase_budget_scale == pytest.approx(0.4)
+
+
+def test_calibrate_confirm_closes_on_authored_keep_in() -> None:
+    from jims_mower.config import MissionConfig
+
+    env = _tiny_env()
+    obs, info = env.reset(seed=2)
+    settings = MissionConfig(
+        stamp_radius_m=2.4,
+        camera_range_m=5.0,
+        max_calibrate_steps=400,
+        max_explore_steps=80,
+        calibrate_confirm_m=1.6,
+        calibrate_cruise=1.0,
+        calibrate_arrive_m=0.55,
+        calibrate_stride_m=0.70,
+    )
+    policy = MissionPolicy(env.cfg, settings=settings)
+    policy.reset(obs, info)
+    phases = {policy.phase.value}
+    for _ in range(80):
+        action = policy.act(obs, info)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        phases.add(policy.phase.value)
+        if policy.phase != MissionPhase.CALIBRATE_BOUNDARY:
+            break
+        if terminated or truncated:
+            break
+    env.close()
+    assert policy.phase != MissionPhase.CALIBRATE_BOUNDARY
+    assert policy.step < 80
+    assert policy.profile is not None
+    assert len(policy.profile.keep_in) >= 3
+
+
+def test_acre_yard_demo_reaches_explore_without_full_lap() -> None:
+    cfg, scenario = load_source("acre_yard_demo")
+    cfg.sensors.width = 16
+    cfg.sensors.height = 12
+    cfg.sensors.camera_count = 4
+    cfg.sensors.cameras = []
+    cfg.max_steps = 360
+    env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
+    obs, info = env.reset(seed=3)
+    policy = MissionPolicy(env.cfg)
+    policy.reset(obs, info)
+    assert policy.settings.calibrate_confirm_m >= 20.0
+    for _ in range(320):
+        action = policy.act(obs, info)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        if policy.phase != MissionPhase.CALIBRATE_BOUNDARY:
+            break
+        if terminated or truncated:
+            break
+    phase = policy.phase.value
+    step = policy.step
+    events = {e.event for e in policy.events}
+    env.close()
+    assert phase in {"explore", "review", "mow", "return_home", "complete"}
+    assert step < 300
+    assert "boundary_recorded" in events
+
+
+def test_mow_stop_reverse_then_skip() -> None:
+    env = _tiny_env()
+    obs, info = env.reset(seed=4)
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info)
+    policy.phase = MissionPhase.MOW
+    policy.global_plan = type("P", (), {"waypoints": [(2.0, 2.0), (3.0, 2.0), (4.0, 2.0)]})()
+    policy.index = 0
+    pose = type("Z", (), {"x": 1.0, "y": 1.0, "theta": 0.0, "z": 0.0, "pitch": 0.0, "roll": 0.0})()
+    first = policy._tick_mow(obs, info, pose, "stop")
+    assert float(first[0]) < 0.0 and float(first[1]) < 0.0
+    policy._tick_mow(obs, info, pose, "stop")
+    policy._tick_mow(obs, info, pose, "stop")
+    assert policy.index >= 1
+    assert policy._skipped_global
+    env.close()

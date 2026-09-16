@@ -78,6 +78,7 @@ jobs:
           test -f /tmp/jims-mower-ci-live/viewer.json
           test -f /tmp/jims-mower-ci-live/maps/fog.png
           test -f /tmp/jims-mower-ci-live/maps/observed.png
+          test -f /tmp/jims-mower-ci-live/maps/observed_mesh.json
       - name: World Viewer + Teach Boundary smoke
         run: |
           jims-mower-mesh --out /tmp/jims-mower-ci-yard.glb --cameras 4 --seed 1 --stride 3

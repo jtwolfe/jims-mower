@@ -357,6 +357,15 @@ class MissionConfig:
     review_min_closure_m: float = 0.80
     explore_cruise: float = 0.80
     mow_cruise: float = 0.55
+    # 0 = auto from yard size. Large yards use a longer stride so the
+    # teach tracker does not chatter on a 200 m fence.
+    calibrate_stride_m: float = 0.0
+    calibrate_cruise: float = 0.0
+    calibrate_arrive_m: float = 0.0
+    # 0 = full perimeter lap. Demo profiles set a short confirmation
+    # distance then close on the authored keep-in (not a physics cheat).
+    calibrate_confirm_m: float = 0.0
+    phase_budget_scale: float = 1.0
 
 
 @dataclass
@@ -798,6 +807,12 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("mission.review_min_closure_m must be >= 0")
     if mission.explore_cruise <= 0.0 or mission.mow_cruise <= 0.0:
         raise ConfigError("mission cruise speeds must be positive")
+    if mission.calibrate_stride_m < 0.0 or mission.calibrate_cruise < 0.0:
+        raise ConfigError("mission calibrate stride/cruise must be >= 0")
+    if mission.calibrate_arrive_m < 0.0 or mission.calibrate_confirm_m < 0.0:
+        raise ConfigError("mission calibrate arrive/confirm must be >= 0")
+    if not 0.05 <= float(mission.phase_budget_scale) <= 1.0:
+        raise ConfigError("mission.phase_budget_scale must be in [0.05, 1]")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

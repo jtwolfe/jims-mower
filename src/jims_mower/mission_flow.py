@@ -135,6 +135,7 @@ class MissionPolicy:
         self.fusion = make_pose_filter(cfg)
         self.safe = SafeStateMachine.from_config(cfg.planner.safe_state)
         self.teach = TeachPolicy(cfg, margin_m=0.70, arrive_m=0.55, cruise=0.75)
+        self._apply_calibrate_drive()
         self.observed: Optional[ObservedMap] = None
         self.phase = MissionPhase.CALIBRATE_BOUNDARY
         self.events: list[MissionEvent] = []
@@ -205,6 +206,7 @@ class MissionPolicy:
         self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
         self.teach.spec = self._geofence
         self.teach.reset(obs, info)
+        self._apply_calibrate_drive()
         self._inset_teach_ring(self._teach_inset_m())
         self._start_teach_nearest(pose)
         self._home = pose
@@ -409,13 +411,15 @@ class MissionPolicy:
             action = np.array([0.45 * float(wheels[0]), 0.45 * float(wheels[1]), 0.0], dtype=np.float32)
         self.index = self.teach.index
         timed_out = self.phase_step + 1 >= int(self.settings.max_calibrate_steps)
-        if self.teach.done or timed_out:
+        confirmed = self._calibrate_confirmed()
+        if self.teach.done or timed_out or confirmed:
             keep_out = [list(poly) for poly in (self._geofence.keep_out or [])]
             self.profile = self.teach.to_profile(name="mission", keep_out=keep_out)
             self.profile.home = {"x": self._home.x, "y": self._home.y, "theta": self._home.theta}
-            # Drop the spawn-to-ring spoke so keep-in is the closed lap, not a slice.
+            # Authored / planned ring is the keep-in. A demo confirm or
+            # timeout must not slice the yard from a partial trail.
             planned = self.teach.planned_ring()
-            if self.teach.done and len(planned) >= 3:
+            if len(planned) >= 3:
                 self.profile.keep_in = planned
             self._geofence = self.profile.geofence_spec()
             if self.observed is not None:
@@ -425,7 +429,9 @@ class MissionPolicy:
                 {
                     "keep_in_vertices": len(self.profile.keep_in),
                     "trail_points": len(self.teach.trail),
-                    "timed_out": bool(timed_out and not self.teach.done),
+                    "trail_m": self._trail_length_m(),
+                    "timed_out": bool(timed_out and not self.teach.done and not confirmed),
+                    "confirmed": bool(confirmed and not self.teach.done),
                 },
             )
             self._transition(MissionPhase.EXPLORE)
@@ -538,14 +544,18 @@ class MissionPolicy:
             return self._hold()
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
         if advice == "stop":
-            # Sit still — driving here is what tips on golf undulation.
+            # Ridge / IMU tip-stop: reverse once, then skip and replan.
+            # Sitting still forever is what parked early mows with low cut %.
             self._calibrate_stall += 1
-            if self._calibrate_stall >= 2 and self.index < len(self.global_plan.waypoints):
+            if self._calibrate_stall == 1:
+                return self._reverse_nudge(pose)
+            if self._calibrate_stall >= 3 and self.index < len(self.global_plan.waypoints):
                 skipped = self.global_plan.waypoints[self.index]
                 self._skipped_global.append(skipped)
                 self._emit("unreachable_segment", {"x": skipped[0], "y": skipped[1], "index": self.index, "reason": "stop"})
                 self.index += 1
                 self._calibrate_stall = 0
+                self._local_replan(obs, pose)
             if len(self._skipped_global) >= 12:
                 self._emit("mow_budget", {"reason": "imu_stop_ridge", "waypoints_left": max(0, len(self.global_plan.waypoints) - self.index)})
                 self._transition(MissionPhase.RETURN_HOME)
@@ -950,6 +960,46 @@ class MissionPolicy:
             MissionEvent(step=self.step, phase=self.phase.value, event=event, detail=detail or {})
         )
 
+    def _apply_calibrate_drive(self) -> None:
+        """Faster fence tracking on large yards. 0 in YAML means auto."""
+        short = min(float(self.cfg.world.width_m), float(self.cfg.world.height_m))
+        large = short >= 24.0
+        cruise = float(self.settings.calibrate_cruise or 0.0)
+        arrive = float(self.settings.calibrate_arrive_m or 0.0)
+        if cruise <= 0.0:
+            cruise = 0.98 if large else 0.75
+        if arrive <= 0.0:
+            arrive = 1.80 if large else 0.55
+        self.teach.cruise = float(cruise)
+        self.teach.arrive_m = float(arrive)
+
+    def _calibrate_stride_m(self) -> float:
+        configured = float(self.settings.calibrate_stride_m or 0.0)
+        if configured > 0.0:
+            return configured
+        short = min(float(self.cfg.world.width_m), float(self.cfg.world.height_m))
+        return max(0.70, min(4.0, 0.055 * short))
+
+    def _trail_length_m(self) -> float:
+        trail = list(self.teach.trail)
+        if len(trail) < 2:
+            return 0.0
+        return float(
+            sum(
+                math.hypot(trail[i][0] - trail[i - 1][0], trail[i][1] - trail[i - 1][1])
+                for i in range(1, len(trail))
+            )
+        )
+
+    def _calibrate_confirmed(self) -> bool:
+        limit = float(self.settings.calibrate_confirm_m or 0.0)
+        return limit > 0.0 and self._trail_length_m() >= limit
+
+    def _reverse_nudge(self, pose: Pose) -> np.ndarray:
+        """One-step reverse off a ridge before skipping the waypoint."""
+        _ = pose
+        return self._drive(-0.36, -0.36, 0.0, pose)
+
     def _teach_inset_m(self) -> float:
         short = min(float(self.cfg.world.width_m), float(self.cfg.world.height_m))
         return max(0.75, min(2.10, 0.18 * short))
@@ -960,7 +1010,7 @@ class MissionPolicy:
             ring = ring[:-1]
         inset = _inset_polygon(ring, margin_m)
         if len(inset) >= 3:
-            dense = _densify_ring(inset, stride_m=0.70)
+            dense = _densify_ring(inset, stride_m=self._calibrate_stride_m())
             self.teach.waypoints = dense + [dense[0]]
             self.teach.index = 0
 
@@ -1024,7 +1074,25 @@ def _fast_settings(base: MissionConfig) -> MissionConfig:
         review_min_closure_m=1.20,
         explore_cruise=0.95,
         mow_cruise=0.85,
+        calibrate_stride_m=float(base.calibrate_stride_m or 0.55),
+        calibrate_cruise=max(0.90, float(base.calibrate_cruise or 0.0)),
+        calibrate_arrive_m=max(0.50, float(base.calibrate_arrive_m or 0.0)),
+        calibrate_confirm_m=float(base.calibrate_confirm_m or 0.0),
+        phase_budget_scale=1.0,
     )
+
+
+def scale_mission_budget(settings: MissionConfig, scale: float) -> MissionConfig:
+    """Shrink phase caps for live demos. Does not change physics or stamps."""
+    factor = min(1.0, max(0.05, float(scale)))
+    if factor >= 0.999:
+        return settings
+    settings.max_calibrate_steps = max(24, int(settings.max_calibrate_steps * factor))
+    settings.max_explore_steps = max(40, int(settings.max_explore_steps * factor))
+    settings.max_mow_steps = max(40, int(settings.max_mow_steps * factor))
+    settings.max_return_steps = max(20, int(settings.max_return_steps * factor))
+    settings.phase_budget_scale = factor
+    return settings
 
 
 def _ring_closed(
@@ -1184,4 +1252,5 @@ __all__ = [
     "YardSnapshot",
     "keepouts_from_env",
     "mission_timeline",
+    "scale_mission_budget",
 ]

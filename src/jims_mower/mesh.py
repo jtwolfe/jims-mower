@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -193,6 +194,89 @@ def mesh_from_elevation(
         resolution_m=res,
         stride=max(1, int(stride)),
         extras={"z_scale": float(z_scale), "grid": [int(rr), int(cc)]},
+    )
+
+
+def mesh_from_observed(
+    omap: Any,
+    *,
+    stride: int = 2,
+    max_side: int = 48,
+    z_scale: float = 1.0,
+) -> TerrainMesh:
+    """Partial observed elevation surface. Unknown quads are holes.
+
+    Physics still uses the true height field. This mesh is the owner /
+    control view: only cells in ``ObservedMap.observed`` become terrain.
+    """
+    from jims_mower.planning.observed import ObservedMap
+
+    if not isinstance(omap, ObservedMap):
+        raise TypeError("mesh_from_observed expects an ObservedMap")
+    elev = omap.observed_elevation()
+    colors_u8 = omap.surface_colors()
+    rows, cols = elev.shape
+    side = max(rows, cols)
+    auto = max(1, int(math.ceil(side / max(1, int(max_side)))))
+    use_stride = max(1, int(stride), auto)
+    row_i = _row_col_indices(rows, use_stride)
+    col_i = _row_col_indices(cols, use_stride)
+    sub = elev[np.ix_(row_i, col_i)]
+    seen = np.isfinite(sub)
+    rr, cc = sub.shape
+    res = max(float(omap.resolution_m), 1e-6)
+    xs = (col_i.astype(np.float32) + 0.5) * res
+    ys = (row_i.astype(np.float32) + 0.5) * res
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    z = np.where(seen, sub, 0.0).astype(np.float32) * float(z_scale)
+    pos = np.stack(
+        [grid_x.reshape(-1), z.reshape(-1), grid_y.reshape(-1)],
+        axis=1,
+    ).astype(np.float32)
+    colors = (colors_u8[np.ix_(row_i, col_i)].astype(np.float32) / 255.0).reshape(-1, 3)
+    uvs = np.stack(
+        [
+            np.clip(grid_x.reshape(-1) / max(float(omap.width_m), 1e-6), 0.0, 1.0),
+            np.clip(grid_y.reshape(-1) / max(float(omap.height_m), 1e-6), 0.0, 1.0),
+        ],
+        axis=1,
+    ).astype(np.float32)
+    quads: list[int] = []
+    for r in range(rr - 1):
+        for c in range(cc - 1):
+            # Fully observed quads only — mixed cells would skirt to the
+            # unknown pad and look like painted holes / icicles.
+            if not (
+                seen[r, c]
+                and seen[r, c + 1]
+                and seen[r + 1, c]
+                and seen[r + 1, c + 1]
+            ):
+                continue
+            i00 = r * cc + c
+            i10 = r * cc + (c + 1)
+            i01 = (r + 1) * cc + c
+            i11 = (r + 1) * cc + (c + 1)
+            quads.extend((i00, i01, i11, i00, i11, i10))
+    indices = np.asarray(quads, dtype=np.uint32) if quads else np.zeros((0,), dtype=np.uint32)
+    normals = _vertex_normals(pos, indices, rr, cc)
+    return TerrainMesh(
+        positions=pos,
+        normals=normals,
+        colors=colors,
+        uvs=uvs,
+        indices=indices,
+        width_m=float(omap.width_m),
+        height_m=float(omap.height_m),
+        resolution_m=res,
+        stride=use_stride,
+        extras={
+            "z_scale": float(z_scale),
+            "grid": [int(rr), int(cc)],
+            "kind": "observed",
+            "n_observed": int(omap.observed.sum()),
+            "honesty": "physics uses true height; this mesh is ObservedMap only",
+        },
     )
 
 

@@ -8,8 +8,8 @@ height field, not a photogrammetry product.
 After a demo or record run:
 
 ```bash
-# Live owner session (fog-of-war, wall-clock MissionPolicy). One command.
-jims-mower-live
+# Live owner session (observed terrain + fog). Jamie demo command:
+jims-mower-live --config acre_yard_demo --speed 5
 jims-mower-live --config acre_yard --speed 5
 # open http://127.0.0.1:8765/  — animates while the sim runs
 
@@ -27,10 +27,19 @@ scrubber of a pre-recorded run. The mesh is the full true height field
 from step 0, so the yard looks already known. `jims-mower-live` is the
 owner loop: the same `MissionPolicy` paced to wall-clock (`--speed`
 `1`/`2`/`5`/`max`), SSE (`GET /api/live`) pushing pose / phase / map,
-and a **fog veil** over unknown cells. Physics still uses the true
+a **growing observed elevation mesh**, and a **fog veil** over unknown
+cells. That is what “learning terrain” looks like — 3D surface where
+cameras have stamped, fog everywhere else. Physics still uses the true
 height field; the owner map and the controller do not. Toggle **true
 elev (god-view debug)** to see the finished mesh. Acre streams are
-coarsened (≤96 px rasters, JPEG cameras) so the browser does not OOM.
+coarsened (≤96 px rasters, ≤48 observed mesh, JPEG cameras) so the
+browser does not OOM.
+
+`acre_yard_demo` is a **live demo profile**: same ~1 acre features and
+physics as `acre_yard`, slightly tighter keep-in, short calibrate
+confirmation (`calibrate_confirm_m: 28`) so `--speed 5` reaches
+EXPLORE in a practical window. It is not a full fence lap and not a
+coverage benchmark. See [`MISSION_FLOW.md`](MISSION_FLOW.md).
 
 The demo (and `jims-mower-record`) write a viewer bundle next to the
 usual PNGs:

@@ -37,11 +37,15 @@ FREE_RGB = (46, 140, 58)
 EXPLORED_RGB = (72, 176, 88)
 HAZARD_RGB = (196, 96, 36)
 STRUCTURE_RGB = (92, 92, 110)
-POND_VIEW_RGB = POND_RGB
-BUILDING_VIEW_RGB = BUILDING_RGB
+# Owner-view water / sheds: saturated so they read through fog holes.
+# Physics / CV still use POND_RGB / BUILDING_RGB on the true field.
+POND_VIEW_RGB = (28, 164, 214)
+BUILDING_VIEW_RGB = (176, 138, 86)
 FRONTIER_RGB = (42, 196, 220)
 FOG_RGB = (16, 18, 22)
 FOG_ALPHA_UNKNOWN = 236
+SHED_LIFT_M = 0.20
+POND_DROP_M = 0.07
 
 
 @dataclass
@@ -292,6 +296,42 @@ class ObservedMap:
                 if 0 <= row < self.rows and 0 <= col < self.cols:
                     rgb[row, col] = FRONTIER_RGB
         return rgb[::-1]
+
+    def surface_colors(self) -> np.ndarray:
+        """Unflipped owner-view RGB for the observed terrain mesh."""
+        rgb = np.zeros((self.rows, self.cols, 3), dtype=np.uint8)
+        rgb[:, :] = UNKNOWN_RGB
+        rgb[self.observed] = FREE_RGB
+        rgb[self.explored] = EXPLORED_RGB
+        rgb[self.observed & (self.hazard >= HAZARD_STEEP)] = (210, 168, 48)
+        rgb[self.observed & (self.hazard >= HAZARD_DRAIN_EDGE)] = HAZARD_RGB
+        rgb[self.observed & (self.structure != STRUCTURE_NONE)] = STRUCTURE_RGB
+        rgb[self.observed & (self.structure == STRUCTURE_BUILDING)] = BUILDING_VIEW_RGB
+        rgb[self.observed & (self.structure == STRUCTURE_POND)] = POND_VIEW_RGB
+        return rgb
+
+    def observed_elevation(
+        self,
+        *,
+        shed_lift_m: float = SHED_LIFT_M,
+        pond_drop_m: float = POND_DROP_M,
+    ) -> np.ndarray:
+        """Partial height field: observed cells only. Unknown is NaN.
+
+        Physics still uses the true field. This is what the owner mesh
+        grows from — sheds lift a little, ponds sit slightly low.
+        """
+        z = np.full((self.rows, self.cols), np.nan, dtype=np.float32)
+        if not np.any(self.observed):
+            return z
+        z[self.observed] = self.elevation[self.observed]
+        sheds = self.observed & (self.structure == STRUCTURE_BUILDING)
+        ponds = self.observed & (self.structure == STRUCTURE_POND)
+        if np.any(sheds):
+            z[sheds] = z[sheds] + float(shed_lift_m)
+        if np.any(ponds):
+            z[ponds] = z[ponds] - float(pond_drop_m)
+        return z
 
     def copy(self) -> "ObservedMap":
         return ObservedMap(

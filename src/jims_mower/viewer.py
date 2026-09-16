@@ -228,6 +228,9 @@ def write_viewer_bundle(
             else None,
             "observed": "maps/observed.png" if (maps_dir / "observed.png").is_file() else None,
             "fog": "maps/fog.png" if (maps_dir / "fog.png").is_file() else None,
+            "observed_mesh": "maps/observed_mesh.json"
+            if (maps_dir / "observed_mesh.json").is_file()
+            else None,
         },
         "live": bool(live),
         "owner_mode": "observed_fog" if live else "",
@@ -247,7 +250,7 @@ def write_viewer_bundle(
         "radio": {"placeholder": True, "label": "radio", "value": None},
         "not_a_benchmark": True,
         "note": (
-            "Live owner session — fog-of-war over unknown cells, no mAP/FPS."
+            "Live owner session — growing observed terrain + fog. True elev is debug. No mAP/FPS."
             if live
             else "World Viewer bundle — mesh + cameras from sim, no mAP/FPS."
         ),
@@ -422,6 +425,9 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         if path == "/api/live/fog.png":
             self._send_live_bytes(self._live_fog(), "image/png")
             return
+        if path == "/api/live/observed_mesh.json":
+            self._send_live_bytes(self._live_observed_mesh(), "application/json")
+            return
         if path.startswith("/api/live/cam/"):
             name = path[len("/api/live/cam/") :].split("?")[0]
             self._send_live_bytes(self._live_camera(name), "image/jpeg")
@@ -468,6 +474,15 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             path = self.data_dir / "maps" / "fog.png"
             return path.read_bytes() if path.is_file() else b""
         return session.fog_png_bytes()
+
+    def _live_observed_mesh(self) -> bytes:
+        session = self.session
+        if session is None:
+            path = self.data_dir / "maps" / "observed_mesh.json"
+            return path.read_bytes() if path.is_file() else b""
+        if hasattr(session, "observed_mesh_bytes"):
+            return session.observed_mesh_bytes()
+        return b""
 
     def _live_camera(self, name: str) -> bytes:
         session = self.session
