@@ -530,6 +530,7 @@ class LiveSession:
 
     def run_n(self, n: int) -> dict[str, Any]:
         self.unattended = True
+        self._stop.clear()
         if self.job_state == "idle":
             self.job_state = "running"
             self._t0_wall = time.perf_counter()

@@ -719,6 +719,7 @@ class MissionPolicy:
                 return self._reverse_nudge(pose)
             if self._calibrate_stall == 2:
                 return self._lateral_nudge(pose)
+            skipped_now = False
             if self._calibrate_stall >= 3 and self.index < len(self.global_plan.waypoints):
                 cluster = self._mow_skip_count()
                 for _ in range(cluster):
@@ -734,6 +735,7 @@ class MissionPolicy:
                 self._calibrate_stall = 0
                 self._stop_cool = max(1, int(self.settings.mow_stop_cool))
                 self._local_replan(obs, pose)
+                skipped_now = True
             skip_limit = 48
             min_mow = 80
             if len(self._skipped_global) >= skip_limit and self.phase_step >= min_mow:
@@ -747,7 +749,7 @@ class MissionPolicy:
                 )
                 self._transition(MissionPhase.RETURN_HOME)
                 return self._hold()
-            if self._calibrate_stall >= 3:
+            if skipped_now:
                 # Skip landed — drive the next waypoint this step.
                 if self.index >= len(self.global_plan.waypoints):
                     self._emit("mow_complete", self.global_plan.as_metrics())
@@ -1060,14 +1062,15 @@ class MissionPolicy:
         denom = max(1, reachable)
         raster = blob.get("coverage_cut")
         keep = self.keep_in_mask
+        painted = 0
         if raster is not None and keep is not None:
             cut = np.asarray(raster)
             if cut.shape == keep.shape:
                 painted = int((cut.astype(bool) & np.asarray(keep, dtype=bool)).sum())
-                return float(min(1.0, painted / denom))
         cut_cells = int(blob.get("coverage_cut_cells") or 0)
-        if cut_cells > 0:
-            return float(min(1.0, cut_cells / denom))
+        n = max(painted, cut_cells)
+        if n > 0:
+            return float(min(1.0, n / denom))
         return float(world)
 
     def _mow_paint_done(self, info: Optional[dict[str, Any]]) -> bool:
@@ -1192,7 +1195,7 @@ class MissionPolicy:
         # Ridge IMU stop during mow is a skip/replan, not a limp-park.
         safe_advice = advice
         if (
-            self.phase == MissionPhase.MOW
+            self.phase in {MissionPhase.MOW, MissionPhase.RETURN_HOME}
             and advice == "stop"
             and not bool(info.get("tipover"))
             and not bool(info.get("drain_drop"))
@@ -1220,6 +1223,7 @@ class MissionPolicy:
                 MissionPhase.EXPLORE,
                 MissionPhase.REVIEW,
                 MissionPhase.MOW,
+                MissionPhase.RETURN_HOME,
             }
             and not self.help_requested
             and not bool(info.get("tipover"))
