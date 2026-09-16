@@ -476,18 +476,139 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     ];
   }
 
-  function legendHtml(st, live) {
-    const areas = areaLegendRows(st, live)
-      .map((row) => `<span><i class="swatch area" style="background:${row.color}"></i>${row.label}</span>`)
-      .join("");
-    return `<div class="map-legend" id="map-legend" aria-label="map legend">
+  function pathLegendHtml() {
+    return `<div class="map-legend path-legend" id="map-legend" aria-label="path legend">
+      <span class="legend-kicker">Path</span>
       <span><i class="swatch fog"></i>Fog</span>
       <span><i class="swatch mapped"></i>Mapped</span>
       <span><i class="swatch trail"></i>Trail</span>
       <span><i class="swatch plan"></i>Plan</span>
       <span><i class="swatch cut"></i>Cut</span>
-      ${areas}
     </div>`;
+  }
+
+  function areaLegendHtml(st, live) {
+    const areas = areaLegendRows(st, live)
+      .map((row) => `<span data-area="${row.id}"><i class="swatch area" style="background:${row.color}"></i>${row.label}</span>`)
+      .join("");
+    return `<div class="area-legend-card" id="area-legend" aria-label="area type legend">
+      <span class="legend-kicker">Area types</span>
+      <div class="map-legend area-legend">${areas}</div>
+    </div>`;
+  }
+
+  function flagOn(st, live, key, fallback) {
+    if (st && st[key] != null) return !!st[key];
+    if (live && live[key] != null) return !!live[key];
+    return fallback;
+  }
+
+  function phaseGates(st, live) {
+    const needsReteach = !!(st.needs_reteach || live.needs_reteach || st.fence_unusable || live.fence_unusable);
+    const flagExplore = flagOn(st, live, "can_explore", true);
+    const flagMow = flagOn(st, live, "can_mow", flagOn(st, live, "can_start_mow", true));
+    const flagReturn = flagOn(st, live, "can_return", true);
+    // Always tappable when paired except Mow on an unusable fence.
+    const canExplore = flagExplore;
+    const canMow = !needsReteach;
+    const canReturn = true;
+    const exploreWhy = canExplore ? "" : "Explore unavailable";
+    const mowWhy = needsReteach
+      ? "Fence unusable — re-teach first"
+      : flagMow
+        ? ""
+        : "Mow available — fence is usable";
+    const returnWhy = flagReturn ? "" : "Sends return-home now (no active job yet).";
+    return { needsReteach, canExplore, canMow, canReturn, exploreWhy, mowWhy, returnWhy };
+  }
+
+  function applyPhaseGates(st, live) {
+    const g = phaseGates(st, live);
+    const setBtn = (id, ok, why) => {
+      const btn = $(id);
+      if (!btn) return;
+      btn.disabled = !ok;
+      if (why) btn.setAttribute("title", why);
+      else btn.removeAttribute("title");
+    };
+    setBtn("#cmd-explore", g.canExplore, g.exploreWhy);
+    setBtn("#cmd-mow", g.canMow, g.mowWhy);
+    setBtn("#cmd-return", g.canReturn, g.returnWhy);
+    const hint = $("#phase-hint");
+    if (hint) {
+      hint.textContent = g.mowWhy || g.exploreWhy || "Explore, mow, or return without waiting for auto MAP READY.";
+    }
+    return g;
+  }
+
+  function phaseRowHtml(st, live) {
+    const g = phaseGates(st, live);
+    const hint = g.mowWhy || g.exploreWhy || "Explore, mow, or return without waiting for auto MAP READY.";
+    return `<div class="phase-card" id="phase-card">
+      <span class="legend-kicker">Manual phases</span>
+      <div class="row phase-row" id="phase-row">
+        <button class="btn primary" id="cmd-explore" ${g.canExplore ? "" : "disabled"} ${g.exploreWhy ? `title="${g.exploreWhy}"` : ""}>Explore</button>
+        <button class="btn warn" id="cmd-mow" ${g.canMow ? "" : "disabled"} ${g.mowWhy ? `title="${g.mowWhy}"` : ""}>Mow</button>
+        <button class="btn ghost" id="cmd-return" ${g.canReturn ? "" : "disabled"} ${g.returnWhy ? `title="${g.returnWhy}"` : ""}>Return home</button>
+      </div>
+      <p class="sub phase-hint" id="phase-hint">${hint}</p>
+    </div>`;
+  }
+
+  function fullExploreHtml(fullExplore) {
+    return `<div class="card full-explore-card" id="full-explore-card">
+      <div class="toggle-row">
+        <strong>Full explore</strong>
+        <button type="button" class="toggle ${fullExplore ? "on" : ""}" id="full-explore" aria-pressed="${fullExplore ? "true" : "false"}">${fullExplore ? "On" : "Off"}</button>
+      </div>
+      <div class="sub">Raise the map-ready gate past the demo 30% / 420 cap.</div>
+    </div>`;
+  }
+
+  function injectRowHtml() {
+    return `<div class="inject-row" id="inject-row">
+      <button class="btn ghost" id="inj-stuck">Inject stuck</button>
+      <button class="btn ghost" id="inj-sos">Inject SOS</button>
+      <button class="btn ghost" id="inj-radio">Inject radio lost</button>
+      <button class="btn warn" id="inj-soc">Low battery</button>
+      <button class="btn ghost" id="unpair">Unpair</button>
+    </div>`;
+  }
+
+  function bindPhaseControls() {
+    const exploreBtn = $("#cmd-explore");
+    if (exploreBtn) {
+      exploreBtn.onclick = () => {
+        const fullEl = $("#full-explore");
+        liveControl("explore", { full: !!(fullEl && fullEl.classList.contains("on")) });
+      };
+    }
+    const mowBtn = $("#cmd-mow");
+    if (mowBtn) mowBtn.onclick = () => liveControl("mow");
+    const returnBtn = $("#cmd-return");
+    if (returnBtn) returnBtn.onclick = () => liveControl("return");
+    const fullBtn = $("#full-explore");
+    if (fullBtn) {
+      fullBtn.onclick = () => liveControl("full_explore", { enabled: !fullBtn.classList.contains("on") });
+    }
+  }
+
+  function bindLowBattery() {
+    const injSoc = $("#inj-soc");
+    if (injSoc) injSoc.onclick = () => liveControl("inject", { kind: "low_soc", soc: 0.12 });
+  }
+
+  function showAreasOverlay(st, live, kind) {
+    const phase = (live && live.phase) || ((st && st.state) || {}).phase || "";
+    return (
+      kind === "mapping" ||
+      kind === "mowing" ||
+      kind === "done" ||
+      phase === "review" ||
+      phase === "mow" ||
+      phase === "complete" ||
+      !!((st && st.area_legend && st.area_legend.length) || (live && live.area_legend && live.area_legend.length))
+    );
   }
 
   function fenceOverlayHtml(st, live) {
@@ -508,7 +629,6 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const copy = st.owner_copy || live.owner_copy || "Yard unknown — start a job when ready.";
     const speed = String(st.speed_label || live.speed_label || "5");
     const needsReteach = !!(st.needs_reteach || live.needs_reteach || st.fence_unusable || live.fence_unusable);
-    const canMow = !needsReteach;
     const reason = (st.explore_reason || live.explore_reason || {});
     const reasonLine = reason.label || "";
     const fullExplore = !!(st.full_explore || live.full_explore);
@@ -521,21 +641,25 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const saved = !!(st.yard_saved || live.yard_saved);
     const teaching = job === "teach";
     const kind = (overlayFrom(st, live).progress_kind || modeFrom(st, live).kind || "idle");
+    const hasAreas = showAreasOverlay(st, live, kind);
     screen().innerHTML = `
       <h1>Live job</h1>
       ${radioChipsHtml(path)}
       ${modeBannerHtml(st, live)}
       <p class="owner-copy secondary" id="owner-copy">${copy}</p>
-      <p class="sub explore-reason" id="explore-reason" ${reasonLine ? "" : "hidden"}>${reasonLine}</p>
+      <p class="explore-reason" id="explore-reason" ${reasonLine ? "" : "hidden"}>${reasonLine}</p>
+      ${phaseRowHtml(st, live)}
+      ${fullExploreHtml(fullExplore)}
       <p class="sub" id="yard-chip">${yardName}${taught ? " · taught fence" : " · authored demo fence until you teach"}</p>
-      <div class="live-preview kind-${kind}" id="live-preview">
+      <div class="live-preview kind-${kind}${hasAreas ? " has-areas" : ""}" id="live-preview">
         <img class="obs" id="obs-img" alt="observed terrain" src="${observed}"/>
         <img class="cut" id="cut-img" alt="cut coverage" src="${coverage}"/>
         <img class="areas" id="areas-img" alt="area types and mowable mask" src="${areas}"/>
         <img class="fog" id="fog-img" alt="fog of war" src="${fog}"/>
         ${fenceOverlayHtml(st, live)}
       </div>
-      ${legendHtml(st, live)}
+      ${areaLegendHtml(st, live)}
+      ${pathLegendHtml()}
       ${progressRowHtml(st, live)}
       <div class="speed-row" id="speed-row">
         <button type="button" data-speed="1">1×</button>
@@ -549,27 +673,14 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       </div>
       <button class="btn ghost" id="load-yard" ${saved ? "" : "hidden"}>Load saved yard</button>
       <div class="row">
-        <button class="btn primary" id="start" ${job === "running" || job === "teach" || needsReteach ? "disabled" : ""}>Start job</button>
+        <button class="btn ghost" id="start" ${job === "running" || job === "teach" || needsReteach ? "disabled" : ""}>Start job</button>
         <button class="btn ghost" id="pause" ${job !== "running" && job !== "teach" ? "disabled" : ""}>Pause</button>
       </div>
       <button class="btn ghost" id="resume" ${job !== "paused" && job !== "hold" ? "disabled" : ""}>Resume</button>
-      <div class="row phase-row" id="phase-row">
-        <button class="btn ghost" id="cmd-explore">Explore</button>
-        <button class="btn warn" id="cmd-mow" ${canMow ? "" : "disabled"}>Mow</button>
-        <button class="btn ghost" id="cmd-return">Return</button>
-      </div>
-      <button class="btn ghost ${fullExplore ? "on" : ""}" id="full-explore" aria-pressed="${fullExplore ? "true" : "false"}">${fullExplore ? "Full explore on" : "Full explore off"}</button>
       ${needsReteach ? `<button class="btn warn" id="reteach-cmd">Re-teach fence</button>` : ""}
-      ${canMow && (st.can_start_mow || live.can_start_mow) ? `<button class="btn warn" id="start-mow">Start mow</button>` : ""}
       <button class="btn danger" id="estop">ESTOP</button>
       ${sessionCardHtml(st, live)}
-      <div class="row">
-        <button class="btn ghost" id="inj-stuck">Inject stuck</button>
-        <button class="btn ghost" id="inj-sos">Inject SOS</button>
-        <button class="btn ghost" id="inj-radio">Inject radio lost</button>
-        <button class="btn ghost" id="inj-soc">Inject low SOC</button>
-        <button class="btn ghost" id="unpair">Unpair</button>
-      </div>
+      ${injectRowHtml()}
       <p style="margin-top:10px"><a class="linkish" href="/viewer">Open live fog viewer</a></p>`;
     document.querySelectorAll("#speed-row button").forEach((btn) => {
       btn.classList.toggle("on", btn.dataset.speed === speed);
@@ -584,27 +695,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     $("#start").onclick = () => liveControl("start");
     $("#pause").onclick = () => liveControl("pause");
     $("#resume").onclick = () => liveControl("resume");
-    const mow = $("#start-mow");
-    if (mow) mow.onclick = () => liveControl("mow");
-    const exploreBtn = $("#cmd-explore");
-    if (exploreBtn) {
-      exploreBtn.onclick = () => {
-        const fullEl = $("#full-explore");
-        liveControl("explore", { full: !!(fullEl && fullEl.classList.contains("on")) });
-      };
-    }
-    const mowBtn = $("#cmd-mow");
-    if (mowBtn) mowBtn.onclick = () => liveControl("mow");
-    const returnBtn = $("#cmd-return");
-    if (returnBtn) returnBtn.onclick = () => liveControl("return");
-    const fullBtn = $("#full-explore");
-    if (fullBtn) {
-      fullBtn.onclick = () => liveControl("full_explore", { enabled: !fullBtn.classList.contains("on") });
-    }
+    bindPhaseControls();
     $("#estop").onclick = () => liveControl("estop");
     $("#inj-stuck").onclick = () => liveControl("inject", { kind: "stuck" });
-    const injSoc = $("#inj-soc");
-    if (injSoc) injSoc.onclick = () => liveControl("inject", { kind: "low_soc", soc: 0.12 });
+    bindLowBattery();
     $("#inj-sos").onclick = async () => {
       await liveControl("inject", { kind: "sos" });
       go("fault");
@@ -698,7 +792,13 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <div class="sub">String-head check every 8 hours (stub).</div>
       </div>
       ${scheduleCardHtml(st, state.yard)}
+      ${isLive() ? `<div class="card" id="health-inject">
+        <strong>Gym inject</strong>
+        <div class="sub">Demo only — drop SOC to watch dock → charge → resume.</div>
+        <button class="btn warn" id="inj-soc">Low battery</button>
+      </div>` : ""}
       <button class="btn ghost" id="redo">Replay onboarding</button>`;
+    if (isLive()) bindLowBattery();
     const toggle = $("#sched-toggle");
     if (toggle) {
       toggle.onclick = async () => {
@@ -780,6 +880,9 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const phaseChanged = prev.phase !== frame.phase || prev.job_state !== frame.job_state;
     const buttonsChanged =
       !!prev.can_start_mow !== !!frame.can_start_mow ||
+      !!prev.can_explore !== !!frame.can_explore ||
+      !!prev.can_mow !== !!frame.can_mow ||
+      !!prev.can_return !== !!frame.can_return ||
       !!prev.needs_reteach !== !!frame.needs_reteach ||
       !!prev.full_explore !== !!frame.full_explore ||
       String(prev.charge_state || "") !== String(frame.charge_state || "");
@@ -789,6 +892,9 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       state.status.done = !!(frame.done || frame.phase === "complete");
       state.status.owner_copy = frame.owner_copy;
       state.status.can_start_mow = frame.can_start_mow;
+      state.status.can_explore = frame.can_explore;
+      state.status.can_mow = frame.can_mow;
+      state.status.can_return = frame.can_return;
       state.status.explore_reason = frame.explore_reason;
       state.status.full_explore = frame.full_explore;
       state.status.charge_state = frame.charge_state;
@@ -842,7 +948,11 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     }
     const preview = $("#live-preview");
     const kind = (frame.path_overlay && frame.path_overlay.progress_kind) || mode.kind || "idle";
-    if (preview) preview.className = `live-preview kind-${kind}`;
+    if (preview) {
+      const hasAreas = showAreasOverlay(state.status || {}, frame, kind);
+      preview.className = `live-preview kind-${kind}${hasAreas ? " has-areas" : ""}`;
+    }
+    applyPhaseGates(state.status || {}, frame);
     const row = $("#progress-row");
     if (row) row.dataset.kind = kind;
     const mapChip = $("#map-chip");
@@ -879,7 +989,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (fullBtn && frame.full_explore != null) {
       fullBtn.classList.toggle("on", !!frame.full_explore);
       fullBtn.setAttribute("aria-pressed", frame.full_explore ? "true" : "false");
-      fullBtn.textContent = frame.full_explore ? "Full explore on" : "Full explore off";
+      fullBtn.textContent = frame.full_explore ? "On" : "Off";
     }
     paintLiveOverlay(state.status || {}, frame);
   }

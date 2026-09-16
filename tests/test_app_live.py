@@ -121,6 +121,10 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "explore_reason" in snap
         assert "area_legend" in snap
         assert "full_explore" in snap
+        assert "can_explore" in snap
+        assert "can_mow" in snap
+        assert "can_return" in snap
+        assert "areas_url" in snap
 
         code, status = _json(host, port, "GET", "/status")
         assert "path_overlay" in status
@@ -128,6 +132,12 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "planned_pct" in status
         assert "coverage_url" in status
         assert "waypoint_index" in status
+        assert "can_explore" in status
+        assert "can_mow" in status
+        assert "can_return" in status
+        assert "explore_reason" in status
+        assert "full_explore" in status
+        assert "area_legend" in status
         if (status.get("state") or {}).get("phase") in {"calibrate_boundary", "explore", "review", "teach"}:
             assert status["state"]["mission"] != "mowing"
 
@@ -171,14 +181,21 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         conn.close()
         assert "/api/live/control" in js
         assert "Start job" in js
-        assert "Start mow" in js
         assert "cmd-explore" in js
         assert "cmd-mow" in js
         assert "cmd-return" in js
+        assert "Explore" in js
+        assert ">Mow<" in js or "cmd-mow" in js
+        assert "Return home" in js
         assert "Full explore" in js
         assert "explore_reason" in js
-        assert "Inject low SOC" in js
+        assert "Low battery" in js
+        assert "low_soc" in js
         assert "area_legend" in js or "Mow this" in js
+        assert "Area types" in js
+        assert "can_explore" in js
+        assert "can_mow" in js
+        assert "can_return" in js
         assert "Teach boundary" in js
         assert "Save yard" in js
         assert "Inject SOS" in js

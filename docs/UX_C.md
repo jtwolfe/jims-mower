@@ -111,12 +111,15 @@ Narrow phone chrome (~390 px). Hash routes:
 
 - `#/onboard/unbox` → `pair` → `home` → `teach` → `mow`
 - `#/map` — live job: large **Mapping yard** / **Mowing** mode chip,
-  fog + observed + cut + area-type raster, SVG trail / plan / frontiers / pose,
-  Map% vs Cut% emphasis, Explore / Mow / Return, Full explore toggle,
-  and a Fog/Mapped/Trail/Plan/Cut plus area-type legend.
-  Pause / Hold / ESTOP stay as a hold badge on the same phase. Pair
-  still required before Start. Else 2D SVG yard.
-- `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run
+  `explore_reason` line, then a **Manual phases** card with always-visible
+  **Explore / Mow / Return home** (enabled from `can_*`, disabled reason
+  shown), a **Full explore** On/Off toggle, then the map with area-type
+  raster, a labeled **Area types** legend (grass / mow-this / path /
+  sand / building / water / drain / beds / keep-out / fog) plus the
+  Path Fog/Mapped/Trail/Plan/Cut row. **Low battery** inject is on Map
+  and Health (`{cmd: inject, kind: low_soc}`). Pair still required
+  before Start. Else 2D SVG yard.
+- `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run, Low battery inject when `--live`
 - `#/fault` — ESTOP / SOS vs stuck recovery
 
 `viewer.js` is a 2D SVG fallback for the phone chrome only. The three.js
