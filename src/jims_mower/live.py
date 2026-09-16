@@ -1020,10 +1020,7 @@ class LiveSession:
             return
         if getattr(self.policy, "fence_unusable", False):
             return
-        plan = self.policy.global_plan
-        if plan is not None and int(getattr(plan, "planned_mowable_cells", 0) or 0) <= 0:
-            return
-        if plan is not None and len(getattr(plan, "waypoints", []) or []) < 2:
+        if getattr(self.policy, "_empty_mow_plan", lambda: False)():
             return
         if self._review_wall0 is None:
             self._review_wall0 = time.perf_counter()
@@ -1177,9 +1174,11 @@ class LiveSession:
         live_card = self._live_session_card()
         card = self.session_card if (self.done and self.session_card) else live_card
         fence_unusable = bool(getattr(policy, "fence_unusable", False))
-        planned = int(status.get("planned_mowable_cells") or 0)
-        if status["phase"] == "review" and planned <= 0 and int(status.get("n_waypoints") or 0) <= 0:
-            fence_unusable = True
+        if status["phase"] == "review":
+            if getattr(policy, "_keep_in_too_small", lambda: False)():
+                fence_unusable = True
+            if int(status.get("n_waypoints") or 0) < 2 and int(status.get("planned_mowable_cells") or 0) <= 0:
+                fence_unusable = True
         if (
             self.job_state == "idle"
             and self.owner_taught

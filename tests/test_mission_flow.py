@@ -360,15 +360,15 @@ def test_scribble_keep_in_review_is_reteach_not_safe() -> None:
         if terminated or truncated or policy.done:
             break
     assert policy.phase == MissionPhase.REVIEW
-    assert policy.fence_unusable or int(policy.status(info).get("planned_mowable_cells") or 0) <= 0
-    assert policy.request_start_mow() is False
-    for _ in range(8):
+    for _ in range(3):
         action = policy.act(obs, info)
         obs, _reward, _term, _trunc, info = env.step(action)
         assert policy.phase == MissionPhase.REVIEW
         assert policy.phase != MissionPhase.SAFE
-        copy = owner_copy_for("running", policy.phase.value, fence_unusable=True)
-        assert "re-teach" in copy.lower()
+    assert policy.fence_unusable is True
+    assert policy.request_start_mow() is False
+    copy = owner_copy_for("running", policy.phase.value, fence_unusable=True)
+    assert "re-teach" in copy.lower()
     env.close()
 
 

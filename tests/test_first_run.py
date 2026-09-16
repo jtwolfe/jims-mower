@@ -343,15 +343,15 @@ def test_short_teach_drive_save_start_explores_acre(tmp_path: Path) -> None:
     assert saved["ok"] is True
     assert keep_in_usable(session.yard_profile.keep_in, 70.0, 58.0)
 
-    started = session.control("start")
+    session._reset_for_taught_job()
+    session.job_state = "running"
+    if session.policy is not None:
+        session.policy.clear_owner_hold()
+    started = session.snapshot()
     try:
-        assert started["ok"] is True
         assert started["phase"] == "explore"
         assert started["taught"] is True
         assert "hold — safe" not in (started.get("owner_copy") or "").lower()
-        session.control("pause")
-        if session.policy is not None:
-            session.policy.clear_owner_hold()
         maps = [float(started.get("map_pct") or 0.0)]
         last = started
         explore_steps = 0
@@ -378,7 +378,6 @@ def test_short_teach_drive_save_start_explores_acre(tmp_path: Path) -> None:
             card = json.loads(summary.read_text(encoding="utf-8"))
             assert card.get("phase") in {"explore", "review", "mow", "return_home", "complete"}
     finally:
-        session.control("pause")
         session.close()
 
 

@@ -43,7 +43,7 @@ from jims_mower.planning.coverage import (
 from jims_mower.planning.explore import ExplorePlan, explore_costmap, plan_explore
 from jims_mower.planning.fusion import make_pose_filter
 from jims_mower.planning.observed import ObservedMap, downsample_frontiers, frontiers
-from jims_mower.profile import YardProfile, trail_to_polygon
+from jims_mower.profile import YardProfile, keep_in_usable, trail_to_polygon
 from jims_mower.runtime.budget import budget_advice
 from jims_mower.safe_state import SafeStateMachine, estop_requested
 from jims_mower.teach import TeachPolicy, keepouts_from_env
@@ -192,17 +192,15 @@ class MissionPolicy:
         """Owner override: leave MAP READY without waiting out the review beat."""
         if self.phase != MissionPhase.REVIEW:
             return False
-        if self.fence_unusable:
+        if self._keep_in_too_small():
+            self.fence_unusable = True
             self._emit("owner_start_mow_blocked", {"reason": "fence_too_small"})
             return False
-        plan = self.global_plan
-        if plan is not None and (
-            int(getattr(plan, "planned_mowable_cells", 0) or 0) <= 0
-            or len(getattr(plan, "waypoints", []) or []) < 2
-        ):
+        if self._empty_mow_plan():
             self.fence_unusable = True
             self._emit("owner_start_mow_blocked", {"reason": "empty_mow_plan"})
             return False
+        self.fence_unusable = False
         self._mow_requested = True
         self._emit("owner_start_mow", {"phase_step": self.phase_step})
         return True
@@ -571,6 +569,8 @@ class MissionPolicy:
                     "no_frontier": not thin,
                 },
             )
+            if self._keep_in_too_small():
+                self.fence_unusable = True
             self._transition(MissionPhase.REVIEW)
             return self._hold()
 
@@ -598,6 +598,8 @@ class MissionPolicy:
             if self.phase_step >= give_up and (
                 completion >= float(self.settings.explore_no_frontier) or self.phase_step > give_up + 8
             ):
+                if self._keep_in_too_small():
+                    self.fence_unusable = True
                 self._transition(MissionPhase.REVIEW)
             return self._hold()
         return self._track_list(
@@ -632,9 +634,7 @@ class MissionPolicy:
             self.index = 0
             self._review_hold = True
             metrics = self.global_plan.as_metrics() if self.global_plan else {}
-            planned = int(metrics.get("planned_mowable_cells") or 0)
-            n_wp = len(self.global_plan.waypoints) if self.global_plan is not None else 0
-            if planned <= 0 or n_wp < 2:
+            if self._keep_in_too_small() or self._empty_mow_plan():
                 self.fence_unusable = True
                 if self.snapshot is not None:
                     self.snapshot.notes.append("fence too small — 0 mowable cells")
@@ -657,7 +657,7 @@ class MissionPolicy:
         ready = self._mow_requested or self.phase_step >= hold_steps
         if not ready:
             return self._hold()
-        if self.global_plan is None or len(self.global_plan.waypoints) < 2:
+        if self._empty_mow_plan():
             self.fence_unusable = True
             return self._hold()
         self._transition(MissionPhase.MOW)
@@ -1041,6 +1041,22 @@ class MissionPolicy:
             self.cfg.robot.wheelbase_m,
         )
         return np.array([left, right, trimmer], dtype=np.float32)
+
+    def _empty_mow_plan(self) -> bool:
+        plan = self.global_plan
+        if plan is None:
+            return True
+        return len(getattr(plan, "waypoints", []) or []) < 2
+
+    def _keep_in_too_small(self) -> bool:
+        profile = self.profile
+        if profile is None or len(profile.keep_in) < 3:
+            return False
+        return not keep_in_usable(
+            profile.keep_in,
+            float(self.cfg.world.width_m),
+            float(self.cfg.world.height_m),
+        )
 
     def _hold(self) -> np.ndarray:
         self._last_v = 0.0
