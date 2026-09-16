@@ -9,6 +9,9 @@ cart, and not a SIL claim.
 
 **No claimed field runtime** until row 18 of
 [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) is measured.
+Procedure + config hooks: [`PACK_THERMAL.md`](PACK_THERMAL.md).
+Fab steps + BOM freeze: [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md).
+Acre scorecard (not run): [`FIELD_TEST.md`](FIELD_TEST.md).
 
 ICD keys that the wiring must feed (do not rename): `cameras`, `imu`,
 `gps`, `tof`, `pose`, action `[left, right, trimmer]`. See
@@ -43,7 +46,10 @@ Gym geometry already matches the envelope
 | \(g\) | **9.81 m/s²** | ICD `GRAVITY_MPS2`. | constant |
 
 If a later hang-test says \(m=26\) kg or \(h_\mathrm{cg}=0.22\) m,
-**recompute tip and torque** before cutting metal.
+**recompute tip and torque** before cutting metal. How to hang-measure
+and rewrite this table: [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md)
+(after hang-measure). Those example 26 kg / 0.22 m figures are
+**illustrative**, not measurements.
 
 ---
 
@@ -217,7 +223,11 @@ Add 20% reserve to limp-home at `min_soc` 0.25 → **~1.3 kWh** nameplate
 if you want one acre on one charge **in this model**.
 
 Gym `BatteryConfig.capacity_wh = 50` is a **thermal/SOC stub** so short
-tests can limp. It is **not** this pack.
+tests can limp. It is **not** this pack. How to replace it with a
+measured Wh and charge time (and refuse a silent `measured: true`):
+[`PACK_THERMAL.md`](PACK_THERMAL.md). Config:
+`runtime.battery.capacity_wh`, `charge_time_h`, `measured: false` by
+default. **Do not copy the ~1.3 kWh model into MEASURED YAML.**
 
 ### 5.3 Chemistry / voltage / Ah
 
@@ -343,6 +353,10 @@ without a regulator. Fuse the Orin separately from the hubs (see §10).
 ## 9. BOM — part **classes**
 
 Not a must-buy list. If the SKU is uncertain, it says so.
+Fab freeze with verify-before-spin / open questions:
+[`FAB_CHECKLIST.md`](FAB_CHECKLIST.md),
+[`configs/hardware/bom.yaml`](../configs/hardware/bom.yaml).
+Every number there is **assumption / class / target** until measured.
 
 | Class | Qty | Example class | Uncertain SKU? | Feeds ICD / role |
 | --- | --- | --- | --- | --- |
@@ -428,16 +442,13 @@ in this document and retune **software** trips.
 
 ## 12. Honest leftovers
 
-- Runtime hours and acre-per-charge: **unmeasured**.
+- Runtime hours and acre-per-charge: **unmeasured**. Procedure ready
+  ([`PACK_THERMAL.md`](PACK_THERMAL.md)); do not invent Wh.
 - Motor SKUs, camera modules, pack brand: **not picked**.
 - RF range, TRT FPS, detector mAP: **out of scope** (and forbidden as
   invented numbers).
-- Next *physical* work: JetPack CSI + real cameras (build-order §5 field
-  line), then real IMU/GNSS/ToF chips (§6 field), then **tape** the
-  stereo pair and commit `extrinsics_stereo_measured.yaml` (S2R-3).
-  Software CSI → `obs["cameras"]`, gym IMU/GNSS/ToF stubs, and the
-  calibration **procedure + gym fixture** are done; the physical
-  acceptance lines are not. Gym CV terrain (stereo + seg stub + frozen
-  elev) is software build-order §2. HW ESTOP sim + bench watchdog
-  stamps are §3–4. Dataset harness (CV-8) records FakeCsi →
-  `jims_mower.dataset.v1`; real labels are still a follow-up.
+- Software path for fab + field is **done**. Next is **human**: fab
+  ([`FAB_CHECKLIST.md`](FAB_CHECKLIST.md)), measure pack / CG, tape
+  extrinsics, collect real labels, run
+  [`FIELD_TEST.md`](FIELD_TEST.md). Do not start another WAVE of gym
+  stubs.

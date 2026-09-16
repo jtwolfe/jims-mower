@@ -127,7 +127,16 @@ jims-mower-app --backend memory --yard configs/yards/example_profile.json --port
 Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md),
 [`docs/SCHEDULE.md`](docs/SCHEDULE.md), [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md),
 [`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md),
-[`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/DATASET.md`](docs/DATASET.md).
+[`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/DATASET.md`](docs/DATASET.md),
+[`docs/PACK_THERMAL.md`](docs/PACK_THERMAL.md),
+[`docs/FAB_CHECKLIST.md`](docs/FAB_CHECKLIST.md),
+[`docs/FIELD_TEST.md`](docs/FIELD_TEST.md).
+
+**What's left is not software.** The gym/owner loop and fab+field
+*procedures* are on `main`. Next is human: fab the chassis, measure
+the pack and CG, commit taped extrinsics, collect real labels, run the
+acre scorecard. **No claimed acre runtime.** Do not start another WAVE
+of gym stubs.
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
 Health `#/health` enable toggle arms the weekly window (SOC / rain / fault
@@ -668,7 +677,10 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo + stronger yard grade
 configs/scenarios/            WAVE 1A/1C/2A yards (suburban, gradient_yard, …)
-docs/                         WAVE notes + UX + schedule + product→hardware + JETSON
+docs/                         WAVE notes + UX + schedule + product→hardware + fab/pack/field
+configs/hardware/bom.yaml     §19 BOM freeze (part classes, no SKUs)
+configs/orin/pack_measured.template.yaml  §18 pack bench scaffold
+configs/field/scorecard.template.yaml     §20 acre scorecard (empty)
 docker/Dockerfile.aarch64     Orin / aarch64 packaging notes (not CI)
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/runtime/       fake drivers, bridge, budget, TRT placeholder

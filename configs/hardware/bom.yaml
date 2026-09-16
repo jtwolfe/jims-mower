@@ -1,0 +1,160 @@
+# BOM freeze — part CLASSES from HARDWARE_DESIGN.md §9.
+# No SKUs. No prices. Every number is an assumption, class, or target
+# until a hang / bench marks it measured. See docs/FAB_CHECKLIST.md.
+#
+# schema: jims_mower.bom.v1
+# measured: false until mass / CG / stall current are written back.
+
+schema: jims_mower.bom.v1
+source: docs/HARDWARE_DESIGN.md §9
+measured: false
+note: >
+  Freeze for the first fab spin. Buy or make the class, then verify the
+  listed check before a spinning trimmer. Do not treat qty or class
+  watts as a shopping cart.
+
+classes:
+  - id: chassis
+    qty: 1
+    class: 3 mm Al or HDPE tub, 500 mm cube class
+    buy_make: make
+    verify_before_spin: hang-measure wet mass and CG; write HARDWARE_DESIGN §1
+    open_questions: thickness vs 22 kg assumption; belly clearance 70–90 mm
+    number_status: assumption
+    feeds: mass / CG
+    notes: Envelope matches gym 0.50 m. Not a fabbed article.
+
+  - id: drive_hub
+    qty: 2
+    class: 24 V hub or gearmotor, ≥7 N·m peak, encoder, IP54+
+    buy_make: buy
+    verify_before_spin: stall current on blocks; resize hub fuses
+    open_questions: wheel OD and gearbox after measuring r_w
+    number_status: class
+    feeds: action [0], [1]
+
+  - id: trimmer_spindle
+    qty: 1
+    class: 24–36 V BLDC + 8–12 k string head
+    buy_make: buy
+    verify_before_spin: electrical cut from ESTOP + living interlock, not PWM 0 only
+    open_questions: clutch vs software current limit
+    number_status: class
+    feeds: action [2]
+
+  - id: wheels
+    qty: "2 or 4"
+    class: ~8 in / 200 mm OD, turf tread
+    buy_make: buy
+    verify_before_spin: tape r_w; confirm track 400 mm and wheelbase 400 mm
+    open_questions: foam vs pneumatic; ground pressure on wet soil
+    number_status: assumption
+    feeds: r_w, track_m
+
+  - id: pack
+    qty: 1
+    class: LiFePO4 24 V 50 Ah class + BMS (uncertain SKU)
+    buy_make: buy
+    verify_before_spin: docs/PACK_THERMAL.md — Wh + charge hours before measured: true
+    open_questions: fit in 50 cm cube with CG low and between wheels
+    number_status: class
+    feeds: battery_soc later
+
+  - id: charger
+    qty: 1
+    class: 24 V 10 A class (or 20 A if thermal allows)
+    buy_make: buy
+    verify_before_spin: log charge_time_h empty → terminate
+    open_questions: dock contacts vs barrel
+    number_status: class
+    feeds: dock
+
+  - id: orin
+    qty: 1
+    class: Jetson Orin Nano 8 GB + carrier, JetPack 6
+    buy_make: buy
+    verify_before_spin: confirm barrel voltage; Orin fuse separate from hubs
+    open_questions: carrier variant; 19–24 V input vs 8S LFP
+    number_status: class
+    feeds: compute
+
+  - id: cameras
+    qty: "4–6"
+    class: IMX219/IMX477-class CSI; one matched stereo pair 6–12 cm + mono
+    buy_make: buy
+    verify_before_spin: tape baseline; CALIBRATION.md; camera names stereo_left/right
+    open_questions: module SKU; mount pitch after lip visibility
+    number_status: class
+    feeds: cameras
+
+  - id: imu
+    qty: 1
+    class: 6-axis I2C (BMI088 / ICM-42688-P class)
+    buy_make: buy
+    verify_before_spin: rest ≈ (0,0,9.81,0,0,0); near CG
+    open_questions: address vs drivers.py 0x68 comment
+    number_status: class
+    feeds: imu
+
+  - id: gnss
+    qty: 1
+    class: UART GNSS with a valid bit, 1 Hz+
+    buy_make: buy
+    verify_before_spin: lever arm from peg; SURVEY_ORIGIN.md
+    open_questions: RTK later, not required for first spin
+    number_status: class
+    feeds: gps
+
+  - id: tof
+    qty: "0/2/4"
+    class: VL53-class downward at wheel corners
+    buy_make: buy
+    verify_before_spin: board-under-wheel shortens the matching corner
+    open_questions: count vs sensors.tof.count
+    number_status: class
+    feeds: tof
+
+  - id: estop_paddle
+    qty: 1
+    class: NC paddle, 10 A+
+    buy_make: buy
+    verify_before_spin: dummy-load spin; rails die; software clear does not restore
+    open_questions: GPIO sense vs coil-only
+    number_status: class
+    feeds: kills rails
+
+  - id: contactor
+    qty: "1–2"
+    class: Traction + trimmer FET / contactor
+    buy_make: buy
+    verify_before_spin: ESTOP.md reset; hotel/Orin stays up
+    open_questions: one contactor vs two FET enables
+    number_status: class
+    feeds: RT-6
+
+  - id: fuses
+    qty: "see HARDWARE_DESIGN §10"
+    class: pack 40 A / Orin 5 A / hub 15 A / trim 15 A (class-scale)
+    buy_make: buy
+    verify_before_spin: resize after measured stall current; mark the lid
+    open_questions: blade vs poly
+    number_status: class
+    feeds: fuse map
+
+  - id: radios
+    qty: 1
+    class: BT + optional Wi-Fi + LoRa (USB/UART)
+    buy_make: buy
+    verify_before_spin: pairing bool is still a stub — do not claim RF range
+    open_questions: which USB stick
+    number_status: class
+    feeds: not measured
+
+  - id: bump_skirt
+    qty: 1
+    class: non-structural skirt above grass
+    buy_make: make
+    verify_before_spin: no under-deck blade; collision_radius_m 0.28 m still matches
+    open_questions: material
+    number_status: target
+    feeds: body envelope

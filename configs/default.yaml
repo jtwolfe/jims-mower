@@ -183,7 +183,14 @@ runtime:
     imu_stall_s: 0.40
     vision_stall_s: 0.40
   battery:
+    # 50 Wh is the gym stub. measured: false until docs/PACK_THERMAL.md.
+    # Do not flip measured: true without capacity_wh / charge_time_h / measured_at.
     capacity_wh: 50.0
+    charge_time_h: null
+    measured: false
+    template: false
+    measured_at: ""
+    notes: ""
     soc: 1.0
     limp_soc: 0.15
     stop_soc: 0.05
@@ -192,6 +199,8 @@ runtime:
     t_ambient_c: 35.0
     t_hot_c: 75.0
     t_crit_c: 85.0
+    board_load_c: null
+    measured: false
 
 # WAVE UX-B — fault injection + radio sim. Off by default.
 faults:

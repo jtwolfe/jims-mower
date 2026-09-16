@@ -1,0 +1,47 @@
+# FIELD SCORECARD TEMPLATE — empty. A human fills this after a
+# residential-acre run. See docs/FIELD_TEST.md.
+#
+# Score tips / drain entries / leftover uncut / ESTOP pulls.
+# Do NOT score mAP, IoU, or FPS. acre_runtime_h stays null until a
+# field run *and* a measured pack (docs/PACK_THERMAL.md).
+
+schema: jims_mower.field_scorecard.v1
+field_run: false
+pack_measured: false
+yard: ""
+date: ""
+operator: ""
+
+preflight:
+  self_test: null          # jims-mower-selftest on the wired robot
+  hw_estop_paddle: null    # paddle + dummy load; rails die
+  soc: null                # fraction 0–1 from the fuel gauge, or skip
+  rain_flag: null          # weather.wet / status.weather.rain
+
+mission:
+  teach_boundary: null
+  surveyed_origin: null    # peg + metre keep-in; SURVEY_ORIGIN.md
+  explore: null
+  map_ready: null
+  mow: null
+  return_home: null
+
+checks:
+  living_interlock: null   # person / dog in safety_radius_m
+  tip_ramp_recovery: null
+  rain_skip: null
+  soc_skip: null
+  day2_resume: null        # cold load yesterday's uncut
+
+score:
+  tips: null
+  drain_entries: null
+  leftover_uncut_cells: null
+  leftover_uncut_m2: null
+  estop_pulls: null
+
+acre_runtime_h: null
+map_claim: null
+iou_claim: null
+fps_claim: null
+notes: ""

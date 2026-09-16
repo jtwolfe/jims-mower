@@ -48,10 +48,14 @@ install a ROS 2 distro. Topic map: `/jims_mower/imu`, `/gps`,
 watt-hours, not board telemetry. Off by default (`runtime.enabled:
 false`). When enabled, `info["budget_advice"]` is `ok` / `slow` /
 `stop` and `TerrainPolicy` combines it with terrain / living / fence
-advice (limp or hold).
+advice (limp or hold). Default `capacity_wh` is the 50 Wh gym stub
+(`runtime.battery.measured: false`). A filled bench
+([`PACK_THERMAL.md`](PACK_THERMAL.md)) is required before `measured:
+true`. No acre-runtime claim.
 
-`info` also carries `battery_soc`, `thermal_c`, `budget_reason`,
-`not_a_power_trace: true`.
+`info` also carries `battery_soc`, `thermal_c`, `capacity_wh`,
+`charge_time_h`, `pack_measured`, `budget_reason`,
+`not_a_power_trace: true`, `acre_runtime_h: null`.
 
 ## Design studies
 

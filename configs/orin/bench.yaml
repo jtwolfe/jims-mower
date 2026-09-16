@@ -31,3 +31,5 @@ runtime:
     enabled: true
     imu_stall_s: 0.40
     vision_stall_s: 0.40
+  # Pack stays the 50 Wh gym stub (measured: false). Bench Wh:
+  # docs/PACK_THERMAL.md / configs/orin/pack_measured.template.yaml.

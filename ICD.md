@@ -44,7 +44,9 @@ the hub.
 `info` (not in the space) also carries `terrain_advice`, `living_advice`,
 `geofence_advice`, `budget_advice` (`ok` / `slow` / `stop` from the
 Orin-class battery / thermal stub when `runtime.enabled`), `battery_soc`,
-`thermal_c`, `detections` as dicts, `weather`, `scenario`, `geofence`
+`thermal_c`, `capacity_wh`, `charge_time_h`, `pack_measured` (50 Wh gym
+stub unless `runtime.battery.measured`; no acre-runtime claim),
+`detections` as dicts, `weather`, `scenario`, `geofence`
 (keep-in vertices), `geofence_spec` (`keep_in` / `keep_out`),
 `nearest_person_m`, IMU/GPS lists.
 

@@ -9,10 +9,12 @@ import pytest
 from jims_mower.app.backend import MemoryBackend
 from jims_mower.constants import SCHEDULE_SCHEMA, YARD_PROFILE_SCHEMA
 from jims_mower.profile import ProfileError, parse_yard_profile
+from jims_mower.pack import GYM_STUB_CAPACITY_WH
 from jims_mower.schedule import (
     FrozenClock,
     ScheduleEngine,
     ScheduleGates,
+    ScheduleHook,
     ScheduleSpec,
     next_window_start,
 )
@@ -53,6 +55,27 @@ def test_arm_in_window() -> None:
     assert decision.window_id == "2026-09-14T09:00"
     again = engine.evaluate(ScheduleGates(soc=0.8))
     assert again.action == "idle"
+
+
+def test_soc_gate_exposes_configured_capacity() -> None:
+    hook = ScheduleHook()
+    hook.engine = ScheduleEngine(_spec(), clock=FrozenClock(_monday_0900()))
+    hook.poll(ScheduleGates(soc=0.10, capacity_wh=200.0, pack_measured=True))
+    status = hook.status_dict()
+    assert status["reason"] == "soc_low"
+    assert status["capacity_wh"] == pytest.approx(200.0)
+    assert status["pack_measured"] is True
+    assert status["remaining_wh"] == pytest.approx(20.0)
+    assert status["soc"] == pytest.approx(0.10)
+
+
+def test_memory_backend_battery_is_unmeasured_stub() -> None:
+    backend = MemoryBackend(default_yard_profile())
+    battery = backend.status()["battery"]
+    assert battery["measured"] is False
+    assert battery["capacity_wh"] == pytest.approx(GYM_STUB_CAPACITY_WH)
+    assert battery["acre_runtime_h"] is None
+    assert battery["not_a_power_trace"] is True
 
 
 def test_skip_soc_rain_fault_estop() -> None:
