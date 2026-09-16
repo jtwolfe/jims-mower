@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from jims_mower.constants import TERRAIN_MODE_CLI
 from jims_mower.env import MowerEnv
 from jims_mower.metrics import EpisodeScorecard, evaluate_episode, summarize_scorecards
 from jims_mower.scenarios import list_scenarios, load_source
@@ -134,7 +135,9 @@ def run_farm(
                 cfg.sensors.camera_count = int(cameras)
                 cfg.sensors.cameras = []
             if terrain_observer:
-                cfg.perception.terrain_mode = terrain_observer.strip().lower()
+                from jims_mower.perception.terrain import normalize_terrain_mode
+
+                cfg.perception.terrain_mode = normalize_terrain_mode(terrain_observer)
             env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
             card = evaluate_episode(env, seed=seed, steps=steps, policy=policy, close=True)
         except Exception as exc:  # noqa: BLE001 — farm records flakes instead of silent skip
@@ -191,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-drains", type=int, default=DEFAULT_MAX_DRAINS)
     p.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind", "learned"),
+        choices=TERRAIN_MODE_CLI,
         default=None,
     )
     p.add_argument(

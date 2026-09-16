@@ -12,6 +12,7 @@ from jims_mower.perception.grass import (
 from jims_mower.perception.hand_signals import HandSignalCurriculum
 from jims_mower.perception.mock import MockDetector, detection_from_obstacle
 from jims_mower.perception.semantic import semantic_raster
+from jims_mower.perception.detect import AppearanceDetector, detector_from_mode
 from jims_mower.perception.trt import TrtDetector, TrtTerrainObserver, tensorrt_available
 from jims_mower.perception.cv_terrain import (
     classify_structure_rgb,
@@ -45,17 +46,27 @@ from jims_mower.perception.grade import PlanarGradeModel, gradients_from_attitud
 from jims_mower.perception.fuse import fuse_camera_labels, fuse_stamps
 from jims_mower.perception.learn import TerrainMLP, load_weights, save_weights
 from jims_mower.perception.temporal import DetectionTracklets, HazardHysteresis
+from jims_mower.perception.onnx_io import (
+    OnnxExportError,
+    OnnxMLP,
+    export_terrain_onnx,
+    onnx_available,
+    onnxruntime_available,
+)
 from jims_mower.perception.terrain import (
     BlindTerrainObserver,
     HeuristicTerrainObserver,
     LearnedTerrainObserver,
+    OnnxTerrainObserver,
     OracleTerrainObserver,
     TerrainEstimate,
     TerrainObserver,
+    normalize_terrain_mode,
     terrain_observer_from_mode,
 )
 
 __all__ = [
+    "AppearanceDetector",
     "BlindDetector",
     "BlindTerrainObserver",
     "ColorGrassObserver",
@@ -69,6 +80,9 @@ __all__ = [
     "HeuristicTerrainObserver",
     "LearnedTerrainObserver",
     "MockDetector",
+    "OnnxExportError",
+    "OnnxMLP",
+    "OnnxTerrainObserver",
     "OracleTerrainObserver",
     "TrtDetector",
     "TrtTerrainObserver",
@@ -82,7 +96,9 @@ __all__ = [
     "PlanarGradeModel",
     "paint_planar_grade",
     "detection_from_obstacle",
+    "detector_from_mode",
     "drain_pixel_fraction",
+    "export_terrain_onnx",
     "fuse_camera_labels",
     "fuse_stamps",
     "grass_fraction",
@@ -110,6 +126,9 @@ __all__ = [
     "synthetic_stereo_points",
     "tape_vs_ideal_disparity",
     "validate_stereo_yaml",
+    "normalize_terrain_mode",
+    "onnx_available",
+    "onnxruntime_available",
     "tensorrt_available",
     "terrain_observer_from_mode",
     "uncut_grass_mask",

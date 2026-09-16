@@ -93,20 +93,27 @@ and say so in `meta.notes`.
 
 ### What not to do
 
-- Do not publish mAP / IoU until a **locked** held-out set exists
-  (build-order §9).
+- Do not publish mAP / IoU until a **locked** held-out **real** set
+  exists (build-order §9 field line). The software train→ONNX path may
+  exist; that is not an IoU.
 - Do not treat FakeCsi tinted frames as terrain.
-- Do not train a production TRT head in this step.
+- Do not treat a sim-trained ONNX / TRT engine as the production head.
 
 ---
 
-## Train stub
+## Train stub → optional ONNX
 
 ```bash
 jims-mower-train-terrain --dataset dataset_out --out terrain_mlp.npz
+# Optional (requires pip install -e ".[onnx]"):
+jims-mower-train-terrain --dataset dataset_out --out artifacts/terrain_mlp.npz \
+  --onnx artifacts/terrain_seg.onnx
 ```
 
-Numpy colour+position stub. Still not a field head.
+Numpy colour+position stub, optional ONNX Gemm export. Sim / FakeCsi
+labels only. **`sim_only`. Not a field head.** `iou_claim` stays null
+until this protocol has a locked real val set (build-order §9 field
+line). See [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) §9.
 
 ---
 

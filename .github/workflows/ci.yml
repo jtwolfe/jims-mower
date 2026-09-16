@@ -38,8 +38,13 @@ jobs:
           jims-mower-study --kind clearance --dry-run --out /tmp/jims-mower-ci-study-clear
           jims-mower-study --kind trimmer --dry-run --out /tmp/jims-mower-ci-study-trim
           jims-mower-study --kind observer --dry-run --out /tmp/jims-mower-ci-study-obs
-      - name: TensorRT placeholder dry-run
-        run: jims-mower-export-trt --dry-run --out /tmp/jims-mower-ci-trt.json
+      - name: Terrain train stub + TensorRT dry-run
+        run: |
+          jims-mower-export --adapter fake_csi --steps 4 --out /tmp/jims-mower-ci-ds
+          jims-mower-train-terrain --dataset /tmp/jims-mower-ci-ds --out /tmp/jims-mower-ci-terrain.npz --epochs 3 --hidden 4
+          test -f /tmp/jims-mower-ci-terrain.npz
+          jims-mower-export-trt --dry-run --out /tmp/jims-mower-ci-trt.json
+          python -c "import json; p=json.load(open('/tmp/jims-mower-ci-trt.json')); assert p['fps_claim'] is None and p['map_claim'] is None and p['iou_claim'] is None"
       - name: Geofence + movers demo smoke
         run: jims-mower-demo --config configs/scenarios/geofence_movers.yaml --steps 4 --out /tmp/jims-mower-ci-geofence --cameras 4 --policy terrain
       - name: Mission resume smoke

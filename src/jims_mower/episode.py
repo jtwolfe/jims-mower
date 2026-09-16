@@ -275,9 +275,9 @@ def record_episode(
         cfg.sensors.cameras = []
     if terrain_observer:
         key = terrain_observer.strip().lower()
-        if key not in {"oracle", "heuristic", "blind"}:
-            raise ValueError(f"terrain_observer must be oracle|heuristic|blind; got {key!r}")
-        cfg.perception.terrain_mode = key
+        from jims_mower.perception.terrain import normalize_terrain_mode
+
+        cfg.perception.terrain_mode = normalize_terrain_mode(key)
     env = MowerEnv(config=cfg, render_mode=None)
     obs, info = env.reset(seed=seed)
     harness = LatencyHarness(delays or LatencyDelays())

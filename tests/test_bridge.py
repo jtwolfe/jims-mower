@@ -76,6 +76,8 @@ def test_tensorrt_placeholder_dry_run(tmp_path: Path) -> None:
     payload = run_export(onnx=None, engine=tmp_path / "x.engine", dry_run=True, out=out)
     assert payload["fps_claim"] is None
     assert payload["map_claim"] is None
+    assert payload["iou_claim"] is None
+    assert payload["field_ready"] is False
     assert payload["not_a_benchmark"] is True
     assert payload["dry_run"] is True
     assert "trtexec" in payload["command"][0]

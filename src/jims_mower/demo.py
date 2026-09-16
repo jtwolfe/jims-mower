@@ -13,7 +13,7 @@ from PIL import Image
 
 from jims_mower.bc import BcPolicy, maybe_load_bc
 from jims_mower.bev import render_bev
-from jims_mower.constants import BC_FEATURE_DIM, DEFAULT_BC_WEIGHTS
+from jims_mower.constants import BC_FEATURE_DIM, DEFAULT_BC_WEIGHTS, TERRAIN_MODE_CLI
 from jims_mower.env import MowerEnv
 from jims_mower.kinematics import sit_on_terrain, trimmer_xy
 from jims_mower.planning import TerrainPolicy
@@ -151,12 +151,9 @@ def run_demo(
         cfg.sensors.camera_count = cameras
         cfg.sensors.cameras = []
     if terrain_observer:
-        key = terrain_observer.strip().lower()
-        if key not in {"oracle", "heuristic", "blind", "learned"}:
-            raise ValueError(
-                f"terrain_observer must be oracle|heuristic|blind|learned; got {terrain_observer!r}"
-            )
-        cfg.perception.terrain_mode = key
+        from jims_mower.perception.terrain import normalize_terrain_mode
+
+        cfg.perception.terrain_mode = normalize_terrain_mode(terrain_observer)
     env = MowerEnv(
         config=cfg,
         scenario=scenario,
@@ -485,7 +482,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind", "learned"),
+        choices=TERRAIN_MODE_CLI,
         default=None,
         help="override perception.terrain_mode (default: YAML, heuristic)",
     )

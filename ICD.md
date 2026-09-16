@@ -81,6 +81,8 @@ class Detector(Protocol):
   ([`constants.LABEL_TO_ID`](src/jims_mower/constants.py)).
 - Categories: `person` / `animal` / `toy` / `static` (WAVE 4 appearance refine).
 - Gym default: `MockDetector`. Stub: `BlindDetector` (always `[]`).
+- `AppearanceDetector` (`detector_backend: appearance|onnx`) ignores
+  `context.obstacles` and returns `[]` until a box ONNX exists.
 - `TrtDetector` is a load-weights placeholder (`fps_claim: null`).
 
 ## TerrainObserver
@@ -97,7 +99,10 @@ class TerrainObserver(Protocol):
 - A real head **must ignore** `context.terrain` (god-view `HeightField`).
 - Modes: `heuristic` (default, RGB+ToF+local IMU tilt, no `context.terrain`), `oracle`
   (training), `blind` (zeros), `learned` (exporter-trained numpy stub;
-  weights via `perception.weights_path` or `LearnedTerrainObserver(...)`).
+  weights via `perception.weights_path` or `LearnedTerrainObserver(...)`),
+  `onnx` (`OnnxTerrainObserver`; onnxruntime if present, else numpy /
+  heuristic), `trt` (engine if present, else heuristic / numpy).
+  Sim ONNX is `sim_only`. Not field-ready. `iou_claim` is null.
 - IMU pitch/roll is local chassis attitude. `elevation` is a neighborhood
   sample; already-mapped cells stay put. See `docs/TERRAIN_MAPS.md`.
 - Heuristic isolated drain-lip stamps are gated unless they sit next to a

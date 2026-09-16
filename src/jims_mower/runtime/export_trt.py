@@ -16,9 +16,10 @@ from typing import Optional
 
 
 PLACEHOLDER_NOTE = (
-    "No trained ONNX is in this repository. Point --onnx at your own "
-    "TerrainObserver / Detector export. Do not treat the printed "
-    "trtexec line as a benchmark. fps_claim is always null."
+    "Software train→ONNX exists (jims-mower-train-terrain --onnx). "
+    "No field-ready head is shipped. Point --onnx at a sim_only or "
+    "your own export. Do not treat the printed trtexec line as a "
+    "benchmark. fps_claim / map_claim / iou_claim stay null."
 )
 
 
@@ -36,9 +37,9 @@ def planned_trtexec(onnx: Path, engine: Path, *, fp16: bool = True) -> list[str]
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Placeholder ONNX → TensorRT export (no weights shipped)"
+        description="ONNX → TensorRT command (dry-run default; no field-ready head)"
     )
-    p.add_argument("--onnx", type=Path, default=None, help="your ONNX, not shipped")
+    p.add_argument("--onnx", type=Path, default=None, help="sim_only or your ONNX; not a field head")
     p.add_argument("--engine", type=Path, default=Path("terrain.engine"))
     p.add_argument("--fp16", action="store_true", default=True)
     p.add_argument("--no-fp16", action="store_true")
@@ -65,6 +66,9 @@ def run_export(
         "not_a_benchmark": True,
         "fps_claim": None,
         "map_claim": None,
+        "iou_claim": None,
+        "domain": "sim_only",
+        "field_ready": False,
         "skipped_reason": None if (onnx is not None and Path(onnx).is_file() and not dry_run) else "no_onnx_or_dry_run",
     }
     if out is not None:

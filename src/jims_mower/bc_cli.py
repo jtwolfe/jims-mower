@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from jims_mower.bc import collect_demos, default_weights_path, train_bc
-from jims_mower.constants import DEFAULT_BC_WEIGHTS
+from jims_mower.constants import DEFAULT_BC_WEIGHTS, TERRAIN_MODE_CLI
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--cameras", type=int, default=None)
     c.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind"),
+        choices=TERRAIN_MODE_CLI,
         default=None,
     )
 

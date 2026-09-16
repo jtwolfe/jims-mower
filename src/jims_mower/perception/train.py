@@ -24,6 +24,7 @@ from jims_mower.perception.learn import (
     save_weights,
     try_import_torch,
 )
+from jims_mower.perception.onnx_io import OnnxExportError, export_terrain_onnx
 from jims_mower.types import CameraSpec, Pose
 
 
@@ -244,23 +245,41 @@ def train_from_export(
     max_per_class: int = 400,
     seed: int = 0,
     backend: str = "numpy",
+    onnx_path: Optional[Union[str, Path]] = None,
 ) -> dict[str, Any]:
     x, y, info = samples_from_export(
         dataset_dir, stride=stride, max_per_class=max_per_class, seed=seed
     )
     key = (backend or "numpy").strip().lower()
+    model: TerrainMLP
+    stats: dict[str, Any]
     if key == "torch":
         if try_import_torch() is None:
             key = "numpy"
             info["torch_fallback"] = "torch unavailable; trained with numpy"
+            model, stats = fit_numpy(x, y, hidden=hidden, epochs=epochs, lr=lr, seed=seed)
         else:
             model, stats = _fit_torch(x, y, hidden=hidden, epochs=epochs, lr=lr, seed=seed)
-            path = save_weights(model, out_path, extra={"dataset": str(dataset_dir)})
-            out = {**info, **stats, "weights": str(path)}
-            return out
-    model, stats = fit_numpy(x, y, hidden=hidden, epochs=epochs, lr=lr, seed=seed)
+    else:
+        model, stats = fit_numpy(x, y, hidden=hidden, epochs=epochs, lr=lr, seed=seed)
     path = save_weights(model, out_path, extra={"dataset": str(dataset_dir)})
-    return {**info, **stats, "weights": str(path)}
+    out = {**info, **stats, "weights": str(path), "domain": "sim_only", "field_ready": False}
+    out["iou_claim"] = None
+    out["map_claim"] = None
+    out["fps_claim"] = None
+    if onnx_path is not None:
+        try:
+            dest = export_terrain_onnx(
+                model,
+                onnx_path,
+                extra={"dataset": str(dataset_dir), "weights": str(path)},
+            )
+            out["onnx"] = str(dest)
+            out["onnx_sidecar"] = str(Path(dest).with_suffix(".json"))
+        except OnnxExportError as exc:
+            out["onnx"] = None
+            out["onnx_skipped"] = str(exc)
+    return out
 
 
 def export_and_train(
@@ -273,6 +292,7 @@ def export_and_train(
     hidden: int = 8,
     epochs: int = 25,
     config: Optional[str] = None,
+    onnx_path: Optional[Union[str, Path]] = None,
 ) -> dict[str, Any]:
     """Minimal labelled dump + train. Used by tests and the CLI."""
     from jims_mower.export import export_dataset
@@ -280,6 +300,7 @@ def export_and_train(
     out_dir = Path(out_dir)
     dataset = out_dir / "dataset"
     weights = out_dir / "terrain_mlp.npz"
+    onnx_dest = Path(onnx_path) if onnx_path is not None else (out_dir / "terrain_seg.onnx")
     meta = export_dataset(
         dataset,
         steps=steps,
@@ -296,6 +317,7 @@ def export_and_train(
         epochs=epochs,
         seed=seed,
         backend="numpy",
+        onnx_path=onnx_dest,
     )
     stats["export"] = meta
     stats["dataset"] = str(dataset)
@@ -324,6 +346,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("numpy", "torch"),
         default="numpy",
         help="torch is optional and unused in CI",
+    )
+    p.add_argument(
+        "--onnx",
+        type=Path,
+        default=None,
+        help="optional ONNX path (requires the onnx extra; sim_only, not field-ready)",
     )
     return p
 
@@ -355,6 +383,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         max_per_class=args.max_per_class,
         seed=args.seed,
         backend=args.backend,
+        onnx_path=args.onnx,
     )
     stats["dataset"] = str(dataset)
     print(
@@ -362,7 +391,12 @@ def main(argv: Optional[list[str]] = None) -> None:
         f"n={stats.get('n_pixels') or stats.get('n_samples')} "
         f"loss={stats.get('final_loss')} → {stats.get('weights')}"
     )
+    if stats.get("onnx"):
+        print(f"onnx (sim_only, not field-ready) → {stats['onnx']}")
+    elif stats.get("onnx_skipped"):
+        print("onnx skipped:", stats["onnx_skipped"])
     print("note:", stats.get("note"))
+    print("iou_claim: null   map_claim: null   fps_claim: null")
 
 
 if __name__ == "__main__":

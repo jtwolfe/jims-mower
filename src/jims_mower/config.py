@@ -10,11 +10,13 @@ from typing import Any, Optional, Union
 import yaml
 
 from jims_mower.constants import (
+    DETECTOR_BACKENDS,
     MOTOR_KILL_MODES,
     MOVER_DENSITIES,
     RADIO_CHANNELS,
     RADIO_LOSS_ACTIONS,
     SEASONS,
+    TERRAIN_MODES,
     TOF_COUNTS,
     TRAJECTORY_MODES,
     WEATHER_PACKS,
@@ -269,8 +271,9 @@ class CurriculumConfig:
 
 @dataclass
 class PerceptionConfig:
-    terrain_mode: str = "heuristic"  # heuristic | oracle | blind | learned
+    terrain_mode: str = "heuristic"  # heuristic | oracle | blind | learned | onnx | trt
     weights_path: str = ""  # optional .npz for LearnedTerrainObserver
+    onnx_path: str = ""  # optional sim_only terrain / detector ONNX; unused in CI
     temporal: bool = False  # hysteresis on heuristic; learned defaults on in factory
     grass_mode: str = "color"  # color | feature
     semantic: bool = True
@@ -278,7 +281,7 @@ class PerceptionConfig:
     occupancy_decay: float = 0.55
     height_fusion: bool = True
     loop_closure: bool = True
-    detector_backend: str = "mock"  # mock | trt
+    detector_backend: str = "mock"  # mock | trt | onnx | appearance | blind
     engine_path: str = ""  # TensorRT .engine placeholder; unused in CI
 
 
@@ -718,9 +721,11 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     if not (therm.t_ambient_c < therm.t_hot_c <= therm.t_crit_c):
         raise ConfigError("runtime.thermal t_ambient_c < t_hot_c <= t_crit_c")
     mode = cfg.perception.terrain_mode
-    if mode not in {"oracle", "blind", "heuristic", "learned"}:
+    if mode not in TERRAIN_MODES:
         raise ConfigError(
-            f"perception.terrain_mode must be oracle|blind|heuristic|learned; got {mode!r}"
+            "perception.terrain_mode must be "
+            "oracle|blind|heuristic|learned|onnx|trt; "
+            f"got {mode!r}"
         )
     grass_mode = str(cfg.perception.grass_mode or "color").strip().lower()
     if grass_mode not in {"color", "feature", "learned", "net"}:
@@ -730,8 +735,8 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     if not 0.0 <= float(cfg.perception.occupancy_decay) <= 1.0:
         raise ConfigError("perception.occupancy_decay must be in [0, 1]")
     det_backend = str(cfg.perception.detector_backend or "mock").strip().lower()
-    if det_backend not in {"mock", "trt", "tensorrt"}:
-        raise ConfigError("perception.detector_backend must be mock|trt")
+    if det_backend not in DETECTOR_BACKENDS:
+        raise ConfigError("perception.detector_backend must be mock|trt|onnx|appearance|blind")
     wd = cfg.runtime.watchdog
     if wd.imu_stall_s <= 0 or wd.vision_stall_s <= 0:
         raise ConfigError("runtime.watchdog stall windows must be positive")

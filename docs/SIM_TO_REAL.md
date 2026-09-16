@@ -13,8 +13,8 @@ The on-box loop **must not** import `jims_mower.renderer` or call
 | `gps` | UART GNSS | `(x, y, z, valid)`; `valid=0` on dropout |
 | `tof` | I2C downward corners | FL, FR, RL, RR; unused stay 0 |
 | `occupancy` | Detector + ToF persist | **Not** a god-view occupancy |
-| `elevation` / `slope` / `hazard` / `confidence` | `TerrainObserver` + optional stereo stamp | Heuristic / learned / TensorRT placeholder. Metric near-field elev from a true stereo pair (`perception/stereo.py`); default gym look-arounds skip it. Not COLMAP. |
-| `detections` | `Detector` | Padded `[label, cam, u, v, w, h, conf, signal]` |
+| `elevation` / `slope` / `hazard` / `confidence` | `TerrainObserver` + optional stereo stamp | Heuristic (live default) / learned / onnx / TensorRT placeholder. Metric near-field elev from a true stereo pair (`perception/stereo.py`); default gym look-arounds skip it. Not COLMAP. Sim ONNX is `sim_only`. |
+| `detections` | `Detector` | Padded `[label, cam, u, v, w, h, conf, signal]`. Mock projects obstacles; `AppearanceDetector` does not. |
 | `pose` | `EkfPoseFilter` / complementary | Planner start / attitude |
 | `coverage` | Your cut-map, or zeros | Gym writes the grass grid; on-box you own it |
 | `hand_signal` | Classifier stub or none | Discrete 0–4 |
@@ -34,8 +34,8 @@ obs key.
 ## What you swap on the Orin
 
 1. `FakeCsiDriver` / `FakeGstAdapter` → `GstNvmmAdapter` (when GStreamer / JetPack exists). Software path already fills named `obs["cameras"]` at the contract size with fresh stamps. Physical CSI is still required.
-2. `MockDetector` → your head (`TrtDetector` is a load-weights hook)
-3. `HeuristicTerrainObserver` → your head (`TrtTerrainObserver` same)
+2. `MockDetector` → your head (`TrtDetector` / `AppearanceDetector` are hooks; mock stays gym default)
+3. `HeuristicTerrainObserver` → your head (`OnnxTerrainObserver` / `TrtTerrainObserver` same; heuristic stays live until a measured engine is configured)
 4. Keep `SensorWatchdog` in front of wheel commands; enable it on the
    bench (`runtime.watchdog.enabled` / `configs/orin/bench.yaml`)
 4b. Keep `HardwareEstop` as the last rail filter (paddle / `hw_reset`)
