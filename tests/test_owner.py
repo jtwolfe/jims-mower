@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from jims_mower.owner import export_owner_overlay
-from jims_mower.owner_cli import main as owner_main
+from jims_mower.owner_cli import build_parser, main as owner_main
 
 
 def test_owner_overlay_html(tmp_path: Path) -> None:
@@ -26,3 +26,6 @@ def test_owner_cli(tmp_path: Path) -> None:
     dest = tmp_path / "phone.html"
     owner_main(["--out", str(dest), "--config", "geofence_movers", "--cameras", "4", "--seed", "1"])
     assert dest.is_file()
+    help_text = build_parser().format_help()
+    assert "--live" in help_text
+    assert "acre_yard_demo" in help_text

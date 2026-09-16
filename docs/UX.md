@@ -43,7 +43,8 @@ MOW** in a practical window. `acre_yard` stays at `0.72` and a full
 fence lap. It is not a coverage benchmark. See
 [`MISSION_FLOW.md`](MISSION_FLOW.md). The viewer owner bar starts,
 pauses, sets speed, holds MAP READY for a 2 s beat (or **Start mow**),
-and ESTOPs locally.
+and ESTOPs locally. The phone app (`jims-mower-owner --live`) is the
+owner product loop; this desktop bar stays for laptop debugging.
 
 The demo (and `jims-mower-record`) write a viewer bundle next to the
 usual PNGs:
@@ -144,8 +145,8 @@ editable fence. Use more steps (or a smaller yard) to record a full loop.
 
 ## What this is not
 
-- Not an owner phone app. WAVE UX-C (`jims-mower-app`, [`UX_C.md`](UX_C.md))
-  is the local phone shell; it **reuses** this viewer at `/viewer` and the
-  same `YardProfile` / `mesh_to_payload` — no second three.js stack.
+- The desktop viewer is not the owner phone. WAVE UX-C (`jims-mower-app --live`,
+  [`UX_C.md`](UX_C.md)) is the local phone shell that **owns** the live job
+  and reuses this viewer at `/viewer` — no second three.js stack.
 - Not SLAM, not a measured mesh quality score.
 - Not a live radio / BMS dashboard — those chips stay empty until hardware.

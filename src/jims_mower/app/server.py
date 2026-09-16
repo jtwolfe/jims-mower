@@ -14,6 +14,10 @@ from jims_mower.viewer import static_dir as viewer_static_dir
 from jims_mower.yard_profile import YardProfileError, yard_profile_from_dict
 
 
+def _live_session(backend: AppBackend) -> Any:
+    return getattr(backend, "session", None)
+
+
 def static_dir() -> Path:
     return Path(__file__).resolve().parent / "static"
 
@@ -104,6 +108,8 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                 if path == "/api/manifest":
                     self._send_json(200, viewer_manifest(backend))
                     return
+                if self._handle_live_get(path, parsed):
+                    return
                 if path == "/api/profile":
                     self._send_json(200, backend.get_yard())
                     return
@@ -166,6 +172,9 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                     saved = backend.put_yard(profile)
                     self._send_json(200, {"ok": True, "path": "profile.json", "profile": saved})
                     return
+                if path in {"/api/live/control", "/api/live/control/"}:
+                    self._live_control()
+                    return
                 if path != "/command":
                     self._send_json(404, {"error": "not found"})
                     return
@@ -179,6 +188,85 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                 self._send_json(400, {"error": str(exc)})
             except Exception as exc:  # pragma: no cover
                 self._send_json(500, {"error": str(exc)})
+
+        def _handle_live_get(self, path: str, parsed: Any) -> bool:
+            session = _live_session(backend)
+            if session is None:
+                return False
+            if path in {"/api/live", "/api/live/"}:
+                self._sse_live(parsed, session)
+                return True
+            if path == "/api/live/snapshot":
+                self._send_json(200, session.snapshot())
+                return True
+            if path == "/api/live/observed.png":
+                self._send_live_bytes(session.observed_png_bytes(), "image/png")
+                return True
+            if path == "/api/live/fog.png":
+                self._send_live_bytes(session.fog_png_bytes(), "image/png")
+                return True
+            if path == "/api/live/coverage.png":
+                payload = session.coverage_png_bytes() if hasattr(session, "coverage_png_bytes") else b""
+                self._send_live_bytes(payload, "image/png")
+                return True
+            if path == "/api/live/observed_mesh.json":
+                payload = session.observed_mesh_bytes() if hasattr(session, "observed_mesh_bytes") else b""
+                self._send_live_bytes(payload, "application/json")
+                return True
+            if path.startswith("/api/live/cam/"):
+                name = path[len("/api/live/cam/") :].split("?")[0]
+                self._send_live_bytes(session.camera_bytes(name), "image/jpeg")
+                return True
+            return False
+
+        def _send_live_bytes(self, payload: bytes, content_type: str) -> None:
+            if not payload:
+                self._send_json(404, {"error": "live asset not ready"})
+                return
+            self._send(200, payload, content_type)
+
+        def _live_control(self) -> None:
+            session = _live_session(backend)
+            if session is None:
+                self._send_json(404, {"error": "no live session"})
+                return
+            body = self._read_json()
+            if not isinstance(body, dict):
+                raise YardProfileError("command body must be a mapping")
+            cmd = str(body.get("cmd") or body.get("command") or "")
+            extra = {k: v for k, v in body.items() if k not in {"cmd", "command"}}
+            try:
+                if hasattr(backend, "live_control"):
+                    result = backend.live_control(cmd, **extra)
+                else:
+                    result = session.control(cmd, **extra)
+            except Exception as exc:  # noqa: BLE001 — owner bar must not 500 the phone
+                result = {"ok": False, "error": str(exc)}
+            self._send_json(200, result)
+
+        def _sse_live(self, parsed: Any, session: Any) -> None:
+            qs = parse_qs(parsed.query)
+            try:
+                limit = int((qs.get("n") or ["0"])[0])
+            except ValueError:
+                limit = 0
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close" if limit > 0 else "keep-alive")
+            self.end_headers()
+            import time
+
+            n = 0
+            try:
+                while limit <= 0 or n < limit:
+                    payload = json.dumps(session.snapshot())
+                    self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    n += 1
+                    time.sleep(0.04 if limit > 0 else 0.12)
+            except (BrokenPipeError, ConnectionResetError):
+                return
 
         def _sse(self, *, limit: int = 0) -> None:
             self.send_response(200)

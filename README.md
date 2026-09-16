@@ -112,9 +112,12 @@ jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
 # WAVE UX-B — software self-test (no RF hardware)
 jims-mower-selftest
 
-# WAVE UX-C — local owner app (API + phone UI; reuses UX-A viewer/mesh)
+# WAVE UX-C — phone owns the live job (one command)
+jims-mower-owner --live
+# open http://127.0.0.1:8766/  Pair BT stub → Start / Pause / ESTOP / MAP READY
+# same session: jims-mower-app --live --config acre_yard_demo --port 8766
+# desktop viewer only: jims-mower-live --config acre_yard_demo --speed 5
 jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
-# open http://127.0.0.1:8765/  (sim: omit --backend memory; episode: --episode DIR)
 ```
 
 Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md).

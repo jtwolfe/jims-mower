@@ -71,18 +71,36 @@ profile**, not a smaller world:
   READY → MOW can happen in minutes, not an hour.
 * `--phase-budget 0.4` scales the phase caps on any yard the same way.
 
-Jamie command: `jims-mower-live --config acre_yard_demo --speed 5`.
+Jamie **phone** command (owns the live job):
+
+```bash
+jims-mower-owner --live
+# open http://127.0.0.1:8766/
+```
+
+Same session: `jims-mower-app --live --config acre_yard_demo --port 8766`.
+Pair the BT stub, then Start / Pause / ESTOP / speed / MAP READY →
+Start mow. Fog + observed preview is in the phone chrome; deep-link
+`/viewer` is the desktop World Viewer on the same process.
+
+Jamie **desktop** command (viewer chrome only):
+
+```bash
+jims-mower-live --config acre_yard_demo --speed 5
+```
+
 Open the viewer: session is **idle** (yard unknown) until **Start**.
 Expect **CALIBRATE → EXPLORE → MAP READY → MOW** in a few minutes
 wall-clock at `--speed 5`. MAP READY holds ~2 s (or **Start mow**).
 Full acre mow to completion is still a manual `acre_yard` run, not CI.
 
-Owner bar (local, no phone backend): Start / Pause / Resume, speed
-`1× 2× 5× max`, **Start mow** / Re-explore at MAP READY, ESTOP.
-Copy reads like a product (“Calibrating boundary…”, “Exploring unknown
-yard…”, “Map ready — start mow?”, “Mowing…”). Home / done writes
-`session_summary.json` (map %, planned/reachable, cut %, skips,
-duration).
+Owner bar: Start / Pause / Resume, speed `1× 2× 5× max`, **Start mow**
+/ Re-explore at MAP READY, ESTOP. Phone adds radio-path chips (BT teach
+/ Wi-Fi map / LoRa sparse, simulated) and stuck vs dead-motor SOS
+injection. Copy reads like a product (“Calibrating boundary…”,
+“Exploring unknown yard…”, “Map ready — start mow?”, “Mowing…”).
+Home / done writes `session_summary.json` (map %, planned/reachable,
+cut %, skips, duration).
 
 ## Unknown-space semantics
 
@@ -154,9 +172,11 @@ Start. Stdlib HTTP + SSE (`GET /api/live`) pushes pose, phase, owner
 copy, map %, cut %, frontiers, plan (after freeze), and URLs for the
 latest fog / observed / **observed mesh** / coverage / camera frames.
 `POST /api/live/control` is the owner bar (start / pause / resume /
-speed / start_mow / reexplore / estop / hold / yard). History is also
-flushed into `live_out/` so you can scrub later. You do not need a
-finished episode folder to watch the robot.
+speed / start_mow / reexplore / estop / hold / yard / pair / inject).
+The phone app (`jims-mower-app --live`) proxies the same endpoints —
+do not fork `MissionPolicy`. History is also flushed into `live_out/`
+so you can scrub later. You do not need a finished episode folder to
+watch the robot.
 
 ### Scrub (finished episode)
 

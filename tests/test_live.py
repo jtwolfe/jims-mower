@@ -16,7 +16,9 @@ from jims_mower.live import (
     coarsen2d,
     owner_copy_for,
     parse_speed,
+    radio_path_for,
     resolve_live_config,
+    robot_status_for,
 )
 from jims_mower.planning.observed import ObservedMap, fog_rgba
 from jims_mower.viewer import serve_viewer
@@ -241,6 +243,17 @@ def test_owner_copy_reads_like_a_product() -> None:
     assert owner_copy_for("running", "review") == "Map ready — start mow?"
     assert owner_copy_for("running", "mow") == "Mowing…"
     assert owner_copy_for("estop", "mow") == "E-STOP — hold."
+    assert owner_copy_for("running", "mow", {"code": "FAULT_IMMOBILISED", "retrieve": True}) == (
+        "SOS — immobilised. Retrieve the mower."
+    )
+    assert owner_copy_for("running", "mow", {"code": "STUCK"}) == "Stuck — recovering (reverse / pivot)."
+    path = radio_path_for("explore", "running")
+    assert path["active"] == "wifi"
+    assert path["simulated"] is True
+    assert {c["label"] for c in path["chips"]} == {"BT teach", "Wi-Fi map", "LoRa sparse"}
+    assert robot_status_for(paired=False, job_state="idle") == "pairing"
+    assert robot_status_for(paired=True, job_state="running") == "live"
+    assert robot_status_for(paired=True, job_state="idle", faults=[{"code": "FAULT_IMMOBILISED", "retrieve": True}]) == "fault"
 
 
 def _post(host: str, port: int, path: str, payload: dict, timeout: float = 6.0):
@@ -295,6 +308,14 @@ def test_live_control_http_contract(tmp_path: Path) -> None:
         assert estop["ok"] is True
         assert estop["job_state"] == "estop"
         assert estop["estop"] is True
+
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "pair"})
+        assert json.loads(raw.decode("utf-8"))["paired"] is True
+
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "inject", "kind": "stuck"})
+        stuck = json.loads(raw.decode("utf-8"))
+        assert stuck["ok"] is True
+        assert any(f.get("code") == "STUCK" for f in stuck.get("faults") or [])
 
         code, raw = _post(host, int(port), "/api/live/control", {"cmd": "nope"})
         assert json.loads(raw.decode("utf-8"))["ok"] is False

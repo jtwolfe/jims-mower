@@ -207,6 +207,9 @@ def _mesh_from_grid(
 
 
 def viewer_manifest(backend: AppBackend) -> dict[str, Any]:
+    session = getattr(backend, "session", None)
+    if session is not None and hasattr(session, "manifest"):
+        return session.manifest()
     status = backend.status()
     yard = backend.get_yard()
     mesh = backend.mesh()
@@ -743,6 +746,12 @@ def make_backend(
     yard_path: Optional[Path] = None,
     seed: int = 7,
     cameras: int = 4,
+    fast: bool = False,
+    speed: Any = 5.0,
+    steps: Optional[int] = None,
+    out_dir: Optional[Union[str, Path]] = None,
+    session: Any = None,
+    reset: bool = True,
 ) -> AppBackend:
     profile: Optional[YardProfile] = None
     persist = Path(yard_path) if yard_path else None
@@ -757,6 +766,22 @@ def make_backend(
         return EpisodeBackend(episode, yard=profile, yard_path=persist)
     if kind == "memory":
         return MemoryBackend(profile, yard_path=persist)
+    if kind == "live":
+        from jims_mower.app.live_backend import LiveBackend
+
+        return LiveBackend(
+            session=session,
+            config=config or "acre_yard_demo",
+            fast=fast,
+            speed=speed,
+            steps=steps,
+            seed=seed,
+            cameras=cameras,
+            yard=profile,
+            yard_path=persist,
+            out_dir=out_dir or "live_out",
+            reset=reset,
+        )
     if kind not in {"sim", "demo"}:
         raise YardProfileError(f"unknown backend {kind!r}")
     return SimBackend(config=config, seed=seed, cameras=cameras, yard=profile, yard_path=persist)

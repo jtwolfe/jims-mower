@@ -69,8 +69,17 @@ JSON in / JSON out. Same origin as the static shell.
 | `GET` | `/viewer` | UX-A World Viewer (`viewer_static` + CDN three.js) |
 | `GET` | `/api/manifest` | UX-A viewer.json-shaped live bundle |
 | `GET` / `POST` | `/api/profile` | same YardProfile as `/yard` |
+| `GET` | `/api/live` | live SSE (`jims_mower.live.v1`) when `--live` |
+| `GET` | `/api/live/snapshot` | latest live frame |
+| `POST` | `/api/live/control` | same owner bar as `jims-mower-live` |
 
-`POST /command` `start` after ESTOP is the operator clear.
+`--live` `/status` also carries `backend: live`, `robot`
+(idle / pairing / live / fault), `owner_copy`, `radio_path` chips,
+map/cut %, `session_summary`, and fog / observed URLs.
+
+`POST /command` `start` after ESTOP is the operator clear. On `--live`
+it forwards to `LiveSession.control` (`start` / `pause` / `estop` /
+`start_mow` / `inject` / `pair`).
 
 ## Thin app shell
 
@@ -78,9 +87,9 @@ Static HTML / CSS / JS in [`src/jims_mower/app/static/`](../src/jims_mower/app/s
 Narrow phone chrome (~390 px). Hash routes:
 
 - `#/onboard/unbox` → `pair` → `home` → `teach` → `mow`
-- `#/map` — 2D SVG yard (keep-in / keep-out / pose / coverage)
-- `#/health` — battery, thermal, radios, hours, schedule stub
-- `#/fault` — ESTOP / SOS
+- `#/map` — live job (status / radios / Start / Pause / ESTOP / fog) when `--live`; else 2D SVG yard
+- `#/health` — battery, thermal, radio-path chips, hours, schedule stub
+- `#/fault` — ESTOP / SOS vs stuck recovery
 
 `viewer.js` is a 2D SVG fallback for the phone chrome only. The three.js
 World Viewer is **UX-A** (`viewer_static/` + `mesh_to_payload`). The
@@ -100,23 +109,32 @@ Do not add a second WebGL stack.
 ## CLI
 
 ```bash
-# Live demo env (default)
-jims-mower-app --config geofence_movers --port 8765
+# Owner phone + live job (one command). Open http://127.0.0.1:8766/
+jims-mower-owner --live
+jims-mower-app --live --config acre_yard_demo --port 8766
 
-# Recorded episode
+# Same live session contract as the desktop viewer:
+# POST /api/live/control  GET /api/live  (no second MissionPolicy)
+# Desktop-only chrome still: jims-mower-live --config acre_yard_demo --speed 5
+
+# Recorded episode / kinematic stub
 jims-mower-record --out /tmp/jm-ep --steps 8 --cameras 4
 jims-mower-app --episode /tmp/jm-ep
-
-# YardProfile on disk (PUT persists)
-jims-mower-app --backend memory --yard configs/yards/example_profile.json
+jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
 ```
 
-Open `http://127.0.0.1:8765/`. `--backend memory` is a kinematic stub for
-UI / API tests; default is the gym demo env.
+`--live` wraps `LiveSession` in-process (default yard `acre_yard_demo`,
+port **8766**, speed 5×). Full `acre_yard` stays available
+(`--config acre_yard`). `--fast` is `mission_tiny` for CI.
+
+Open `http://127.0.0.1:8766/`. Pair the BT stub, Start job, watch fog,
+MAP READY → Start mow, Pause / ESTOP. Inject stuck vs dead-motor SOS
+from the job or SOS tab.
 
 ## Tests
 
 ```bash
-pytest tests/test_yard_profile.py tests/test_app_api.py
-jims-mower-app --help
+pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_live.py
+jims-mower-app --live --help
+jims-mower-owner --help
 ```

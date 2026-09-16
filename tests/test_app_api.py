@@ -186,6 +186,10 @@ def test_cli_parser_and_make_backend() -> None:
     args = parser.parse_args(["--backend", "memory", "--port", "9001", "--host", "127.0.0.1"])
     assert args.backend == "memory"
     assert args.port == 9001
+    live_args = parser.parse_args(["--live", "--fast"])
+    assert live_args.live is True
+    assert live_args.fast is True
+    assert "--live" in parser.format_help()
     backend = make_backend(kind="memory")
     status = backend.status()
     assert status["schema"] == APP_STATUS_SCHEMA

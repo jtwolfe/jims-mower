@@ -79,6 +79,20 @@ OWNER_COPY = {
     "complete": "Done.",
     "fault": "Fault — retrieve.",
     "safe": "Hold — safe.",
+    "immobilised": "SOS — immobilised. Retrieve the mower.",
+    "stuck": "Stuck — recovering (reverse / pivot).",
+}
+RADIO_PATH_CHIPS = (
+    {"id": "bt", "label": "BT teach", "role": "teach"},
+    {"id": "wifi", "label": "Wi-Fi map", "role": "map"},
+    {"id": "lora", "label": "LoRa sparse", "role": "sparse"},
+)
+INJECT_ALIASES = {
+    "sos": "motor_left",
+    "dead_motor": "motor_left",
+    "immobilised": "motor_left",
+    "motor": "motor_left",
+    "stuck": "stuck",
 }
 
 SPEED_ALIASES = {
@@ -119,10 +133,54 @@ def speed_label(speed: float) -> str:
     return str(speed)
 
 
-def owner_copy_for(job_state: str, phase: str) -> str:
-    if job_state in OWNER_COPY and job_state in {"idle", "paused", "estop", "hold"}:
+def owner_copy_for(job_state: str, phase: str, fault: Optional[dict[str, Any]] = None) -> str:
+    if job_state == "estop":
+        return OWNER_COPY["estop"]
+    blob = fault if isinstance(fault, dict) else None
+    if blob:
+        code = str(blob.get("code") or "")
+        if blob.get("retrieve") or code == "FAULT_IMMOBILISED":
+            return OWNER_COPY["immobilised"]
+        if code == "STUCK":
+            return OWNER_COPY["stuck"]
+    if job_state in OWNER_COPY and job_state in {"idle", "paused", "hold"}:
         return OWNER_COPY[job_state]
     return OWNER_COPY.get(phase, PHASE_LABELS.get(phase, phase))
+
+
+def radio_path_for(phase: str, job_state: str = "running") -> dict[str, Any]:
+    """Simulated bearer chips: BT teach / Wi-Fi map / LoRa sparse. No RF hardware."""
+    if job_state == "idle" or phase in {"", "idle", "calibrate_boundary"}:
+        active = "bt"
+    elif phase in {"explore", "review"}:
+        active = "wifi"
+    else:
+        active = "lora"
+    chips = [{**chip, "active": chip["id"] == active} for chip in RADIO_PATH_CHIPS]
+    return {"active": active, "chips": chips, "simulated": True, "not_rf_hardware": True}
+
+
+def robot_status_for(
+    *,
+    paired: bool,
+    job_state: str,
+    faults: Optional[list[dict[str, Any]]] = None,
+    done: bool = False,
+) -> str:
+    """Owner pill: idle / pairing / live / fault."""
+    for item in faults or []:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get("code") or "")
+        if item.get("retrieve") or code == "FAULT_IMMOBILISED":
+            return "fault"
+    if job_state == "estop":
+        return "fault"
+    if not paired:
+        return "pairing"
+    if job_state in {"running", "paused", "hold"} and not done:
+        return "live"
+    return "idle"
 
 
 def resolve_live_config(config: Optional[Any], *, fast: bool) -> Any:
@@ -260,9 +318,11 @@ class LiveSession:
         self.job_state = "idle"
         self.unattended = False
         self.estop = False
+        self.paired = False
         self._t0_wall = 0.0
         self._review_wall0: Optional[float] = None
         self.session_card: dict[str, Any] = {}
+        self._fault_overlay: dict[str, Any] = {}
 
     @property
     def dt(self) -> float:
@@ -302,6 +362,7 @@ class LiveSession:
         self.started = True
         self.job_state = "idle"
         self.estop = False
+        self._fault_overlay = {}
         self._t0_wall = 0.0
         self._review_wall0 = None
         self.session_card = {}
@@ -534,7 +595,47 @@ class LiveSession:
         elif key == "yard":
             self._apply_yard(str(kwargs.get("yard") or self.config_name))
             self.job_state = "idle"
+        elif key == "pair":
+            self.paired = True
+        elif key == "inject":
+            self._inject_fault(
+                str(kwargs.get("kind") or kwargs.get("fault") or "stuck"),
+                mode=str(kwargs.get("mode") or "open_circuit"),
+            )
         return {"ok": True, "cmd": key, **self.snapshot()}
+
+    def _inject_fault(self, kind: str, *, mode: str = "open_circuit") -> None:
+        raw = str(kind or "stuck").strip().lower()
+        resolved = INJECT_ALIASES.get(raw, raw)
+        if self.env is None:
+            return
+        self.env.inject_fault(resolved, mode=mode)
+        blob = self.env.fault_bus.as_info((self.info or {}).get("pose") if self.info else None)
+        self.info = dict(self.info or {})
+        self.info["fault"] = blob
+        self._fault_overlay = blob
+
+    def _current_fault(self) -> dict[str, Any]:
+        blob = (self.info or {}).get("fault") if isinstance(self.info, dict) else None
+        if isinstance(blob, dict) and str(blob.get("code") or "ok") not in {"", "ok"}:
+            return blob
+        if isinstance(self._fault_overlay, dict) and str(self._fault_overlay.get("code") or "ok") not in {"", "ok"}:
+            return self._fault_overlay
+        return {}
+
+    def _faults_payload(self, fault: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not isinstance(fault, dict):
+            return []
+        code = str(fault.get("code") or "ok")
+        if not code or code == "ok":
+            return []
+        return [
+            {
+                "code": code,
+                "detail": str(fault.get("reason") or fault.get("component") or code),
+                "retrieve": bool(fault.get("retrieve")),
+            }
+        ]
 
     def _apply_yard(self, yard: str) -> None:
         name = str(yard).strip()
@@ -660,6 +761,8 @@ class LiveSession:
 
     def _frame_unlocked(self) -> dict[str, Any]:
         policy = self.policy
+        fault = self._current_fault()
+        radio_path = radio_path_for("idle", self.job_state)
         if policy is None:
             return {
                 "schema": LIVE_SCHEMA,
@@ -669,7 +772,10 @@ class LiveSession:
                 "phase": "idle",
                 "phase_label": "IDLE",
                 "job_state": self.job_state,
-                "owner_copy": owner_copy_for(self.job_state, "idle"),
+                "owner_copy": owner_copy_for(self.job_state, "idle", fault),
+                "radio_path": radio_path,
+                "faults": self._faults_payload(fault),
+                "paired": bool(self.paired),
                 "done": False,
                 "not_a_benchmark": True,
             }
@@ -711,7 +817,10 @@ class LiveSession:
             "phase": status["phase"],
             "phase_label": status["phase_label"],
             "job_state": self.job_state,
-            "owner_copy": owner_copy_for(self.job_state, status["phase"]),
+            "owner_copy": owner_copy_for(self.job_state, status["phase"], fault),
+            "radio_path": radio_path_for(status["phase"], self.job_state),
+            "faults": self._faults_payload(fault),
+            "paired": bool(self.paired),
             "yards": list(LIVE_YARDS),
             "yard": str(self.config_name),
             "can_start_mow": status["phase"] == "review",
