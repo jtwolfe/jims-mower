@@ -35,6 +35,7 @@ const state = {
   lastCamSeq: -1,
   lastStep: -1,
   liveSource: null,
+  unknownPad: null,
 };
 
 const renderer = new THREE.WebGLRenderer({ canvas: $("view"), antialias: true });
@@ -200,6 +201,7 @@ function setOverlayVis() {
   const god = $("tog-god") && $("tog-god").checked;
   const fogOn = $("tog-fog") && $("tog-fog").checked && !god;
   if (state.overlays.fog) state.overlays.fog.visible = !!fogOn;
+  setOwnerMeshVis(fogOn);
   if (state.planLine) state.planLine.visible = $("tog-plan").checked;
   if (state.exploreLine) {
     state.exploreLine.visible = $("tog-explore") ? $("tog-explore").checked : false;
@@ -491,6 +493,41 @@ function tick() {
   }
   controls.update();
   renderer.render(scene, camera);
+}
+
+function ensureUnknownPad() {
+  if (state.unknownPad) return state.unknownPad;
+  const w = state.width || 12;
+  const h = state.height || 12;
+  const pad = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshLambertMaterial({ color: 0x12141a, side: THREE.DoubleSide })
+  );
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.set(w / 2, 0.01, h / 2);
+  pad.name = "unknownPad";
+  scene.add(pad);
+  state.unknownPad = pad;
+  return pad;
+}
+
+function setOwnerMeshVis(fogOn) {
+  // Owner fog hides the true height-field mesh. Physics may still use it;
+  // the owner map must not look finished from t=0.
+  const hideTrue = !!fogOn;
+  ensureUnknownPad();
+  if (state.unknownPad) state.unknownPad.visible = hideTrue;
+  if (state.meshGroup) {
+    const overlaySet = new Set(Object.values(state.overlays).filter(Boolean));
+    state.meshGroup.traverse((obj) => {
+      if (!obj.isMesh) return;
+      if (overlaySet.has(obj)) return;
+      obj.visible = !hideTrue;
+    });
+  }
+  if (state.overlays.observed && state.overlays.observed.material) {
+    state.overlays.observed.material.opacity = hideTrue ? 0.92 : 0.42;
+  }
 }
 
 function ensureOverlayPlane(key, opacity) {
