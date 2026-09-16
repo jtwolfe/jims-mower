@@ -48,6 +48,8 @@ def test_viewer_static_assets_present() -> None:
     assert "EventSource" in js
     assert "postControl" in js
     assert "/api/live/control" in js
+    assert 'job_state === "idle"' in js
+    assert "Yard unknown" in html
     assert "unknownPad" in js
     assert "setOwnerMeshVis" in js
     assert "applyObservedMesh" in js
