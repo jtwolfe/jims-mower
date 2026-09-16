@@ -10,7 +10,7 @@ from pathlib import Path
 from jims_mower.app.live_backend import LiveBackend
 from jims_mower.app.server import make_server
 from jims_mower.constants import LIVE_SCHEMA
-from jims_mower.live import LiveSession
+from jims_mower.live import LiveSession, owner_copy_for, robot_status_for
 from jims_mower.profile import YardProfile, apply_profile_to_scenario, load_yard_profile
 from jims_mower.scenarios import load_source
 
@@ -111,6 +111,67 @@ def test_teach_save_start_skips_calibrate(tmp_path: Path) -> None:
         backend.close()
 
 
+def test_teach_paused_then_start_reaches_explore_not_idle_calibrate(tmp_path: Path) -> None:
+    """Regression: teach-complete sets paused; Start must still skip calibrate.
+
+    Old bug: Start treated paused-after-teach like a mid-job resume, left
+    phase at calibrate_boundary on a dirty env, then died after 1–2 steps
+    while the owner pill read IDLE and copy said Calibrating.
+    """
+    session = _session(tmp_path)
+    session.reset()
+    session.job_state = "teach"
+    session._taught_env_dirty = True
+    for _ in range(6):
+        session.step_once()
+    session.job_state = "paused"
+    saved = session.control("save_yard", keep_in=_tiny_keep_in())
+    assert saved["ok"] is True
+    assert saved["taught"] is True
+    assert saved["job_state"] == "idle"
+
+    started = session.control("start")
+    try:
+        assert started["ok"] is True
+        assert started["phase"] == "explore"
+        assert started["job_state"] == "running"
+        assert started["done"] is False
+        assert started["phase"] != "calibrate_boundary"
+        assert session.env is not None
+        assert int(session.env._steps) == 0
+        copy = owner_copy_for(started["job_state"], started["phase"], taught=True)
+        pill = robot_status_for(
+            paired=True,
+            job_state=started["job_state"],
+            done=bool(started["done"]),
+        )
+        assert "calibrat" not in copy.lower()
+        assert pill == "live"
+        assert pill != "idle" or started["phase"] != "calibrate_boundary"
+
+        session.control("pause")
+        maps = [float(started.get("map_pct") or 0.0)]
+        last = started
+        for _ in range(10):
+            last = session.step_once()
+            maps.append(float(last.get("map_pct") or 0.0))
+            assert last["phase"] in {"explore", "review", "mow", "return_home", "complete"}
+            assert last["phase"] != "calibrate_boundary"
+            assert not (last["done"] and last["phase"] == "calibrate_boundary")
+            copy = owner_copy_for(last["job_state"], last["phase"], taught=True)
+            pill = robot_status_for(
+                paired=True,
+                job_state=last["job_state"],
+                done=bool(last["done"]),
+            )
+            assert not (pill == "idle" and "calibrat" in copy.lower())
+        assert last["phase"] in {"explore", "review", "mow"}
+        assert max(maps) >= maps[0]
+    finally:
+        session.control("pause")
+        session.close()
+
+
 def test_load_saved_profile_then_start(tmp_path: Path) -> None:
     keep = _tiny_keep_in()
     profile = YardProfile(
@@ -133,6 +194,23 @@ def test_load_saved_profile_then_start(tmp_path: Path) -> None:
     started = session.control("start")
     assert started["phase"] == "explore"
     session.control("pause")
+    session.close()
+
+
+def test_snap_home_outside_keep_in_moves_inside(tmp_path: Path) -> None:
+    session = _session(tmp_path)
+    session.reset()
+    saved = session.control(
+        "save_yard",
+        keep_in=_tiny_keep_in(),
+        home={"x": -4.0, "y": 20.0, "theta": 0.3},
+    )
+    assert saved["ok"] is True
+    home = session.yard_profile.home
+    xs = [p[0] for p in session.yard_profile.keep_in]
+    ys = [p[1] for p in session.yard_profile.keep_in]
+    assert min(xs) <= float(home["x"]) <= max(xs)
+    assert min(ys) <= float(home["y"]) <= max(ys)
     session.close()
 
 
