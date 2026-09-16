@@ -566,6 +566,7 @@ class LiveSession:
             if self.done or self._stop.is_set():
                 break
             self._advance()
+        self._flush_incremental(final=True)
         return self.snapshot()
 
     def run_blocking(self) -> dict[str, Any]:

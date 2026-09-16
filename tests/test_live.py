@@ -413,14 +413,20 @@ def test_live_acre_demo_taught_reaches_mow(tmp_path: Path, monkeypatch) -> None:
         map_stride=16,
         observed_mesh_stride=32,
         yard_path=tmp_path / "profile.json",
-        yard_profile=YardProfile(
-            name="taught_acre",
-            width_m=70.0,
-            height_m=58.0,
-            resolution_m=0.50,
-            keep_in=keep,
-            home={"x": 12.0, "y": 12.0, "theta": 0.0},
-        ),
+    )
+    session.reset()
+    pose = (session.info or {}).get("pose") or {}
+    session.yard_profile = YardProfile(
+        name="taught_acre",
+        width_m=70.0,
+        height_m=58.0,
+        resolution_m=0.50,
+        keep_in=keep,
+        home={
+            "x": float(pose.get("x", 6.0)),
+            "y": float(pose.get("y", 6.0)),
+            "theta": float(pose.get("theta", 0.0)),
+        },
     )
     session.owner_taught = True
     session.reset()
@@ -448,6 +454,7 @@ def test_live_acre_demo_taught_reaches_mow(tmp_path: Path, monkeypatch) -> None:
     maps = session._n_map_builds - maps0
     mesh = session._n_mesh_builds - mesh0
     session.close()
+    assert int(last["step"]) > 20
     assert "explore" in phases
     assert "mow" in phases or last["phase"] in {"mow", "return_home", "complete"}
     assert last["phase"] != "explore"
