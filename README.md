@@ -114,9 +114,12 @@ jims-mower-selftest
 
 # WAVE UX-C — phone owns the live job (one command)
 jims-mower-owner --live
-# open http://127.0.0.1:8766/  Pair BT stub → Start / Pause / ESTOP / MAP READY
+# open http://127.0.0.1:8766/  Pair → Teach boundary → Save yard → Start
+# first-run hash: jims-mower-owner --live --first-run
+# reload a saved YardProfile: --yard live_out/profile.json
 # same session: jims-mower-app --live --config acre_yard_demo --port 8766
 # desktop viewer only: jims-mower-live --config acre_yard_demo --speed 5
+# acre_yard_demo = live/laptop; acre_yard = full fence lap (not CI)
 jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
 ```
 

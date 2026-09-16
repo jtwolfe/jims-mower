@@ -64,6 +64,7 @@ jobs:
           jims-mower-app --help
           jims-mower-app --live --help
           jims-mower-owner --help
+          jims-mower-owner --live --first-run --help
       - name: WAVE 4 hooks smoke
         run: |
           jims-mower-sequence --yards paddock,suburban --dry-run --out /tmp/jims-mower-ci-seq

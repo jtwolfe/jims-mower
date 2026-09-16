@@ -238,6 +238,8 @@ def test_live_cli_prepare_only(tmp_path: Path) -> None:
 
 def test_owner_copy_reads_like_a_product() -> None:
     assert owner_copy_for("idle", "calibrate_boundary") == "Yard unknown — start a job when ready."
+    assert owner_copy_for("idle", "idle", taught=True) == "Yard taught — start a job when ready."
+    assert "Teaching" in owner_copy_for("teach", "teach")
     assert owner_copy_for("running", "calibrate_boundary") == "Calibrating boundary…"
     assert owner_copy_for("running", "explore") == "Exploring unknown yard…"
     assert owner_copy_for("running", "review") == "Map ready — start mow?"

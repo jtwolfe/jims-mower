@@ -29,3 +29,4 @@ def test_owner_cli(tmp_path: Path) -> None:
     help_text = build_parser().format_help()
     assert "--live" in help_text
     assert "acre_yard_demo" in help_text
+    assert "--first-run" in help_text

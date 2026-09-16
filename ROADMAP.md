@@ -17,7 +17,18 @@ on `main`. WAVE **UX-C** (this PR) is the thin owner app + YardProfile API;
 it reuses the UX-A mesh + three.js viewer and UX-B fault / radio status.
 Later items stay unchecked until they land. No claimed mAP / FPS.
 
-## WAVE UX-C — owner app shell + YardProfile API (this PR)
+## First-run teach → save yard → run job (this PR)
+
+- [x] Phone / live first-run: pair → teach keep-in (drive or edit vertices) → save `YardProfile`
+- [x] Live Start uses the taught profile as geofence/home (skip authored `calibrate_confirm_m`)
+- [x] After teach, job still does explore fog → MAP READY → mow
+- [x] One command: `jims-mower-owner --live` (Teach → Save → Start) or `--first-run`
+- [x] Reuse UX-A `YardProfile` / teach trail — no second fence format
+- [x] Acre-scale physics world stays (`acre_yard_demo`); `--fast` is CI
+- [x] Tests: teach → profile → live start smoke (no full-acre mow)
+- [x] Docs: first-run vs demo confirm fence; `acre_yard` vs `acre_yard_demo`
+
+## WAVE UX-C — owner app shell + YardProfile API (done, on main)
 
 - [x] YardProfile JSON (`jims_mower.yard.v1`) — home, keep-in/out, mesh, radio prefs, schedule stub
 - [x] Load / save / validate on the UX-A `YardProfile` (radio / schedule extras)

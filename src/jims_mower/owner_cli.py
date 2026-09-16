@@ -28,6 +28,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--speed", default="5")
     p.add_argument("--fast", action="store_true")
     p.add_argument("--steps", type=int, default=None)
+    p.add_argument(
+        "--first-run",
+        action="store_true",
+        help="pair → teach keep-in → save YardProfile → Start (uses taught fence, not authored confirm)",
+    )
+    p.add_argument("--yard", type=Path, default=None, help="load a saved YardProfile JSON")
     return p
 
 
@@ -57,6 +63,10 @@ def main(argv: Optional[list[str]] = None) -> None:
             launch.append("--fast")
         if args.steps is not None:
             launch.extend(["--steps", str(args.steps)])
+        if args.first_run:
+            launch.append("--first-run")
+        if args.yard is not None:
+            launch.extend(["--yard", str(args.yard)])
         app_main(launch)
         return
     payload = export_owner_overlay(

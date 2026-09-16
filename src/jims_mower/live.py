@@ -39,9 +39,14 @@ from jims_mower.mission_flow import (
     session_summary,
 )
 from jims_mower.planning.observed import fog_rgba
-from jims_mower.profile import write_yard_profile
+from jims_mower.profile import (
+    YardProfile,
+    apply_profile_to_scenario,
+    load_yard_profile,
+    write_yard_profile,
+)
 from jims_mower.scenarios import load_source
-from jims_mower.teach import keepouts_from_env
+from jims_mower.teach import TeachPolicy, keepouts_from_env
 from jims_mower.viewer import (
     dump_step_frames,
     serve_viewer,
@@ -68,6 +73,8 @@ REVIEW_HOLD_WALL_S = 2.0
 LIVE_YARDS = ("acre_yard_demo", "acre_yard", "mission_tiny", "golf_rough")
 OWNER_COPY = {
     "idle": "Yard unknown — start a job when ready.",
+    "taught_idle": "Yard taught — start a job when ready.",
+    "teach": "Teaching the keep-in — drive the perimeter or edit vertices, then save.",
     "paused": "Paused.",
     "estop": "E-STOP — hold.",
     "hold": "Hold.",
@@ -133,7 +140,13 @@ def speed_label(speed: float) -> str:
     return str(speed)
 
 
-def owner_copy_for(job_state: str, phase: str, fault: Optional[dict[str, Any]] = None) -> str:
+def owner_copy_for(
+    job_state: str,
+    phase: str,
+    fault: Optional[dict[str, Any]] = None,
+    *,
+    taught: bool = False,
+) -> str:
     if job_state == "estop":
         return OWNER_COPY["estop"]
     blob = fault if isinstance(fault, dict) else None
@@ -143,14 +156,18 @@ def owner_copy_for(job_state: str, phase: str, fault: Optional[dict[str, Any]] =
             return OWNER_COPY["immobilised"]
         if code == "STUCK":
             return OWNER_COPY["stuck"]
+    if job_state == "teach" or phase == "teach":
+        return OWNER_COPY["teach"]
     if job_state in OWNER_COPY and job_state in {"idle", "paused", "hold"}:
+        if job_state == "idle" and taught:
+            return OWNER_COPY["taught_idle"]
         return OWNER_COPY[job_state]
     return OWNER_COPY.get(phase, PHASE_LABELS.get(phase, phase))
 
 
 def radio_path_for(phase: str, job_state: str = "running") -> dict[str, Any]:
     """Simulated bearer chips: BT teach / Wi-Fi map / LoRa sparse. No RF hardware."""
-    if job_state == "idle" or phase in {"", "idle", "calibrate_boundary"}:
+    if job_state in {"idle", "teach"} or phase in {"", "idle", "teach", "calibrate_boundary"}:
         active = "bt"
     elif phase in {"explore", "review"}:
         active = "wifi"
@@ -178,7 +195,7 @@ def robot_status_for(
         return "fault"
     if not paired:
         return "pairing"
-    if job_state in {"running", "paused", "hold"} and not done:
+    if job_state in {"running", "paused", "hold", "teach"} and not done:
         return "live"
     return "idle"
 
@@ -277,6 +294,9 @@ class LiveSession:
         phase_budget: float = 1.0,
         calibrate_stride: Optional[float] = None,
         calibrate_confirm: Optional[float] = None,
+        yard_profile: Optional[YardProfile] = None,
+        yard_path: Optional[Union[str, Path]] = None,
+        first_run: bool = False,
     ) -> None:
         self.config_name = resolve_live_config(config, fast=fast)
         self.fast = bool(fast)
@@ -291,6 +311,11 @@ class LiveSession:
         self.phase_budget = min(1.0, max(0.05, float(phase_budget)))
         self.calibrate_stride = calibrate_stride
         self.calibrate_confirm = calibrate_confirm
+        self.yard_profile = yard_profile
+        self.yard_path = Path(yard_path) if yard_path else None
+        self.first_run = bool(first_run)
+        self.owner_taught = bool(yard_profile is not None and len(yard_profile.keep_in) >= 3)
+        self.teach_policy: Optional[TeachPolicy] = None
         self.max_steps = int(steps if steps is not None else (FAST_STEPS if fast else DEFAULT_STEPS))
         self.env: Optional[MowerEnv] = None
         self.policy: Optional[MissionPolicy] = None
@@ -350,12 +375,20 @@ class LiveSession:
         if self.calibrate_confirm is not None:
             cfg.mission.calibrate_confirm_m = float(self.calibrate_confirm)
         scale_mission_budget(cfg.mission, self.phase_budget)
+        taught = self.yard_profile if self.owner_taught and self.yard_profile is not None else None
+        if taught is not None and len(taught.keep_in) >= 3:
+            apply_profile_to_scenario(scenario, taught, resize_world=False)
         if self.env is not None:
             self.env.close()
         self.env = MowerEnv(config=cfg, scenario=scenario, render_mode="rgb_array")
-        self.obs, self.info = self.env.reset(seed=self.seed)
+        reset_opts: dict[str, Any] = {}
+        if taught is not None:
+            reset_opts["yard_profile"] = taught
+            reset_opts["resize_world"] = False
+        self.obs, self.info = self.env.reset(seed=self.seed, options=reset_opts or None)
         self.policy = MissionPolicy(self.env.cfg, fast=self.fast)
-        self.policy.reset(self.obs, self.info)
+        self.policy.reset(self.obs, self.info, profile=taught)
+        self.teach_policy = None
         self.camera_names = list(self.obs.get("cameras") or {})
         self.poses = []
         self.done = False
@@ -449,6 +482,8 @@ class LiveSession:
             raise RuntimeError("LiveSession.reset() before stepping")
         if self.done:
             return self.snapshot()
+        if self.job_state == "teach":
+            return self._step_teach()
         if self.estop:
             self.info = dict(self.info or {})
             self.info["estop"] = True
@@ -497,7 +532,7 @@ class LiveSession:
         last_speed = self.speed
         last = self.snapshot()
         while not self._stop.is_set() and not self.done and step_i < self.max_steps:
-            if self.job_state not in {"running"}:
+            if self.job_state not in {"running", "teach"}:
                 time.sleep(0.05)
                 t0 = time.perf_counter()
                 step_i = 0
@@ -531,7 +566,7 @@ class LiveSession:
         self._thread.start()
 
     def control(self, cmd: str, **kwargs: Any) -> dict[str, Any]:
-        """Owner bar: start / pause / resume / speed / start_mow / ESTOP."""
+        """Owner bar: start / pause / resume / speed / start_mow / ESTOP / teach."""
         key = str(cmd or "").strip().lower()
         if key not in LIVE_CONTROL_CMDS:
             return {"ok": False, "error": f"unknown command {cmd}", **self.snapshot()}
@@ -544,6 +579,8 @@ class LiveSession:
             if kwargs.get("speed") is not None:
                 self.speed = parse_speed(kwargs.get("speed"))
             self.estop = False
+            if self.job_state not in {"paused", "hold", "estop"} and self.owner_taught:
+                self._reset_for_taught_job()
             if self.policy is not None:
                 self.policy.clear_owner_hold()
                 if self.policy.safe.mode == "estop":
@@ -597,6 +634,12 @@ class LiveSession:
             self.job_state = "idle"
         elif key == "pair":
             self.paired = True
+        elif key == "teach":
+            return self._begin_teach(**kwargs)
+        elif key == "save_yard":
+            return self._save_yard(**kwargs)
+        elif key == "load_yard":
+            return self._load_yard(**kwargs)
         elif key == "inject":
             self._inject_fault(
                 str(kwargs.get("kind") or kwargs.get("fault") or "stuck"),
@@ -651,6 +694,191 @@ class LiveSession:
         if was_running:
             self.job_state = "running"
             self._t0_wall = time.perf_counter()
+
+    def _reset_for_taught_job(self) -> None:
+        """Rebuild the env/policy so Start uses the saved YardProfile as fence."""
+        if not self.owner_taught or self.yard_profile is None:
+            return
+        if self.policy is not None and self.policy.phase.value != "calibrate_boundary":
+            if self.policy.profile is not None and len(self.policy.profile.keep_in) >= 3:
+                return
+        paired = self.paired
+        taught = self.owner_taught
+        profile = self.yard_profile
+        first = self.first_run
+        dest = self.yard_path
+        self.stop()
+        self.yard_profile = profile
+        self.owner_taught = taught
+        self.first_run = first
+        self.yard_path = dest
+        self.reset()
+        self.paired = paired
+
+    def _begin_teach(self, **kwargs: Any) -> dict[str, Any]:
+        if not self.started:
+            self.reset()
+        if kwargs.get("speed") is not None:
+            self.speed = parse_speed(kwargs.get("speed"))
+        self.estop = False
+        self.done = False
+        self.teach_policy = None
+        if self.policy is not None:
+            self.policy.clear_owner_hold()
+        self.job_state = "teach"
+        self._t0_wall = self._t0_wall or time.perf_counter()
+        self._stop.clear()
+        self.start_thread()
+        return {"ok": True, "cmd": "teach", **self.snapshot()}
+
+    def _profile_from_vertices(
+        self,
+        keep_in: Any,
+        *,
+        keep_out: Optional[Any] = None,
+        home: Optional[Any] = None,
+        name: str = "",
+    ) -> YardProfile:
+        from jims_mower.profile import parse_yard_profile
+
+        env = self.env
+        width = float(env.cfg.world.width_m) if env is not None else 16.0
+        height = float(env.cfg.world.height_m) if env is not None else 12.0
+        res = float(env.cfg.world.resolution_m) if env is not None else 0.20
+        pose = (self.info or {}).get("pose") if isinstance(self.info, dict) else {}
+        holes = keep_out
+        if holes is None and env is not None:
+            holes = [list(p) for p in env.geofence_spec().keep_out]
+        if not holes and self.yard_profile is not None:
+            holes = [list(p) for p in self.yard_profile.keep_out]
+        if not holes and env is not None:
+            holes = keepouts_from_env(env)
+        home_pose = home
+        if home_pose is None and isinstance(pose, dict) and pose:
+            home_pose = {
+                "x": float(pose.get("x", 1.0)),
+                "y": float(pose.get("y", 1.0)),
+                "theta": float(pose.get("theta", 0.0)),
+            }
+        payload = {
+            "schema": "jims_mower.yard.v1",
+            "name": name or (self.yard_profile.name if self.yard_profile else str(self.config_name)),
+            "width_m": width,
+            "height_m": height,
+            "resolution_m": res,
+            "keep_in": keep_in,
+            "keep_out": holes or [],
+            "home": home_pose or {"x": 1.0, "y": 1.0, "theta": 0.0},
+            "mesh": "yard.glb",
+        }
+        return parse_yard_profile(payload)
+
+    def _draft_profile_from_teach(self) -> YardProfile:
+        env = self.env
+        keep_out: list[list[tuple[float, float]]] = []
+        if env is not None:
+            keep_out = [list(p) for p in env.geofence_spec().keep_out]
+        if not keep_out and env is not None:
+            keep_out = keepouts_from_env(env)
+        if self.teach_policy is not None:
+            profile = self.teach_policy.to_profile(name=str(self.config_name), keep_out=keep_out)
+        elif self.yard_profile is not None and len(self.yard_profile.keep_in) >= 3:
+            profile = self.yard_profile
+        elif env is not None:
+            spec = env.geofence_spec()
+            profile = YardProfile(
+                name=str(self.config_name),
+                width_m=float(env.cfg.world.width_m),
+                height_m=float(env.cfg.world.height_m),
+                resolution_m=float(env.cfg.world.resolution_m),
+                keep_in=list(spec.keep_in),
+                keep_out=keep_out or [list(p) for p in spec.keep_out],
+                home={"x": 1.0, "y": 1.0, "theta": 0.0},
+            )
+        else:
+            raise RuntimeError("no teach trail or yard to save")
+        if env is not None:
+            profile.width_m = float(env.cfg.world.width_m)
+            profile.height_m = float(env.cfg.world.height_m)
+            profile.resolution_m = float(env.cfg.world.resolution_m)
+        pose = (self.info or {}).get("pose") if isinstance(self.info, dict) else {}
+        if isinstance(pose, dict) and pose and not (self.teach_policy and self.teach_policy.trail):
+            profile.home = {
+                "x": float(pose.get("x", profile.home.get("x", 1.0))),
+                "y": float(pose.get("y", profile.home.get("y", 1.0))),
+                "theta": float(pose.get("theta", profile.home.get("theta", 0.0))),
+            }
+        return profile
+
+    def _persist_yard(self, profile: YardProfile, dest: Optional[Union[str, Path]] = None) -> Path:
+        path = Path(dest) if dest is not None else (self.yard_path or (self.out_dir / "profile.json"))
+        write_yard_profile(path, profile)
+        self.yard_path = path
+        return path
+
+    def _save_yard(self, **kwargs: Any) -> dict[str, Any]:
+        keep_in = kwargs.get("keep_in")
+        if keep_in:
+            profile = self._profile_from_vertices(
+                keep_in,
+                keep_out=kwargs.get("keep_out"),
+                home=kwargs.get("home"),
+                name=str(kwargs.get("name") or ""),
+            )
+        else:
+            profile = self._draft_profile_from_teach()
+        if len(profile.keep_in) < 3:
+            return {"ok": False, "error": "keep_in needs at least 3 vertices", **self.snapshot()}
+        dest = kwargs.get("path")
+        path = self._persist_yard(profile, dest)
+        self.yard_profile = profile
+        self.owner_taught = True
+        if self.job_state == "teach":
+            self.job_state = "idle"
+        self.stop()
+        return {"ok": True, "cmd": "save_yard", "path": str(path), **self.snapshot()}
+
+    def _load_yard(self, **kwargs: Any) -> dict[str, Any]:
+        dest = Path(kwargs.get("path") or self.yard_path or (self.out_dir / "profile.json"))
+        if not dest.is_file():
+            return {"ok": False, "error": f"YardProfile not found: {dest}", **self.snapshot()}
+        profile = load_yard_profile(dest)
+        if len(profile.keep_in) < 3:
+            return {"ok": False, "error": "saved yard missing keep_in", **self.snapshot()}
+        self.yard_profile = profile
+        self.owner_taught = True
+        self.yard_path = dest
+        if self.job_state == "teach":
+            self.job_state = "idle"
+        return {"ok": True, "cmd": "load_yard", "path": str(dest), **self.snapshot()}
+
+    def _step_teach(self) -> dict[str, Any]:
+        assert self.env is not None
+        if self.teach_policy is None:
+            self.teach_policy = TeachPolicy(self.env.cfg, spec=self.env.geofence_spec())
+            self.teach_policy.reset(self.obs, self.info)
+        action = self.teach_policy.act(self.obs, self.info)
+        self.obs, _reward, terminated, truncated, self.info = self.env.step(action)
+        if self.policy is not None:
+            from jims_mower.types import Pose
+
+            raw = (self.info or {}).get("pose") or {}
+            pose = Pose(
+                float(raw.get("x", 0.0)),
+                float(raw.get("y", 0.0)),
+                float(raw.get("theta", 0.0)),
+            )
+            self.policy._stamp(self.obs, self.info, pose, explored=True)
+        if terminated or truncated or self.teach_policy.done:
+            self.job_state = "paused"
+            self.yard_profile = self._draft_profile_from_teach()
+        force_map = False
+        self._refresh_maps(force=force_map)
+        self._refresh_cameras(force=False)
+        self._record_pose()
+        with self.lock:
+            self._seq += 1
+        return self.snapshot()
 
     def _maybe_auto_mow(self) -> None:
         if self.policy is None or self.unattended:
@@ -791,9 +1019,12 @@ class LiveSession:
             plan = _downsample_xy(list(wps))
         keep_in: list[list[float]] = []
         keep_out: list[list[list[float]]] = []
-        if policy.profile is not None:
-            keep_in = [list(pt) for pt in policy.profile.keep_in]
-            keep_out = [[list(pt) for pt in hole] for hole in (policy.profile.keep_out or [])]
+        src = policy.profile if policy.profile is not None else self.yard_profile
+        if src is not None and len(src.keep_in) >= 3:
+            keep_in = [list(pt) for pt in src.keep_in]
+            keep_out = [[list(pt) for pt in hole] for hole in (src.keep_out or [])]
+        phase = "teach" if self.job_state == "teach" else status["phase"]
+        phase_label = "TEACH" if phase == "teach" else status["phase_label"]
         cam_name = self.camera_names[0] if self.camera_names else "front"
         n_obs = self._n_observed
         if policy.observed is not None:
@@ -814,15 +1045,24 @@ class LiveSession:
             "map_seq": self._map_seq,
             "cam_seq": self._cam_seq,
             "step": status["step"],
-            "phase": status["phase"],
-            "phase_label": status["phase_label"],
+            "phase": phase,
+            "phase_label": phase_label,
             "job_state": self.job_state,
-            "owner_copy": owner_copy_for(self.job_state, status["phase"], fault),
-            "radio_path": radio_path_for(status["phase"], self.job_state),
+            "owner_copy": owner_copy_for(
+                self.job_state, phase, fault, taught=self.owner_taught
+            ),
+            "radio_path": radio_path_for(phase, self.job_state),
+            "taught": bool(self.owner_taught),
+            "first_run": bool(self.first_run),
+            "needs_teach": bool(self.first_run and not self.owner_taught),
+            "yard_path": str(self.yard_path) if self.yard_path else "",
+            "yard_saved": bool(self.yard_path is not None and Path(self.yard_path).is_file()),
             "faults": self._faults_payload(fault),
             "paired": bool(self.paired),
             "yards": list(LIVE_YARDS),
             "yard": str(self.config_name),
+            "width_m": float(self.env.cfg.world.width_m) if self.env is not None else 16.0,
+            "height_m": float(self.env.cfg.world.height_m) if self.env is not None else 12.0,
             "can_start_mow": status["phase"] == "review",
             "can_reexplore": status["phase"] == "review",
             "pose": pose,

@@ -122,6 +122,42 @@ def test_global_plan_avoids_path_building_and_reports_metrics() -> None:
     assert max(ys) - min(ys) > 1.5
 
 
+def test_taught_profile_skips_calibrate_and_starts_explore() -> None:
+    from jims_mower.profile import YardProfile
+
+    env = _tiny_env()
+    keep_in = [(0.7, 0.7), (5.0, 0.7), (5.0, 4.0), (0.7, 4.0)]
+    profile = YardProfile(
+        name="taught_tiny",
+        width_m=env.cfg.world.width_m,
+        height_m=env.cfg.world.height_m,
+        resolution_m=env.cfg.world.resolution_m,
+        keep_in=keep_in,
+        home={"x": 1.2, "y": 1.2, "theta": 0.0},
+    )
+    obs, info = env.reset(seed=3, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info, profile=profile)
+    assert policy.phase == MissionPhase.EXPLORE
+    assert policy.profile is not None
+    assert len(policy.profile.keep_in) == 4
+    events = {e.event for e in policy.events}
+    assert "boundary_taught" in events
+    seen = {policy.phase.value}
+    for _ in range(80):
+        action = policy.act(obs, info)
+        assert float(action[2]) == 0.0 or policy.phase == MissionPhase.MOW
+        obs, _reward, terminated, truncated, info = env.step(action)
+        seen.add(policy.phase.value)
+        if policy.phase in {MissionPhase.REVIEW, MissionPhase.MOW, MissionPhase.COMPLETE}:
+            break
+        if terminated or truncated or policy.done:
+            break
+    env.close()
+    assert "calibrate_boundary" not in seen
+    assert "explore" in seen
+
+
 def test_phase_order_and_trimmer_off_before_mow() -> None:
     env = _tiny_env()
     obs, info = env.reset(seed=3)

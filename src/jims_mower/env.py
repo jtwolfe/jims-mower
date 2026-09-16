@@ -327,7 +327,11 @@ class MowerEnv(gym.Env):
                 self._yard_profile = load_yard_profile(raw_profile)
             if self.scenario is None:
                 self.scenario = empty_scenario(self.cfg)
-            apply_profile_to_scenario(self.scenario, self._yard_profile)
+            apply_profile_to_scenario(
+                self.scenario,
+                self._yard_profile,
+                resize_world=bool(options.get("resize_world", True)),
+            )
         previous_cut = None
         if grow_cfg.enabled and self._had_episode:
             previous_cut = self._coverage.cut.copy()

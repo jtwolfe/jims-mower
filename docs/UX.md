@@ -139,6 +139,13 @@ jims-mower-demo --config teach_out/profile.json --steps 20 --out demo_taught
 the raw trail. Physics still uses the height field; the profile is the
 geofence + spawn, not a new renderer.
 
+The phone live loop (`jims-mower-owner --live`) reuses this same
+document. Teach in the app (drive or edit vertices) → Save yard → Start
+runs explore / MAP READY / mow against that fence. Without teach,
+`acre_yard_demo` still **confirms** the authored keep-in
+(`calibrate_confirm_m`) — that is demo pacing, not first-run setup.
+See [`UX_C.md`](UX_C.md) and [`MISSION_FLOW.md`](MISSION_FLOW.md).
+
 A short `--steps` run may not finish the rectangle. The keep-in then
 falls back to the planned perimeter waypoints so you still get an
 editable fence. Use more steps (or a smaller yard) to record a full loop.

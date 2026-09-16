@@ -128,8 +128,10 @@ move, not so the job finishes. Mesh export should use `--stride 3` or
 authored pond/sheds, slightly tighter keep-in, `calibrate_confirm_m: 28`,
 and `explore_complete: 0.42` so `--speed 5` can reach **MAP READY then
 MOW** in minutes. `acre_yard` stays at `0.72` and a full fence lap.
-The live viewer shows a growing **observed** elevation mesh (unknown
-stays fog). Physics still uses the true field.
+A first-run teach (`jims-mower-owner --live` → Teach → Save) replaces
+that authored confirm with a `YardProfile` keep-in; the acre physics
+world does not shrink. The live viewer shows a growing **observed**
+elevation mesh (unknown stays fog). Physics still uses the true field.
 
 ### DEM hook (optional, not used in CI)
 
