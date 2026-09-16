@@ -76,7 +76,11 @@ def apply_overlay(cfg: EnvConfig, source: Union[str, Path, dict]) -> EnvConfig:
     data = load_overlay(source)
     season = str(data.get("season") or data.get("name") or "none")
     env = data.get("env") if isinstance(data.get("env"), dict) else {}
-    merged = {k: v for k, v in data.items() if k in {"world", "weather", "planner", "perception", "curriculum"}}
+    merged = {
+        k: v
+        for k, v in data.items()
+        if k in {"world", "weather", "planner", "perception", "curriculum", "owner", "radio"}
+    }
     merged.update(env)
     if merged:
         overlay_config(cfg, merged)

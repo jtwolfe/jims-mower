@@ -305,13 +305,16 @@ p.lead, .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 
   font-size: 13px;
   text-decoration: none;
 }
-input[type="text"] {
+input[type="text"],
+input.pin {
   width: 100%;
   background: #101410;
   border: 1px solid var(--line);
   color: var(--ink);
   border-radius: 12px;
   padding: 10px 12px;
+  margin: 8px 0 12px;
+  box-sizing: border-box;
 }
 
 .toggle-row {

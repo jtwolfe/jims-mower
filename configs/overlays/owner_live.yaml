@@ -1,0 +1,9 @@
+schema: jims_mower.overlay.v1
+kind: overlay
+name: owner_live
+description: >
+  Live owner / field-dryrun overlay. Pair Bluetooth before Start.
+  Radio stays sim — no RF range claim.
+owner:
+  require_pair: true
+  pair_pin: "2468"

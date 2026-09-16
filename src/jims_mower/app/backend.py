@@ -21,6 +21,7 @@ from jims_mower.constants import (
 from jims_mower.episode import EpisodeReader
 from jims_mower.geofence import allowed_xy
 from jims_mower.mesh import mesh_from_elevation, mesh_to_payload
+from jims_mower.pairing import PairingMachine
 from jims_mower.profile import RadioPrefs
 from jims_mower.safe_state import SafeStateMachine
 from jims_mower.pack import GYM_STUB_CAPACITY_WH, battery_status_block
@@ -48,7 +49,7 @@ class AppBackend(Protocol):
     def status(self) -> dict[str, Any]: ...
     def get_yard(self) -> dict[str, Any]: ...
     def put_yard(self, profile: YardProfile) -> dict[str, Any]: ...
-    def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]: ...
+    def command(self, cmd: str, *, reason: str = "", **kwargs: Any) -> dict[str, Any]: ...
     def mesh(self) -> dict[str, Any]: ...
     def coverage(self) -> dict[str, Any]: ...
     def tick(self) -> dict[str, Any]: ...
@@ -57,6 +58,23 @@ class AppBackend(Protocol):
 
 def _pose_dict(x: float, y: float, theta: float) -> dict[str, float]:
     return {"x": float(x), "y": float(y), "theta": float(theta)}
+
+
+def _bind_pairing(yard: Any, *, require_pair: bool = False) -> PairingMachine:
+    return PairingMachine.from_profile(getattr(yard, "pairing", None), require_pair=require_pair)
+
+
+def _persist_pair_on_yard(yard: Any, pairing: PairingMachine) -> None:
+    if yard is not None and hasattr(yard, "pairing"):
+        yard.pairing = pairing.persist()
+
+
+def _pair_kwargs_pin(kwargs: dict[str, Any]) -> Optional[str]:
+    if kwargs.get("pin") is not None:
+        return str(kwargs["pin"])
+    if kwargs.get("code") is not None:
+        return str(kwargs["code"])
+    return None
 
 
 def _weather_status(*, rain: bool, extra: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -68,7 +86,7 @@ def _weather_status(*, rain: bool, extra: Optional[dict[str, Any]] = None) -> di
     return blob
 
 
-def _radio_status(radio: Any, *, rssi: int = -88) -> dict[str, Any]:
+def _radio_status(radio: Any, *, pairing: Any = None) -> dict[str, Any]:
     if not isinstance(radio, RadioPrefs):
         raw = radio or {}
         if isinstance(raw, YardProfile):
@@ -96,17 +114,33 @@ def _radio_status(radio: Any, *, rssi: int = -88) -> dict[str, Any]:
         ok = bool(radio.wifi_enabled)
     elif primary == "lora":
         ok = bool(radio.lora_enabled)
+    pair_state = None
+    if pairing is not None:
+        pair_state = getattr(pairing, "state", None) or (pairing.get("state") if isinstance(pairing, dict) else None)
+    paired = bool(getattr(pairing, "is_paired", False)) if pairing is not None else bool(radio.bluetooth)
+    if pairing is not None and hasattr(pairing, "is_paired"):
+        paired = bool(pairing.is_paired)
+    elif pair_state == "paired":
+        paired = True
     return {
         "link": primary if ok else "none",
         "ok": bool(ok),
-        "rssi": int(rssi),
-        "bluetooth": {"paired": bool(radio.bluetooth), "ok": bool(radio.bluetooth)},
+        "rf_claim": None,
+        "transport": {"bluetooth": "bt", "wifi": "wifi", "lora": "lora"}.get(primary if ok else "", None),
+        "bluetooth": {
+            "state": pair_state or ("paired" if paired else "unpaired"),
+            "paired": bool(paired),
+            "ok": bool(paired if pair_state else radio.bluetooth),
+        },
         "wifi": {"enabled": bool(radio.wifi_enabled), "ssid": radio.wifi_ssid, "ok": bool(radio.wifi_enabled)},
         "lora": {
             "enabled": bool(radio.lora_enabled),
             "channel": int(radio.lora_channel),
             "ok": bool(radio.lora_enabled),
+            "far_fence": True,
         },
+        "not_rf_hardware": True,
+        "simulated": True,
     }
 
 
@@ -125,21 +159,41 @@ def _radio_sim_from_info(info: Optional[dict[str, Any]]) -> Optional[dict[str, A
         "radio_channel": info.get("radio_channel"),
         "radio_lost": bool(info.get("radio_lost")),
         "radio_on_loss": info.get("radio_on_loss"),
-        "radio_distance_m": info.get("radio_distance_m"),
+        "rf_claim": None,
+        "transports": info.get("transports"),
         "not_rf_hardware": True,
     }
 
 
-def _overlay_radio_sim(status_radio: dict[str, Any], sim: Optional[dict[str, Any]]) -> dict[str, Any]:
+def _overlay_radio_sim(
+    status_radio: dict[str, Any],
+    sim: Optional[dict[str, Any]],
+    *,
+    env_radio: Any = None,
+) -> dict[str, Any]:
+    if env_radio is not None and hasattr(env_radio, "owner_status"):
+        owner = env_radio.owner_status()
+        out = dict(status_radio)
+        out.update({k: owner[k] for k in owner if k not in {"link"} or owner.get("link") != "none"})
+        out["rf_claim"] = None
+        out["sim"] = sim
+        if sim and sim.get("radio_lost") and not getattr(env_radio, "any_lost", False):
+            out["ok"] = False
+        return out
     if not isinstance(sim, dict):
+        status_radio = dict(status_radio)
+        status_radio.setdefault("rf_claim", None)
         return status_radio
     out = dict(status_radio)
     out["sim"] = sim
+    out["rf_claim"] = None
     if sim.get("radio_lost"):
         out["link"] = "none"
         out["ok"] = False
+        out["transport"] = None
     elif sim.get("radio_enabled") and sim.get("radio_channel"):
         out["link"] = _SIM_LINK.get(str(sim["radio_channel"]), str(sim["radio_channel"]))
+        out["transport"] = sim.get("radio_channel")
     return out
 
 
@@ -262,7 +316,7 @@ def viewer_manifest(backend: AppBackend) -> dict[str, Any]:
         "radio": {
             "placeholder": False,
             "label": (status.get("radio") or {}).get("link"),
-            "value": (status.get("radio") or {}).get("rssi"),
+            "value": (status.get("radio") or {}).get("rf_claim"),
         },
         "not_a_benchmark": True,
         "note": "Owner-app live bundle — same UX-A viewer_static / mesh payload.",
@@ -277,6 +331,7 @@ class MemoryBackend:
         yard: Optional[YardProfile] = None,
         *,
         yard_path: Optional[Path] = None,
+        require_pair: bool = False,
     ) -> None:
         self._lock = threading.Lock()
         self.yard = yard or default_yard_profile()
@@ -289,6 +344,8 @@ class MemoryBackend:
         self.faults: list[dict[str, str]] = []
         self.hours_mowed = 1.4
         self.rain = False
+        self.require_pair = bool(require_pair)
+        self.pairing = _bind_pairing(self.yard, require_pair=self.require_pair)
         self.schedule_hook = ScheduleHook.from_profile_schedule(self.yard.schedule)
         rows = max(1, int(round(self.yard.height_m / self.yard.resolution_m)))
         cols = max(1, int(round(self.yard.width_m / self.yard.resolution_m)))
@@ -323,6 +380,8 @@ class MemoryBackend:
         )
 
     def _arm_from_schedule(self) -> None:
+        if not self.pairing.can_start:
+            return
         if self.safe.mode == "estop":
             self.safe.clear()
         self.faults = []
@@ -331,6 +390,14 @@ class MemoryBackend:
     def _stop_from_schedule(self) -> None:
         if self.safe.mode != "estop":
             self.mission = "idle"
+
+    def _hold_safe_unlocked(self, reason: str) -> None:
+        """Unpair / radio-lost: idle hold, not ESTOP."""
+        if self.safe.mode == "estop":
+            return
+        if self.mission in {"mowing", "returning", "teach"}:
+            self.mission = "idle"
+            self.notify.emit("info", f"{reason} — hold safe", yard=self.yard.name)
 
     def _poll_schedule_unlocked(self) -> None:
         self.schedule_hook.poll(
@@ -383,7 +450,10 @@ class MemoryBackend:
                 "help_requested": bool(self.safe.command().help_requested),
                 "reason": self.safe.last_reason,
             },
-            "radio": _radio_status(self.yard.radio),
+            "radio": _radio_status(self.yard.radio, pairing=self.pairing),
+            "pairing": self.pairing.as_info(),
+            "require_pair": bool(self.require_pair),
+            "paired": bool(self.pairing.is_paired),
             "faults": list(self.faults),
             "coverage_pct": coverage_pct,
             "coverage_source": "gym_grid",
@@ -421,6 +491,7 @@ class MemoryBackend:
             self._yard_store.put(profile)
             self._yard_store.select(profile.name)
         self.schedule_hook.sync(profile.schedule)
+        self.pairing = _bind_pairing(profile, require_pair=self.require_pair)
         if prev is not None and prev.name != profile.name:
             self.notify.emit(
                 "info",
@@ -475,7 +546,7 @@ class MemoryBackend:
     def ota(self) -> dict[str, Any]:
         return ota_status()
 
-    def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
+    def command(self, cmd: str, *, reason: str = "", **kwargs: Any) -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
         if key not in APP_COMMANDS:
             raise YardProfileError(f"unknown command {cmd!r}; expected one of {APP_COMMANDS}")
@@ -486,6 +557,9 @@ class MemoryBackend:
                 self.faults = [{"code": "ESTOP", "detail": reason or "owner estop"}]
                 self.notify.emit("fault", reason or "owner estop", yard=self.yard.name)
             elif key == "start":
+                refused = self.pairing.refuse_start()
+                if refused:
+                    raise YardProfileError("not paired — Pair Bluetooth before Start")
                 if self.safe.mode == "estop":
                     self.safe.clear()
                 self.faults = []
@@ -503,6 +577,15 @@ class MemoryBackend:
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot teach while ESTOP is latched")
                 self.mission = "teach"
+            elif key == "pair":
+                result = self.pairing.request_pair(_pair_kwargs_pin(kwargs))
+                _persist_pair_on_yard(self.yard, self.pairing)
+                if not result.ok:
+                    raise YardProfileError(result.reason or "pair_failed")
+            elif key == "unpair":
+                self.pairing.unpair()
+                self._hold_safe_unlocked("unpaired")
+                _persist_pair_on_yard(self.yard, self.pairing)
             return self._status_unlocked()
 
     def mesh(self) -> dict[str, Any]:
@@ -593,6 +676,8 @@ class SimBackend:
         self.faults: list[dict[str, str]] = []
         self.hours_mowed = 0.0
         self.rain = rain_from_weather(self._info.get("weather"))
+        self.require_pair = False
+        self.pairing = _bind_pairing(self.yard, require_pair=False)
         self.schedule_hook = ScheduleHook.from_profile_schedule(self.yard.schedule)
 
     def set_clock(self, clock: Clock) -> None:
@@ -666,7 +751,14 @@ class SimBackend:
                 "terrain_advice": self._info.get("terrain_advice"),
                 "living_advice": self._info.get("living_advice"),
             },
-            "radio": _overlay_radio_sim(_radio_status(self.yard.radio), _radio_sim_from_info(self._info)),
+            "radio": _overlay_radio_sim(
+                _radio_status(self.yard.radio, pairing=self.pairing),
+                _radio_sim_from_info(self._info),
+                env_radio=getattr(self.env, "radio", None),
+            ),
+            "pairing": self.pairing.as_info(),
+            "require_pair": bool(self.require_pair),
+            "paired": bool(self.pairing.is_paired),
             "faults": faults,
             "coverage_pct": 100.0 * float(self._info.get("coverage_fraction") or 0.0),
             "coverage_source": str(self._info.get("coverage_source") or "gym_grid"),
@@ -691,9 +783,10 @@ class SimBackend:
             if self.yard_path is not None:
                 save_yard_profile(profile, self.yard_path)
             self.schedule_hook.sync(profile.schedule)
+            self.pairing = _bind_pairing(profile, require_pair=self.require_pair)
             return profile.as_dict()
 
-    def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
+    def command(self, cmd: str, *, reason: str = "", **kwargs: Any) -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
         if key not in APP_COMMANDS:
             raise YardProfileError(f"unknown command {cmd!r}; expected one of {APP_COMMANDS}")
@@ -703,6 +796,9 @@ class SimBackend:
                 self.mission = "estop"
                 self.faults = [{"code": "ESTOP", "detail": reason or "owner estop"}]
             elif key == "start":
+                refused = self.pairing.refuse_start()
+                if refused:
+                    raise YardProfileError("not paired — Pair Bluetooth before Start")
                 if self.safe.mode == "estop":
                     self.safe.clear()
                 self.faults = []
@@ -718,6 +814,16 @@ class SimBackend:
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot teach while ESTOP is latched")
                 self.mission = "teach"
+            elif key == "pair":
+                result = self.pairing.request_pair(_pair_kwargs_pin(kwargs))
+                _persist_pair_on_yard(self.yard, self.pairing)
+                if not result.ok:
+                    raise YardProfileError(result.reason or "pair_failed")
+            elif key == "unpair":
+                self.pairing.unpair()
+                if self.safe.mode != "estop" and self.mission in {"mowing", "returning", "teach"}:
+                    self.mission = "idle"
+                _persist_pair_on_yard(self.yard, self.pairing)
             return self._status_unlocked()
 
     def mesh(self) -> dict[str, Any]:
@@ -783,6 +889,8 @@ class EpisodeBackend:
         self.yard = yard or self._yard_from_episode()
         self.hours_mowed = 0.0
         self.rain = False
+        self.require_pair = False
+        self.pairing = _bind_pairing(self.yard, require_pair=False)
         self.schedule_hook = ScheduleHook.from_profile_schedule(self.yard.schedule)
 
     def set_clock(self, clock: Clock) -> None:
@@ -888,7 +996,10 @@ class EpisodeBackend:
                 "reason": self.safe.last_reason,
                 "terrain_advice": info.get("terrain_advice"),
             },
-            "radio": _overlay_radio_sim(_radio_status(self.yard.radio), _radio_sim_from_info(info)),
+            "radio": _overlay_radio_sim(_radio_status(self.yard.radio, pairing=self.pairing), _radio_sim_from_info(info)),
+            "pairing": self.pairing.as_info(),
+            "require_pair": bool(self.require_pair),
+            "paired": bool(self.pairing.is_paired),
             "faults": _ux_b_faults(info, list(self.faults)),
             "coverage_pct": 100.0 * float(info.get("coverage_fraction") or 0.0),
             "coverage_source": str(info.get("coverage_source") or "gym_grid"),
@@ -914,9 +1025,10 @@ class EpisodeBackend:
             if self.yard_path is not None:
                 save_yard_profile(profile, self.yard_path)
             self.schedule_hook.sync(profile.schedule)
+            self.pairing = _bind_pairing(profile, require_pair=self.require_pair)
             return profile.as_dict()
 
-    def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
+    def command(self, cmd: str, *, reason: str = "", **kwargs: Any) -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
         if key not in APP_COMMANDS:
             raise YardProfileError(f"unknown command {cmd!r}; expected one of {APP_COMMANDS}")
@@ -926,6 +1038,9 @@ class EpisodeBackend:
                 self.mission = "estop"
                 self.faults = [{"code": "ESTOP", "detail": reason or "owner estop"}]
             elif key == "start":
+                refused = self.pairing.refuse_start()
+                if refused:
+                    raise YardProfileError("not paired — Pair Bluetooth before Start")
                 if self.safe.mode == "estop":
                     self.safe.clear()
                 self.faults = []
@@ -943,6 +1058,16 @@ class EpisodeBackend:
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot teach while ESTOP is latched")
                 self.mission = "teach"
+            elif key == "pair":
+                result = self.pairing.request_pair(_pair_kwargs_pin(kwargs))
+                _persist_pair_on_yard(self.yard, self.pairing)
+                if not result.ok:
+                    raise YardProfileError(result.reason or "pair_failed")
+            elif key == "unpair":
+                self.pairing.unpair()
+                if self.safe.mode != "estop" and self.mission in {"mowing", "returning", "teach"}:
+                    self.mission = "idle"
+                _persist_pair_on_yard(self.yard, self.pairing)
             return self._status_unlocked()
 
     def mesh(self) -> dict[str, Any]:

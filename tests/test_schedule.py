@@ -185,5 +185,5 @@ def test_profile_schedule_fields_roundtrip() -> None:
     old.pop("min_soc")
     old["note"] = "stub — not a scheduler"
     migrated = parse_yard_profile(dict(raw, schema=YARD_PROFILE_SCHEMA, schedule=old))
-    assert migrated.schedule["timezone"] == "local"
+    assert migrated.schedule["timezone"] == "Australia/Brisbane"
     assert "stub" not in migrated.schedule["note"]

@@ -34,10 +34,13 @@ from jims_mower.field_scorecard import (
 from jims_mower.mission_flow import MissionPhase, MissionPolicy
 from jims_mower.perception.detect import gym_red_bias_signal, paint_kind_blob
 from jims_mower.planning.controller import TerrainPolicy, observed_hand_signal
+from jims_mower.overlays import apply_overlay
 from jims_mower.profile import SurveyOrigin, YardProfile, load_yard_profile, write_yard_profile
+from jims_mower.radio import RadioSim
 from jims_mower.safety import trimmer_interlock
 from jims_mower.scenarios import load_source
 from jims_mower.schedule import FrozenClock, ScheduleEngine, ScheduleGates, ScheduleSpec
+from jims_mower.yard_profile import YardProfileError
 from jims_mower.types import Obstacle
 
 DRYRUN_SCHEMA = "jims_mower.field_dryrun.v1"
@@ -257,18 +260,107 @@ def check_hand_signal() -> dict[str, Any]:
     )
 
 
+def check_pair_before_start() -> dict[str, Any]:
+    """UX-5: Start is refused until paired; radio-lost holds safe (not ESTOP)."""
+    from jims_mower.app.backend import MemoryBackend
+    from jims_mower.yard_profile import default_yard_profile
+
+    backend = MemoryBackend(default_yard_profile(), require_pair=True)
+    blocked = False
+    try:
+        backend.command("start")
+    except YardProfileError as exc:
+        blocked = "not paired" in str(exc).lower()
+    backend.command("pair", pin="2468")
+    started = backend.command("start")["state"]["mission"] == "mowing"
+    backend.pairing.lose(reason="radio_lost")
+    backend._hold_safe_unlocked("radio_lost")
+    held = backend.status()["state"]["mission"] == "idle"
+    refused_again = False
+    try:
+        backend.command("start")
+    except YardProfileError:
+        refused_again = True
+    ok = blocked and started and held and refused_again and backend.pairing.state == "lost"
+    return _row(
+        "pair_before_start",
+        "PASS" if ok else "FAIL",
+        "unpaired Start refused; pair then Start; radio-lost holds safe (not ESTOP)"
+        if ok
+        else "pair-before-start gate failed",
+        require_pair=True,
+        on_lost="hold_safe",
+    )
+
+
+def check_radio_far_fence() -> dict[str, Any]:
+    sim = RadioSim(enabled=True)
+    sim.lose_link("wifi")
+    sim.lose_link("bt")
+    pause = sim.route_command("pause", paired=True)
+    start = sim.route_command("start", paired=True)
+    unpaired = sim.route_command("start", paired=False)
+    status = sim.owner_status()
+    ok = (
+        pause.ok
+        and pause.channel == "lora"
+        and start.ok
+        and start.channel == "lora"
+        and not unpaired.ok
+        and status.get("rf_claim") is None
+    )
+    return _row(
+        "radio_far_fence",
+        "PASS" if ok else "FAIL",
+        "BT lost → LoRa sim still accepts Pause/Start-if-paired; rf_claim null"
+        if ok
+        else "LoRa far-fence sim fallback failed",
+        rf_claim=None,
+        transport=status.get("transport"),
+    )
+
+
+def check_brisbane_timezone() -> dict[str, Any]:
+    spec = ScheduleSpec(
+        enabled=True,
+        days=("mon",),
+        start_local="09:00",
+        duration_min=60,
+        timezone="Australia/Brisbane",
+        min_soc=0.25,
+        skip_rain=True,
+        arm_window_min=15,
+    )
+    # Sunday 23:00 UTC = Monday 09:00 Australia/Brisbane (UTC+10, no DST).
+    brisbane_ok = ScheduleEngine(
+        spec, clock=FrozenClock(datetime(2026, 9, 13, 23, 0, tzinfo=timezone.utc))
+    ).evaluate(ScheduleGates(soc=0.9))
+    utc_0900 = ScheduleEngine(
+        spec, clock=FrozenClock(datetime(2026, 9, 14, 9, 0, tzinfo=timezone.utc))
+    ).evaluate(ScheduleGates(soc=0.9))
+    ok = brisbane_ok.action == "arm" and utc_0900.action != "arm"
+    return _row(
+        "brisbane_timezone",
+        "PASS" if ok else "FAIL",
+        "09:00 Australia/Brisbane ≠ 09:00 UTC"
+        if ok
+        else "schedule timezone did not distinguish Brisbane from UTC",
+        timezone="Australia/Brisbane",
+    )
+
+
 def check_schedule_skips() -> tuple[dict[str, Any], dict[str, Any]]:
     spec = ScheduleSpec(
         enabled=True,
         days=("mon",),
         start_local="09:00",
         duration_min=60,
-        timezone="UTC",
+        timezone="Australia/Brisbane",
         min_soc=0.25,
         skip_rain=True,
         arm_window_min=15,
     )
-    instant = datetime(2026, 9, 14, 9, 0, tzinfo=timezone.utc)
+    instant = datetime(2026, 9, 13, 23, 0, tzinfo=timezone.utc)
     rain = ScheduleEngine(spec, clock=FrozenClock(instant)).evaluate(ScheduleGates(soc=0.9, rain=True))
     soc = ScheduleEngine(spec, clock=FrozenClock(instant)).evaluate(ScheduleGates(soc=0.10, rain=False))
     rain_ok = rain.action == "skip" and rain.reason == "rain"
@@ -366,6 +458,7 @@ def _run_mission(
     cfg.perception.interlock_source = "detections"
     cfg.curriculum.hand_signals = True
     cfg.curriculum.hand_signal_classifier = False
+    apply_overlay(cfg, "owner_live")
     cfg.max_steps = max(int(cfg.max_steps), int(steps) + 2)
     env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
     profile = _taught_profile(env, name=f"gym_dryrun_{scenario_name}")
@@ -499,6 +592,9 @@ def run_field_dryrun(
     living = check_living_interlock()
     hand = check_hand_signal()
     rain_row, soc_row = check_schedule_skips()
+    pair_row = check_pair_before_start()
+    radio_row = check_radio_far_fence()
+    tz_row = check_brisbane_timezone()
     mission = _run_mission(
         scenario_name=scenario,
         steps=steps,
@@ -542,6 +638,9 @@ def run_field_dryrun(
         "soc_skip": soc_row["status"],
         "day2_resume": day2["status"],
         "hand_signal": hand["status"],
+        "pair_before_start": pair_row["status"],
+        "radio_far_fence": radio_row["status"],
+        "brisbane_timezone": tz_row["status"],
     }
     card["score"] = {
         "tips": int(mission["tips"]),
@@ -565,6 +664,9 @@ def run_field_dryrun(
         "preflight": preflight["rows"],
         "living_interlock": living,
         "hand_signal": hand,
+        "pair_before_start": pair_row,
+        "radio_far_fence": radio_row,
+        "brisbane_timezone": tz_row,
         "rain_skip": rain_row,
         "soc_skip": soc_row,
         "tip_ramp_recovery": mission["tip_row"],
@@ -577,7 +679,7 @@ def run_field_dryrun(
     rows = (
         list(preflight["rows"])
         + list(mission["mission_rows"])
-        + [living, hand, mission["tip_row"], rain_row, soc_row, day2, mission["estop_row"]]
+        + [living, hand, pair_row, radio_row, tz_row, mission["tip_row"], rain_row, soc_row, day2, mission["estop_row"]]
     )
     fail = any(r.get("status") == "FAIL" for r in rows)
     return {

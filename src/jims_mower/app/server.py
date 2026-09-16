@@ -216,7 +216,10 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                     raise YardProfileError("command body must be a mapping")
                 cmd = body.get("cmd") or body.get("command")
                 reason = str(body.get("reason") or "")
-                self._send_json(200, backend.command(str(cmd or ""), reason=reason))
+                extra = {}
+                if body.get("pin") is not None or body.get("code") is not None:
+                    extra["pin"] = body.get("pin") if body.get("pin") is not None else body.get("code")
+                self._send_json(200, backend.command(str(cmd or ""), reason=reason, **extra))
             except YardProfileError as exc:
                 self._send_json(400, {"error": str(exc)})
             except Exception as exc:  # pragma: no cover

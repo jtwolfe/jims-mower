@@ -150,8 +150,8 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| SCH-1 | Arm / stop from `YardProfile.schedule` | **partial** (this PR) | Engine + Health toggle + SOC / rain / fault gates. Not a cloud calendar. Not a rain *service*. | Enable Mon 09:00 UTC on FrozenClock → mission `mowing`; SOC 0.10 → `soc_low`; rain flag → skip; duration expires → idle. See [`SCHEDULE.md`](SCHEDULE.md). | Owner app (done) |
-| SCH-2 | Timezone | **partial** | `local` or IANA. Orin must set a real zone (e.g. `Australia/Sydney`). | Job starts at 09:00 in that zone, not UTC-by-accident. | SCH-1 |
+| SCH-1 | Arm / stop from `YardProfile.schedule` | **partial** (this PR) | Engine + Health toggle + SOC / rain / fault gates. Not a cloud calendar. Not a rain *service*. | Enable Mon 09:00 in `Australia/Brisbane` on FrozenClock → mission `mowing`; SOC 0.10 → `soc_low`; rain flag → skip; duration expires → idle. See [`SCHEDULE.md`](SCHEDULE.md). | Owner app (done) |
+| SCH-2 | Timezone | **partial** (this PR) | Default IANA `Australia/Brisbane` (user locale). `local` still accepted. Orin: `timedatectl set-timezone Australia/Brisbane` / `TZ`. | FrozenClock: 09:00 Brisbane ≠ 09:00 UTC (`tests/test_pairing.py`). | SCH-1 |
 | SCH-3 | Rain skip | **partial** | Uses env `weather.wet` or `status.weather.rain`. No BOM/radar. | Set rain flag; window is consumed as skip; next week can still run. | SCH-1 |
 | SCH-4 | SOC gate | **partial** | Compares `battery.soc` to `schedule.min_soc` (default 0.25). OrinBudget / `/status` read `runtime.battery.capacity_wh` (50 Wh gym stub unless `measured: true`). Remaining Wh = soc × capacity. **No acre-runtime claim.** | Real fuel gauge below min_soc skips. | RT-5 pack telemetry |
 | SCH-5 | Notifications | **partial** (in-app this PR) | `NotificationLog` + `/notifications`. Skip/finish reasons on the LAN list. Webhook is a **stub** (`delivered: false`). No SMS / vendor push. | Owner sees a skip reason on `/notifications` without a second SSE tab. Field SMS still missing. | SCH-1, UX-2 |
@@ -185,8 +185,8 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | UX-1 | Schedule UI | **partial** (this PR) | Health toggle + next run + skip reason. Days/time still JSON. | Toggle On, FrozenClock in window → Start without Map. | SCH-1 |
 | UX-2 | Notifications | **partial** (in-app this PR) | `/notifications` list + webhook stub. Not SMS. Not a vendor push. | See SCH-5. | SCH-5 |
 | UX-3 | Multi-yard | **partial** (this PR) | `YardStore` + `/yards` + `POST /yards/select`. Switching replaces keep-in/home; no fence bleed. Sequence CLI remains a sim farm tool. | Switch yards on the phone; home/geofence/schedule swap; no fence bleed. Gym: `tests/test_session_ops.py`. | MAP-4 |
-| UX-4 | Radio | **stub** | Wi-Fi → BT → LoRa **sim**. No RF. | Field: BT pair required, LoRa command at the far fence — measure or don't claim range. | hardware radios |
-| UX-5 | Pairing | **stub** | Phone “Pair Bluetooth” sets a bool. | Real BT pairing before first Start. | UX-4 |
+| UX-4 | Radio | **partial** (sim this PR) | Wi-Fi → BT → LoRa **sim transports**. Owner status shows active transport + `rf_claim: null`. Never a metre range / RSSI. When BT is `lost`, LoRa still accepts Pause / ESTOP / Start-if-paired (far-fence sim). No BlueZ / no LoRa hardware. | Gym: transport fallback without metres (`tests/test_pairing.py`, `tests/test_radio.py`). Field: measure or don't claim range. | hardware radios |
+| UX-5 | Pairing | **partial** (sim this PR) | State machine: unpaired → pairing → paired / failed / lost. Live owner / field-dryrun overlay `owner.require_pair: true`. Start refused until `paired`. Explicit pair request + optional gym PIN `2468`. Persist on YardProfile. Unpair / radio-lost **hold safe** (not ESTOP). No BlueZ. | Pair → Start. Unpaired Start is a hard no. Lost radio holds. Gym: `tests/test_pairing.py`. | UX-4 |
 
 ### 8. Sim-to-real
 

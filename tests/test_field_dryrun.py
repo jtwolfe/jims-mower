@@ -90,6 +90,9 @@ def test_field_dryrun_writes_valid_scorecard(tmp_path: Path) -> None:
     assert card.checks["rain_skip"] == "PASS"
     assert card.checks["soc_skip"] == "PASS"
     assert card.checks["day2_resume"] == "PASS"
+    assert card.checks["pair_before_start"] == "PASS"
+    assert card.checks["radio_far_fence"] == "PASS"
+    assert card.checks["brisbane_timezone"] == "PASS"
     assert card.mission["teach_boundary"] == "PASS"
     assert card.mission["surveyed_origin"] == "PASS"
     raw = yaml.safe_load(dest.read_text(encoding="utf-8"))

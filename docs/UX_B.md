@@ -88,4 +88,5 @@ drawn drop fails that bearer. `radio.on_loss`:
 ## Honesty
 
 Bandwidth / range / drop figures are **class-scale stubs** for failover
-tests. They are not a link budget. No mAP / FPS.
+tests. They are not a link budget. Owner status never exposes them —
+`rf_claim` is always null. No mAP / FPS.

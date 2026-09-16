@@ -27,7 +27,7 @@ order §1.
 | `days` | `[]` | `mon`…`sun` |
 | `start_local` | `09:00` | 24h `HH:MM` in `timezone` |
 | `duration_min` | `60` | Auto-stop only for jobs **this engine armed** |
-| `timezone` | `local` | `local` or IANA (`Australia/Sydney`, `UTC`) |
+| `timezone` | `Australia/Brisbane` | IANA name (user locale). `local` still accepted. 09:00 means 09:00 in this zone, not UTC-by-accident. |
 | `min_soc` | `0.25` | Skip if `battery.soc` is below this. SOC is a fraction of `runtime.battery.capacity_wh` (50 Wh gym stub unless `measured: true` — [`PACK_THERMAL.md`](PACK_THERMAL.md)). Not an acre-runtime claim. |
 | `skip_rain` | `true` | Skip when the rain / wet flag is set |
 | `arm_window_min` | `15` | Minutes after start still eligible |
@@ -38,6 +38,9 @@ order §1.
 - **Wall clock** in `jims-mower-app` / `--live` (and a 1 s serve ticker).
 - **Frozen / sim clock** via `backend.set_clock(FrozenClock(...))` for
   tests. Advance the same object to expire `duration_min`.
+  `2026-09-13 23:00 UTC` is Monday `09:00` in `Australia/Brisbane`
+  (UTC+10, no DST). `2026-09-14 09:00 UTC` is `19:00` Brisbane — not
+  the 09:00 window.
 
 `GET /status` and `tick()` both poll. Each weekly window is consumed at
 most once (arm **or** skip). `already_running` does **not** consume, so

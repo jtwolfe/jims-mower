@@ -58,8 +58,30 @@ software crash, `systemctl stop`, or owner app Start **cannot** replace
 the paddle. See [`ESTOP.md`](ESTOP.md) and
 [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §10.
 
+## Clock / timezone (SCH-2)
+
+Set the Orin zone before the first scheduled job. Default owner locale
+is `Australia/Brisbane` (09:00 means 09:00 there, not UTC).
+
+```bash
+sudo timedatectl set-timezone Australia/Brisbane
+# or export TZ=Australia/Brisbane for a one-off process
+timedatectl status
+```
+
+`YardProfile.schedule.timezone` is that IANA string. `local` still
+resolves to the host zone if you leave it.
+
+## Pair before Start (UX-5)
+
+The live owner app refuses Start until Bluetooth is **paired**
+(`owner.require_pair: true`). Pairing is still simulated (no BlueZ).
+Unpair / radio-lost **holds the job safe** — it does not ESTOP.
+Re-pair before Start. See [`UX_C.md`](UX_C.md).
+
 ## Honesty
 
 - No claimed onboard FPS / mAP.
 - `GstNvmmAdapter` is not physical CSI until you wire JetPack.
-- OTA A/B and BT/LoRa stay stubs. Do not claim RF range.
+- OTA A/B and BT/LoRa stay stubs. Radio is sim transports + `rf_claim: null`.
+  Do not claim RF range.

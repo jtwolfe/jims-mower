@@ -47,6 +47,9 @@ ENV_OVERLAY_KEYS = frozenset(
         "mission",
         "domain_randomization",
         "runtime",
+        "owner",
+        "radio",
+        "faults",
     }
 )
 

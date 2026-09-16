@@ -15,12 +15,14 @@ from typing import Any, Callable, Optional, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from jims_mower.constants import (
+    DEFAULT_SCHEDULE_TIMEZONE,
     SCHEDULE_DAYS,
     SCHEDULE_SCHEMA,
     SCHEDULE_SKIP_REASONS,
 )
 
 DEFAULT_NOTE = "weekly window — engine arms start when due"
+DEFAULT_TIMEZONE = DEFAULT_SCHEDULE_TIMEZONE
 _OLD_STUB_NOTE = "stub — not a scheduler"
 _DAY_INDEX = {name: i for i, name in enumerate(SCHEDULE_DAYS)}
 
@@ -60,14 +62,17 @@ class FrozenClock:
 
 
 def resolve_timezone(name: str) -> tzinfo:
-    key = str(name or "local").strip() or "local"
+    key = str(name or DEFAULT_TIMEZONE).strip() or DEFAULT_TIMEZONE
     if key.lower() == "local":
         found = datetime.now().astimezone().tzinfo
         return found if found is not None else timezone.utc
     try:
         return ZoneInfo(key)
     except ZoneInfoNotFoundError as exc:
-        raise ValueError(f"schedule.timezone must be 'local' or an IANA name; got {name!r}") from exc
+        raise ValueError(
+            f"schedule.timezone must be 'local' or an IANA name "
+            f"(default {DEFAULT_TIMEZONE}); got {name!r}"
+        ) from exc
 
 
 def parse_hhmm(raw: str) -> tuple[int, int]:
@@ -84,7 +89,7 @@ class ScheduleSpec:
     days: tuple[str, ...] = ()
     start_local: str = "09:00"
     duration_min: int = 60
-    timezone: str = "local"
+    timezone: str = DEFAULT_TIMEZONE
     min_soc: float = 0.25
     skip_rain: bool = True
     arm_window_min: int = 15
@@ -170,7 +175,7 @@ def spec_from_mapping(raw: Optional[dict[str, Any]]) -> ScheduleSpec:
         days=tuple(str(d).strip().lower()[:3] for d in (raw.get("days") or [])),
         start_local=str(raw.get("start_local") or "09:00"),
         duration_min=int(raw.get("duration_min", 60)),
-        timezone=str(raw.get("timezone") or "local"),
+        timezone=str(raw.get("timezone") or DEFAULT_TIMEZONE),
         min_soc=float(raw.get("min_soc", 0.25)),
         skip_rain=bool(raw.get("skip_rain", True)),
         arm_window_min=int(raw.get("arm_window_min", 15)),

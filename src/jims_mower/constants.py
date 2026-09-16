@@ -175,6 +175,7 @@ LIVE_CONTROL_CMDS = (
     "yard",
     "inject",
     "pair",
+    "unpair",
     "teach",
     "save_yard",
     "load_yard",
@@ -190,7 +191,7 @@ SESSION_BUNDLE_SCHEMA = "jims_mower.session_bundle.v1"
 MESH_SCHEMA = "jims_mower.mesh.v1"
 APP_STATUS_SCHEMA = "jims_mower.app_status.v1"
 COVERAGE_MAP_SCHEMA = "jims_mower.coverage.v1"
-APP_COMMANDS = ("start", "stop", "return", "estop", "teach")
+APP_COMMANDS = ("start", "stop", "return", "estop", "teach", "pair", "unpair")
 APP_MISSIONS = ("idle", "mowing", "returning", "teach", "estop")
 RADIO_LINKS = ("bluetooth", "wifi", "lora")
 SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -260,6 +261,12 @@ FAULT_CODES = (
 MOTOR_KILL_MODES = frozenset({"cmd_ignored", "encoder_stuck", "open_circuit"})
 RADIO_CHANNELS = ("wifi", "bt", "lora")
 RADIO_LOSS_ACTIONS = frozenset({"limp_home", "stop_beacon"})
+# Far-fence sim: when BT is lost, LoRa still accepts these. No metre claim.
+RADIO_FAR_FENCE_CMDS = frozenset({"pause", "estop", "start", "hold", "hw_estop"})
+PAIRING_SCHEMA = "jims_mower.pairing.v1"
+PAIR_STATES = ("unpaired", "pairing", "paired", "failed", "lost")
+GYM_PAIR_PIN = "2468"
+DEFAULT_SCHEDULE_TIMEZONE = "Australia/Brisbane"
 
 KIND_RGB = {
     "person": (220, 80, 80),

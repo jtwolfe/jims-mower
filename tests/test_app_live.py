@@ -79,7 +79,9 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert status["radio_path"]["chips"]
         labels = {c["label"] for c in status["radio_path"]["chips"]}
         assert labels == {"BT teach", "Wi-Fi map", "LoRa sparse"}
-        assert "Yard unknown" in (status["owner_copy"] or "")
+        assert "Pair Bluetooth" in (status["owner_copy"] or "")
+        assert status["radio"]["rf_claim"] is None
+        assert status["require_pair"] is True
 
         code, paired = _json(host, port, "POST", "/command", {"cmd": "pair"})
         assert code == 200
@@ -158,6 +160,9 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "session-card" in js
         assert "cut-pct" in js
         assert "session_summary" in js
+        assert "Pair Bluetooth" in js
+        assert "rf_claim" in js
+        assert "2468" in js
 
         conn = HTTPConnection(host, port, timeout=6.0)
         conn.request("GET", "/viewer")

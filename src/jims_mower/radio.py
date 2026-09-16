@@ -1,8 +1,9 @@
 """Simulated BT / Wi-Fi / LoRa links. No real RF hardware.
 
-Command preference is Wi-Fi → BT → LoRa. Each link has a bandwidth,
-range, and drop probability. Heartbeat loss can limp-home or stop+beacon
-(config). Figures are class-scale stubs, not measured air data.
+Command preference is Wi-Fi → BT → LoRa. Gym heartbeat still uses
+class-scale stub ranges internally — owner status never exposes them.
+``rf_claim`` is always null. When BT is lost, a LoRa sim channel can
+still accept Pause / ESTOP / Start-if-paired (far-fence, no metres).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import numpy as np
 
 from jims_mower.constants import (
     RADIO_CHANNELS,
+    RADIO_FAR_FENCE_CMDS,
     RADIO_LOSS_ACTIONS,
     RADIO_SCHEMA,
 )
@@ -115,6 +117,7 @@ class RadioSim:
         self.lost = False
         self.last_channel: Optional[str] = None
         self.last_delivery: Optional[RadioDelivery] = None
+        self.link_up: dict[str, bool] = {name: True for name in RADIO_CHANNELS}
 
     @classmethod
     def from_config(cls, cfg: Any, *, seed: int = 0) -> "RadioSim":
@@ -138,6 +141,86 @@ class RadioSim:
         self.lost = False
         self.last_channel = None
         self.last_delivery = None
+        self.link_up = {name: True for name in RADIO_CHANNELS}
+
+    def lose_link(self, name: str) -> None:
+        """Mark a sim transport down. No metre range — explicit inject."""
+        key = str(name or "").strip().lower()
+        if key == "bluetooth":
+            key = "bt"
+        if key not in RADIO_CHANNELS:
+            raise ValueError(f"unknown radio transport {name!r}")
+        self.link_up[key] = False
+
+    def restore_link(self, name: str) -> None:
+        key = str(name or "").strip().lower()
+        if key == "bluetooth":
+            key = "bt"
+        if key not in RADIO_CHANNELS:
+            raise ValueError(f"unknown radio transport {name!r}")
+        self.link_up[key] = True
+
+    @property
+    def any_lost(self) -> bool:
+        return any(not up for up in self.link_up.values())
+
+    def route_command(self, cmd: str, *, paired: bool) -> RadioDelivery:
+        """Wi-Fi → BT → LoRa among *up* transports. No distance.
+
+        When only LoRa is up, Pause / ESTOP / Start-if-paired still work
+        (far-fence sim). Start still needs ``paired``.
+        """
+        key = str(cmd or "").strip().lower()
+        if key == "start" and not paired:
+            delivery = RadioDelivery(False, None, [], reason="not_paired")
+            self.last_delivery = delivery
+            return delivery
+        attempts: list[str] = []
+        up = [name for name in RADIO_CHANNELS if self.link_up.get(name, True)]
+        if not up:
+            delivery = RadioDelivery(False, None, list(RADIO_CHANNELS), reason="all_transports_lost")
+            self.last_channel = None
+            self.last_delivery = delivery
+            return delivery
+        for name in RADIO_CHANNELS:
+            attempts.append(name)
+            if not self.link_up.get(name, True):
+                continue
+            if name == "lora" and "wifi" not in up and "bt" not in up:
+                if key not in RADIO_FAR_FENCE_CMDS:
+                    continue
+            delivery = RadioDelivery(True, name, attempts, reason=None)
+            self.last_channel = name
+            self.last_delivery = delivery
+            return delivery
+        delivery = RadioDelivery(False, None, attempts, reason="lora_far_fence_only")
+        self.last_channel = None
+        self.last_delivery = delivery
+        return delivery
+
+    def owner_status(self) -> dict[str, Any]:
+        """Owner-facing radio block. Never a metre range or RSSI claim."""
+        active = self.last_channel
+        if active is None:
+            for name in RADIO_CHANNELS:
+                if self.link_up.get(name, True):
+                    active = name
+                    break
+        return {
+            "schema": RADIO_SCHEMA,
+            "transport": active,
+            "link": {"wifi": "wifi", "bt": "bluetooth", "lora": "lora"}.get(str(active or ""), "none"),
+            "ok": bool(active is not None and self.link_up.get(str(active), False)),
+            "rf_claim": None,
+            "radio_lost": bool(self.lost or not any(self.link_up.values())),
+            "transports": {name: ("up" if self.link_up.get(name, True) else "lost") for name in RADIO_CHANNELS},
+            "far_fence": {
+                "when_bt_lost": "lora accepts pause / estop / start-if-paired",
+                "rf_claim": None,
+            },
+            "simulated": True,
+            "not_rf_hardware": True,
+        }
 
     def send(
         self,
@@ -198,8 +281,9 @@ class RadioSim:
             "radio_channel": self.last_channel,
             "radio_lost": bool(self.lost),
             "radio_on_loss": self.on_loss,
-            "radio_distance_m": float(self.distance_m),
             "radio_since_ok_s": float(self._since_ok_s),
             "radio_delivery": delivery,
+            "rf_claim": None,
+            "transports": {name: ("up" if self.link_up.get(name, True) else "lost") for name in RADIO_CHANNELS},
             "not_rf_hardware": True,
         }

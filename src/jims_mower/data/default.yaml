@@ -212,6 +212,11 @@ runtime:
 faults:
   enabled: false
   inject: []
+# Live owner / field-dryrun overlay sets require_pair: true.
+# Gym unit tests leave the default false so Start still works unpaired.
+owner:
+  require_pair: false
+  pair_pin: "2468"
 radio:
   enabled: false
   distance_m: 10.0

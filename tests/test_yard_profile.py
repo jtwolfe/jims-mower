@@ -35,7 +35,8 @@ def test_default_roundtrip(tmp_path: Path) -> None:
     assert loaded.radio["wifi"]["enabled"] is False
     assert loaded.radio["lora"]["enabled"] is True
     assert loaded.schedule["days"] == ["mon", "wed", "fri"]
-    assert loaded.schedule["timezone"] == "local"
+    assert loaded.schedule["timezone"] == "Australia/Brisbane"
+    assert loaded.pairing["state"] == "unpaired"
     assert loaded.schedule["min_soc"] == pytest.approx(0.25)
     assert loaded.schedule["skip_rain"] is True
     assert "stub" not in loaded.schedule["note"]

@@ -161,3 +161,16 @@ def test_default_links_are_stubs() -> None:
 def test_rejects_bad_on_loss() -> None:
     with pytest.raises(ConfigError):
         load_config({"radio": {"on_loss": "jam_the_spectrum"}})
+
+
+def test_owner_status_never_claims_metres() -> None:
+    sim = RadioSim(enabled=True)
+    sim.lose_link("wifi")
+    delivery = sim.route_command("estop", paired=True)
+    assert delivery.ok is True
+    assert delivery.channel in {"bt", "lora"}
+    status = sim.owner_status()
+    assert status["rf_claim"] is None
+    assert "rssi" not in status
+    assert "radio_distance_m" not in sim.as_info()
+    assert sim.as_info()["rf_claim"] is None

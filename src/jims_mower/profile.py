@@ -18,7 +18,8 @@ from jims_mower.constants import (
     YARD_PROFILE_SCHEMA,
 )
 from jims_mower.geofence import GeofenceSpec
-from jims_mower.schedule import DEFAULT_NOTE, ScheduleSpec, resolve_timezone
+from jims_mower.pairing import PairingError, default_pairing, parse_pairing
+from jims_mower.schedule import DEFAULT_NOTE, DEFAULT_TIMEZONE, ScheduleSpec, resolve_timezone
 from jims_mower.types import Pose
 
 ORIGIN_NOTE = (
@@ -230,6 +231,14 @@ def _parse_radio(raw: Any) -> dict[str, Any]:
     ).as_dict()
 
 
+def _parse_pairing_field(data: dict[str, Any]) -> dict[str, Any]:
+    raw = data.get("pairing") if "pairing" in data else data.get("paired")
+    try:
+        return parse_pairing(raw)
+    except PairingError as exc:
+        raise ProfileError(str(exc)) from exc
+
+
 def _parse_schedule(raw: Any) -> dict[str, Any]:
     if raw is None:
         return ScheduleSpec().as_dict()
@@ -254,7 +263,7 @@ def _parse_schedule(raw: Any) -> dict[str, Any]:
         raise ProfileError("schedule.duration_min must be an integer") from exc
     if duration < 0 or duration > 24 * 60:
         raise ProfileError("schedule.duration_min must be in 0..1440")
-    timezone = str(raw.get("timezone") or "local").strip() or "local"
+    timezone = str(raw.get("timezone") or DEFAULT_TIMEZONE).strip() or DEFAULT_TIMEZONE
     try:
         resolve_timezone(timezone)
     except ValueError as exc:
@@ -587,6 +596,7 @@ class YardProfile:
     inflate_m: float = 0.30
     radio: dict[str, Any] = field(default_factory=lambda: RadioPrefs().as_dict())
     schedule: dict[str, Any] = field(default_factory=lambda: ScheduleStub().as_dict())
+    pairing: dict[str, Any] = field(default_factory=default_pairing)
     description: str = ""
     not_a_benchmark: bool = True
     origin: SurveyOrigin = field(default_factory=SurveyOrigin)
@@ -646,6 +656,7 @@ class YardProfile:
             "inflate_m": float(self.inflate_m),
             "radio": dict(self.radio or RadioPrefs().as_dict()),
             "schedule": dict(self.schedule or ScheduleStub().as_dict()),
+            "pairing": dict(self.pairing or default_pairing()),
             "description": self.description,
             "origin": (self.origin if isinstance(self.origin, SurveyOrigin) else parse_survey_origin(self.origin)).as_dict(),
             "not_a_benchmark": True,
@@ -705,6 +716,7 @@ def parse_yard_profile(data: dict[str, Any]) -> YardProfile:
         inflate_m=float(data.get("inflate_m") or 0.30),
         radio=_parse_radio(data.get("radio")),
         schedule=_parse_schedule(data.get("schedule")),
+        pairing=_parse_pairing_field(data),
         description=str(data.get("description") or ""),
         not_a_benchmark=True,
         origin=parse_survey_origin(data.get("origin")),

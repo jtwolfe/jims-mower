@@ -195,9 +195,9 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 
 | Method | Path | Contract |
 | --- | --- | --- |
-| `GET` | `/status` | `jims_mower.app_status.v1` — `pose`, `battery`, `state` (`mission` + SafeState `machine`), `radio`, `faults` |
+| `GET` | `/status` | `jims_mower.app_status.v1` — `pose`, `battery`, `state` (`mission` + SafeState `machine`), `radio` (`rf_claim: null`), `pairing`, `faults` |
 | `GET` / `PUT` | `/yard` | full [`YardProfile`](src/jims_mower/profile.py) (`jims_mower.yard.v1`) — `schedule` is evaluated by [`ScheduleEngine`](src/jims_mower/schedule.py) |
-| `POST` | `/command` | `{cmd}` ∈ `start` / `stop` / `return` / `estop` / `teach` (live also `save_yard` / `load_yard` / `pair`) |
+| `POST` | `/command` | `{cmd, pin?}` ∈ `start` / `stop` / `return` / `estop` / `teach` / `pair` / `unpair` (live also `save_yard` / `load_yard`) |
 | `GET` | `/map/mesh` | UX-A `mesh_to_payload` + `ux_a_href: /viewer` |
 | `GET` | `/map/coverage` | downsampled cut / uncut / non-grass |
 | `GET` | `/events` | SSE of `/status` |

@@ -115,6 +115,7 @@ def test_teach_save_start_skips_calibrate(tmp_path: Path) -> None:
         assert len(loaded.keep_in) >= 3
         assert loaded.width_m == session.env.cfg.world.width_m
 
+        session.control("pair")
         started = session.control("start")
         assert started["ok"] is True
         assert started["phase"] == "explore"
