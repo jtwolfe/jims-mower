@@ -678,9 +678,9 @@ function setOwnerBar(frame) {
   if (startMow) startMow.hidden = !frame.can_start_mow;
   const reexplore = $("btn-reexplore");
   if (reexplore) reexplore.hidden = !frame.can_reexplore;
+  setPhaseBar(idle ? "" : (frame.phase || ""));
   const chip = $("phase-chip");
   if (chip) chip.textContent = idle ? "IDLE" : `LIVE ${frame.phase_label || frame.phase || "—"}`;
-  setPhaseBar(idle ? "" : (frame.phase || ""));
   const summary = $("session-summary");
   if (summary && frame.session_summary && (frame.done || frame.phase === "complete" || frame.phase === "return_home")) {
     const s = frame.session_summary;
@@ -767,8 +767,6 @@ function applyLiveFrame(frame) {
         `planned ${(100 * (frame.planned_pct || 0)).toFixed(1)}%  cut ${(100 * (frame.cut_pct || 0)).toFixed(1)}%\n` +
         `skips ${frame.skips || 0}`;
     }
-    const chip = $("phase-chip");
-    if (chip) chip.textContent = idle ? "IDLE" : `LIVE ${frame.phase_label || frame.phase || "—"}`;
     const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
     if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
     if (phase === "mow" && $("tog-coverage")) $("tog-coverage").checked = true;
