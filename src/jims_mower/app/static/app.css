@@ -70,6 +70,10 @@ body {
 #robot-pill.pairing { background: #2a2618; color: #ecd48a; }
 #robot-pill.live { background: #1d2a1d; color: #b7f0c0; }
 #robot-pill.fault { background: #3a1414; color: #ffd0d0; }
+#robot-pill.mapping { background: #152036; color: #c5d8ff; }
+#robot-pill.mowing { background: #1d2a1d; color: #b7f0c0; }
+#robot-pill.teach { background: #2a2618; color: #ecd48a; }
+#robot-pill.done { background: #1f6b32; color: #d8f5de; }
 
 .radio-chips {
   display: flex;

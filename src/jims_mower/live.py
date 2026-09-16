@@ -45,7 +45,7 @@ from jims_mower.mission_flow import (
     scale_mission_budget,
     session_summary,
 )
-from jims_mower.path_overlay import build_path_overlay
+from jims_mower.path_overlay import build_path_overlay, mission_from_phase
 from jims_mower.planning.observed import fog_rgba
 from jims_mower.profile import (
     YardProfile,
@@ -1483,6 +1483,8 @@ class LiveSession:
                 "require_pair": bool(self.require_pair),
                 "path_overlay": idle_overlay,
                 "mode_banner": idle_overlay["mode"],
+                "mission": mission_from_phase("idle", self.job_state),
+                "waypoint_index": 0,
                 "done": False,
                 "not_a_benchmark": True,
             }
@@ -1597,6 +1599,8 @@ class LiveSession:
             "n_observed": n_obs,
             "mesh_seq": self._mesh_seq,
             "n_waypoints": int(status["n_waypoints"]),
+            "waypoint_index": int(status.get("waypoint_index") or 0),
+            "mission": mission_from_phase(phase, self.job_state),
             "frontiers": frontiers,
             "explore": explore,
             "plan": plan,

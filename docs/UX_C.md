@@ -86,11 +86,13 @@ JSON in / JSON out. Same origin as the static shell.
 
 `--live` `/status` also carries `backend: live`, `robot`
 (idle / pairing / live / fault), `owner_copy`, `radio_path` chips,
-map/cut %, `session_summary`, fog / observed / coverage URLs, and a
-`path_overlay` (`trail` / `plan` / `frontiers` / `pose` / `phase`) plus
-`mode_banner` so the phone can tell **Mapping** from **Mowing** without
-the 3D viewer. Overlay arrays are downsampled for SSE. No mAP / RF
-range claimed.
+map/cut/planned %, `session_summary`, fog / observed / coverage URLs, and a
+`path_overlay` (`trail` / `plan` / `frontiers` / `pose` / `target` /
+`phase`) plus `mode_banner` so the phone can tell **Mapping** from
+**Mowing** without the 3D viewer. `state.mission` follows **phase**
+(explore / review / teach — never `running` → mowing). Overlay arrays
+are downsampled for SSE. Keep-out holes draw red on the phone fence.
+No mAP / RF range claimed.
 
 `POST /command` `start` after ESTOP is the operator clear. On `--live`
 it forwards to `LiveSession.control` (`start` / `pause` / `estop` /

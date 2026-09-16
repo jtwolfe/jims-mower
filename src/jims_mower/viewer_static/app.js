@@ -23,6 +23,7 @@ const state = {
   overlays: {},
   fenceGroup: null,
   poseMarker: null,
+  targetMarker: null,
   planLine: null,
   exploreLine: null,
   frontierGroup: null,
@@ -39,6 +40,7 @@ const state = {
   observedTerrain: null,
   lastMeshSeq: -1,
   lastDefaultPhase: null,
+  hasTarget: false,
 };
 
 const renderer = new THREE.WebGLRenderer({ canvas: $("view"), antialias: true });
@@ -242,6 +244,7 @@ function setOverlayVis() {
     state.frontierGroup.visible = $("tog-explore") ? $("tog-explore").checked : true;
   }
   if (state.poseMarker) state.poseMarker.visible = $("tog-pose").checked;
+  if (state.targetMarker) state.targetMarker.visible = $("tog-pose").checked && !!state.hasTarget;
   if (state.fenceGroup) state.fenceGroup.visible = $("tog-fence").checked;
   if (state.trailLine) state.trailLine.visible = $("tog-trail").checked;
 }
@@ -406,6 +409,30 @@ function makePoseMarker() {
   g.add(body);
   scene.add(g);
   return g;
+}
+
+function makeTargetMarker() {
+  const mesh = new THREE.Mesh(
+    new THREE.RingGeometry(0.12, 0.2, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffee88, side: THREE.DoubleSide })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+
+function placeTargetMarker(target) {
+  if (!state.targetMarker) state.targetMarker = makeTargetMarker();
+  const x = target == null ? null : (Array.isArray(target) ? target[0] : target.x);
+  const y = target == null ? null : (Array.isArray(target) ? target[1] : target.y);
+  state.hasTarget = x != null && y != null;
+  if (!state.hasTarget) {
+    state.targetMarker.visible = false;
+    return;
+  }
+  state.targetMarker.position.copy(worldToScene(x, y, 0.14));
+  state.targetMarker.visible = $("tog-pose") ? $("tog-pose").checked : true;
 }
 
 function pointerFromEvent(ev) {
@@ -844,6 +871,7 @@ function applyLiveFrame(frame) {
     replaceLine("trailLine", overlay.trail, 0xaa88ff);
     if (state.trailLine) state.trailLine.visible = $("tog-trail") ? $("tog-trail").checked : true;
   }
+  placeTargetMarker(overlay.target);
   if (frame.mesh_seq != null && frame.mesh_seq !== state.lastMeshSeq && frame.observed_mesh_url) {
     fetch(frame.observed_mesh_url)
       .then((r) => r.json())
@@ -1019,6 +1047,7 @@ async function boot() {
   }
   rebuildFence();
   state.poseMarker = makePoseMarker();
+  state.targetMarker = makeTargetMarker();
 
   const cams = manifest.cameras || [];
   const select = $("cam-select");

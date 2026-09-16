@@ -50,6 +50,15 @@
     const pill = $("#robot-pill");
     if (!pill) return;
     const robot = (status && status.robot) || ((status && status.state && status.state.mission) || "idle");
+    const live = !!(status && (status.live || status.backend === "live"));
+    const mode = (status && status.mode_banner) || {};
+    const kind = mode.kind || "";
+    if (live && robot === "live" && kind && kind !== "idle") {
+      const short = { mapping: "mapping", mowing: "mowing", teach: "teach", done: "done" }[kind] || kind;
+      pill.textContent = short;
+      pill.className = ["mapping", "mowing", "teach", "done"].includes(kind) ? kind : "live";
+      return;
+    }
     pill.textContent = robot;
     pill.className = ["idle", "pairing", "live", "fault"].includes(robot) ? robot : "idle";
   }
@@ -340,8 +349,34 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     safe: { label: "Hold — safe", tone: "idle", kind: "idle" },
   };
 
+  function asXYList(raw) {
+    return (raw || []).map((p) => (Array.isArray(p) ? p : [p.x, p.y])).filter((p) => p[0] != null && p[1] != null);
+  }
+
   function overlayFrom(st, live) {
-    return (live && live.path_overlay) || (st && st.path_overlay) || {};
+    const built = (live && live.path_overlay) || (st && st.path_overlay) || {};
+    const livePlan = asXYList((live && live.plan) || (st && st.plan));
+    const liveExplore = asXYList((live && live.explore) || (st && st.explore));
+    const liveFrontiers = asXYList((live && live.frontiers) || (st && st.frontiers));
+    const idx = built.waypoint_index != null ? built.waypoint_index : (live && live.waypoint_index != null ? live.waypoint_index : (st && st.waypoint_index));
+    const plan = (built.plan && built.plan.length ? built.plan : livePlan) || [];
+    const explore = (built.explore && built.explore.length ? built.explore : liveExplore) || [];
+    const active = plan.length ? plan : explore;
+    let target = built.target;
+    if (!target && active.length && idx != null) {
+      const i = Math.max(0, Math.min(active.length - 1, Number(idx)));
+      target = active[i];
+    }
+    return Object.assign({}, built, {
+      trail: built.trail || [],
+      plan,
+      explore,
+      frontiers: (built.frontiers && built.frontiers.length ? built.frontiers : liveFrontiers) || [],
+      pose: built.pose || (live && live.pose) || (st && st.pose),
+      target,
+      waypoint_index: idx,
+      path_remaining: built.path_remaining != null ? built.path_remaining : (live && live.path_remaining != null ? live.path_remaining : st && st.path_remaining),
+    });
   }
 
   function modeFrom(st, live) {
@@ -369,6 +404,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       w: Number(yard.width_m || live.width_m || st.width_m || 16),
       h: Number(yard.height_m || live.height_m || st.height_m || 12),
       keep: (live && live.keep_in) || st.keep_in || yard.keep_in || [],
+      keepOut: (live && live.keep_out) || st.keep_out || yard.keep_out || [],
     };
   }
 
@@ -380,6 +416,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       width: box.w,
       height: box.h,
       keepIn: box.keep,
+      keepOut: box.keepOut,
       overlay: overlayFrom(st, live),
       pose: (live && live.pose) || (st && st.pose),
     });
@@ -405,10 +442,16 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const mapPct = Number(st.map_pct != null ? st.map_pct : 100 * (live.map_pct || 0));
     const cutPct = Number(st.cut_pct != null ? st.cut_pct : 100 * (live.cut_pct || 0));
     const remaining = overlay.path_remaining != null ? overlay.path_remaining : live.path_remaining;
+    const planned = Number(st.planned_pct != null ? st.planned_pct : 100 * (live.planned_pct || 0));
     const cutLabel = mapping ? "Cut (idle)" : "Cut";
-    const pathLabel = remaining != null && remaining !== ""
-      ? `${Number(remaining)} left`
-      : "—";
+    const idx = overlay.waypoint_index;
+    let pathLabel = "—";
+    if (remaining != null && remaining !== "") pathLabel = `${Number(remaining)} left`;
+    if (idx != null && Number(overlay.n_waypoints || live.n_waypoints || 0) > 0) {
+      const n = Number(overlay.n_waypoints || live.n_waypoints || 0);
+      pathLabel = `${Number(idx) + 1}/${n}`;
+    }
+    if (mowing && planned > 0) pathLabel = `${pathLabel} · ${planned.toFixed(0)}%`;
     return `<div class="row progress-row" id="progress-row" data-kind="${kind}">
       <div class="chip ${mapping ? "emphasis" : "secondary"}" id="map-chip"><span class="chip-kicker">Map</span><b id="map-pct">${mapPct.toFixed(1)}%</b></div>
       <div class="chip ${mowing ? "emphasis" : "muted"}" id="cut-chip"><span class="chip-kicker" id="cut-kicker">${cutLabel}</span><b id="cut-pct">${cutPct.toFixed(1)}%</b></div>
@@ -696,10 +739,17 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       state.status.needs_reteach = frame.needs_reteach;
       state.status.path_overlay = frame.path_overlay;
       state.status.mode_banner = frame.mode_banner;
+      state.status.planned_pct = 100 * Number(frame.planned_pct || 0);
+      state.status.waypoint_index = frame.waypoint_index;
+      state.status.coverage_url = frame.coverage_url || state.status.coverage_url;
+      state.status.frontiers = frame.frontiers;
+      state.status.explore = frame.explore;
+      state.status.plan = frame.plan;
       if (frame.session_summary) state.status.session_summary = frame.session_summary;
       if (state.status.state) {
         state.status.state.phase = frame.phase;
         state.status.state.job_state = frame.job_state;
+        state.status.state.mission = frame.mission || (frame.path_overlay && frame.path_overlay.mission) || state.status.state.mission;
       }
     }
     if (route() === "map" && (phaseChanged || buttonsChanged || (frame.done && !$("#session-card")))) {
@@ -742,8 +792,17 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const cutEl = $("#cut-pct");
     if (cutEl && frame.cut_pct != null) cutEl.textContent = `${(100 * Number(frame.cut_pct)).toFixed(1)}%`;
     const pathEl = $("#path-remaining");
-    const remaining = frame.path_overlay && frame.path_overlay.path_remaining;
-    if (pathEl && remaining != null) pathEl.textContent = `${Number(remaining)} left`;
+    if (pathEl) {
+      const overlay = overlayFrom(state.status || {}, frame);
+      const remaining = overlay.path_remaining;
+      const idx = overlay.waypoint_index;
+      const n = Number(overlay.n_waypoints || frame.n_waypoints || 0);
+      const planned = Number(state.status && state.status.planned_pct != null ? state.status.planned_pct : 100 * (frame.planned_pct || 0));
+      let pathLabel = remaining != null ? `${Number(remaining)} left` : "—";
+      if (idx != null && n > 0) pathLabel = `${Number(idx) + 1}/${n}`;
+      if (kind === "mowing" && planned > 0) pathLabel = `${pathLabel} · ${planned.toFixed(0)}%`;
+      pathEl.textContent = pathLabel;
+    }
     const fog = $("#fog-img");
     if (fog && frame.fog_url) fog.src = frame.fog_url;
     const obs = $("#obs-img");

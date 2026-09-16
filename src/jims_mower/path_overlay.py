@@ -48,6 +48,8 @@ OVERLAY_COLORS = {
     "explore": "#f0a030",
     "frontier": "#42c4dc",
     "fence": "#ffcc33",
+    "keepout": "#c82828",
+    "target": "#ffee88",
     "pose": "#f3f6f1",
 }
 
@@ -161,6 +163,40 @@ def progress_kind_for(phase: str, job_state: str = "running") -> str:
     return "idle"
 
 
+def mission_from_phase(phase: str, job_state: str = "running") -> str:
+    """Owner ``state.mission`` from phase — never ``running`` → mowing.
+
+    Pause / hold / idle stay ``idle`` so schedule can re-arm. ESTOP stays
+    ``estop``. A live explore / calibrate / review job is not ``mowing``.
+    """
+    state = str(job_state or "").strip().lower()
+    if state == "estop":
+        return "estop"
+    key = normalize_phase(phase, job_state)
+    if state in {"idle", "paused", "hold"} and key != "teach":
+        return "idle"
+    return {
+        "teach": "teach",
+        "calibrate_boundary": "teach",
+        "explore": "explore",
+        "review": "review",
+        "mow": "mowing",
+        "return_home": "returning",
+        "complete": "idle",
+        "safe": "idle",
+        "idle": "idle",
+        "fault": "idle",
+    }.get(key, "idle")
+
+
+def target_from_waypoints(points: Optional[Iterable[Any]], index: int) -> Optional[list[float]]:
+    cleaned = [xy for xy in (_as_xy(raw) for raw in (points or [])) if xy is not None]
+    if not cleaned:
+        return None
+    i = min(max(0, int(index)), len(cleaned) - 1)
+    return cleaned[i]
+
+
 def build_path_overlay(
     *,
     phase: str,
@@ -201,6 +237,8 @@ def build_path_overlay(
     remaining = max(0, int(n_waypoints) - int(waypoint_index))
     if int(n_waypoints) <= 0:
         remaining = 0
+    active = list(plan or []) if show_plan else list(explore or [])
+    target = target_from_waypoints(active, waypoint_index)
 
     return {
         "trail": trail_xy,
@@ -208,10 +246,12 @@ def build_path_overlay(
         "explore": explore_xy,
         "frontiers": frontier_xy,
         "pose": pose_row,
+        "target": target,
         "phase": key,
         "job_state": str(job_state or "idle"),
         "mode": mode,
         "progress_kind": progress_kind_for(key, job_state),
+        "mission": mission_from_phase(key, job_state),
         "path_remaining": remaining,
         "n_waypoints": int(n_waypoints),
         "waypoint_index": int(waypoint_index),

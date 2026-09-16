@@ -23,6 +23,7 @@ from jims_mower.live import (
     LiveSession,
     robot_status_for,
 )
+from jims_mower.path_overlay import mission_from_phase
 from jims_mower.pack import GYM_STUB_CAPACITY_WH, battery_status_block
 from jims_mower.schedule import (
     Clock,
@@ -157,19 +158,7 @@ class LiveBackend:
         faults = list(snap.get("faults") or [])
         faults = _ux_b_faults(info, faults)
         job_state = str(snap.get("job_state") or "idle")
-        mission = {
-            "idle": "idle",
-            "running": "mowing",
-            "paused": "idle",
-            "hold": "idle",
-            "estop": "estop",
-        }.get(job_state, job_state)
-        if snap.get("phase") == "return_home":
-            mission = "returning"
-        if snap.get("can_start_mow"):
-            mission = "review"
-        if job_state == "teach" or snap.get("phase") == "teach":
-            mission = "teach"
+        mission = mission_from_phase(str(snap.get("phase") or "idle"), job_state)
         radio = _overlay_radio_sim(
             _radio_status(self.yard.radio, pairing=self.session.pairing),
             _radio_sim_from_info(info),
@@ -205,19 +194,7 @@ class LiveBackend:
         )
         snap = self.session.snapshot()
         job_state = str(snap.get("job_state") or job_state)
-        mission = {
-            "idle": "idle",
-            "running": "mowing",
-            "paused": "idle",
-            "hold": "idle",
-            "estop": "estop",
-        }.get(job_state, job_state)
-        if snap.get("phase") == "return_home":
-            mission = "returning"
-        if snap.get("can_start_mow"):
-            mission = "review"
-        if job_state == "teach" or snap.get("phase") == "teach":
-            mission = "teach"
+        mission = mission_from_phase(str(snap.get("phase") or "idle"), job_state)
         return {
             "schema": APP_STATUS_SCHEMA,
             "backend": "live",
@@ -252,6 +229,15 @@ class LiveBackend:
             "coverage_source": str(snap.get("coverage_source") or "gym_grid"),
             "map_pct": 100.0 * float(snap.get("map_pct") or 0.0),
             "cut_pct": 100.0 * float(snap.get("cut_pct") or 0.0),
+            "planned_pct": 100.0 * float(snap.get("planned_pct") or 0.0),
+            "waypoint_index": int(
+                snap.get("waypoint_index")
+                if snap.get("waypoint_index") is not None
+                else (snap.get("path_overlay") or {}).get("waypoint_index") or 0
+            ),
+            "frontiers": snap.get("frontiers") or (snap.get("path_overlay") or {}).get("frontiers") or [],
+            "explore": snap.get("explore") or (snap.get("path_overlay") or {}).get("explore") or [],
+            "plan": snap.get("plan") or (snap.get("path_overlay") or {}).get("plan") or [],
             "hours_mowed": float(snap.get("duration_s") or 0.0) / 3600.0,
             "yard": str(snap.get("yard") or self.yard.name),
             "owner_copy": snap.get("owner_copy"),

@@ -10,6 +10,7 @@ from jims_mower.path_overlay import (
     TRAIL_MAX_POINTS,
     build_path_overlay,
     downsample_xy,
+    mission_from_phase,
     mode_banner_for,
     progress_kind_for,
     trail_from_poses,
@@ -78,6 +79,17 @@ def test_mode_banner_mapping_vs_mowing() -> None:
     assert mode_banner_for("complete", "idle")["label"] == "Done"
 
 
+def test_mission_from_phase_not_running_equals_mowing() -> None:
+    assert mission_from_phase("explore", "running") == "explore"
+    assert mission_from_phase("calibrate_boundary", "running") == "teach"
+    assert mission_from_phase("review", "running") == "review"
+    assert mission_from_phase("mow", "running") == "mowing"
+    assert mission_from_phase("return_home", "running") == "returning"
+    assert mission_from_phase("explore", "paused") == "idle"
+    assert mission_from_phase("mow", "estop") == "estop"
+    assert mission_from_phase("calibrate_boundary", "idle") == "idle"
+
+
 def test_progress_kind_swaps_map_vs_cut() -> None:
     assert progress_kind_for("explore") == "mapping"
     assert progress_kind_for("calibrate_boundary") == "mapping"
@@ -107,6 +119,8 @@ def test_build_path_overlay_explore_hides_mow_plan() -> None:
     assert overlay["trail"][0] == [0.0, 1.0]
     assert overlay["pose"]["x"] == 3.0
     assert overlay["path_remaining"] == 15
+    assert overlay["target"] == [3.0, 2.0]
+    assert overlay["mission"] == "explore"
     assert overlay["colors"]["trail"] == "#aa88ff"
     assert overlay["colors"]["plan"] == "#2ad4e6"
 
@@ -131,6 +145,9 @@ def test_build_path_overlay_mow_shows_plan_not_frontiers() -> None:
     assert overlay["frontiers"] == []
     assert overlay["trail"][-1] == [2.0, 2.0]
     assert overlay["path_remaining"] == 28
+    assert overlay["target"] == [4.0, 6.0]
+    assert overlay["waypoint_index"] == 12
+    assert overlay["mission"] == "idle"
 
 
 def test_overlay_caps_long_arrays() -> None:

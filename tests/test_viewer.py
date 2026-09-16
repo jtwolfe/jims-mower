@@ -50,6 +50,7 @@ def test_viewer_static_assets_present() -> None:
     assert "/api/live/control" in js
     assert "applyPhaseLayerDefaults" in js
     assert "path_overlay" in js
+    assert "placeTargetMarker" in js
     assert "tog-trail" in html
     assert 'job_state === "idle"' in js
     assert "Yard unknown" in html

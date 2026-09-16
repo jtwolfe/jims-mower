@@ -86,12 +86,15 @@
     const h = Number(o.height || 12);
     const overlay = o.overlay || {};
     const keepIn = o.keepIn || [];
+    const keepOut = o.keepOut || [];
     const colors = overlay.colors || {
       trail: "#aa88ff",
       plan: "#2ad4e6",
       explore: "#f0a030",
       frontier: "#42c4dc",
       fence: "#ffcc33",
+      keepout: "#c82828",
+      target: "#ffee88",
       pose: "#f3f6f1",
     };
     const trail = overlay.trail || [];
@@ -99,9 +102,17 @@
     const explore = overlay.explore || [];
     const frontiers = overlay.frontiers || [];
     const pose = overlay.pose || o.pose || { x: 0, y: 0, theta: 0 };
+    const target = overlay.target || o.target;
     const fence = keepIn.length
-      ? `<polygon class="ov-fence" points="${poly(keepIn)}" fill="none" stroke="${colors.fence || "#ffcc33"}" stroke-width="0.18"/>`
+      ? `<polygon class="ov-fence" points="${polyLine(keepIn)}" fill="none" stroke="${colors.fence || "#ffcc33"}" stroke-width="0.18"/>`
       : "";
+    const holes = (keepOut || [])
+      .filter((ring) => ring && ring.length >= 3)
+      .map(
+        (ring) =>
+          `<polygon class="ov-keepout" points="${polyLine(ring)}" fill="rgba(200,40,40,0.28)" stroke="${colors.keepout || "#c82828"}" stroke-width="0.14"/>`
+      )
+      .join("");
     const trailEl = trail.length >= 2
       ? `<polyline class="ov-trail" points="${polyLine(trail)}" fill="none" stroke="${colors.trail}" stroke-width="0.16" stroke-linecap="round" stroke-linejoin="round"/>`
       : "";
@@ -119,9 +130,17 @@
       })
       .join("");
     const robot = `<polygon class="ov-pose" points="${poseTriangle(pose)}" fill="#111" stroke="${colors.pose}" stroke-width="0.05"/>`;
+    let targetEl = "";
+    if (target) {
+      const tx = Array.isArray(target) ? target[0] : target.x;
+      const ty = Array.isArray(target) ? target[1] : target.y;
+      if (tx != null && ty != null) {
+        targetEl = `<circle class="ov-target" cx="${Number(tx)}" cy="${Number(ty)}" r="0.22" fill="none" stroke="${colors.target || "#ffee88"}" stroke-width="0.08"/>`;
+      }
+    }
     svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
     svg.setAttribute("preserveAspectRatio", "none");
-    svg.innerHTML = `<g transform="translate(0 ${h}) scale(1 -1)">${fence}${exploreEl}${planEl}${trailEl}${dots}${robot}</g>`;
+    svg.innerHTML = `<g transform="translate(0 ${h}) scale(1 -1)">${fence}${holes}${exploreEl}${planEl}${trailEl}${dots}${targetEl}${robot}</g>`;
   }
 
   async function uxAAvailable() {

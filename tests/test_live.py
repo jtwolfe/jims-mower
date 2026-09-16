@@ -174,6 +174,10 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         assert "pose" in overlay and overlay["pose"].keys() >= {"x", "y", "theta"}
         assert overlay["phase"] == snap["phase"]
         assert snap["mode_banner"]["label"]
+        assert "waypoint_index" in snap
+        assert "mission" in snap
+        if snap["phase"] in {"calibrate_boundary", "explore", "review"}:
+            assert snap["mission"] != "mowing"
         assert snap["observed_url"].startswith("/api/live/observed.png")
         assert snap["fog_url"].startswith("/api/live/fog.png")
         assert snap["observed_mesh_url"].startswith("/api/live/observed_mesh.json")

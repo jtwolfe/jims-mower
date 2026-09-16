@@ -98,6 +98,8 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         code, status = _json(host, port, "GET", "/status")
         assert status["robot"] == "live"
         assert status["state"]["job_state"] == "running"
+        if status["state"].get("phase") in {"calibrate_boundary", "explore", "review", "teach"}:
+            assert status["state"]["mission"] != "mowing"
 
         code, paused = _json(host, port, "POST", "/api/live/control", {"cmd": "pause"})
         assert paused["job_state"] == "paused"
@@ -120,6 +122,11 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         code, status = _json(host, port, "GET", "/status")
         assert "path_overlay" in status
         assert status["mode_banner"]["label"]
+        assert "planned_pct" in status
+        assert "coverage_url" in status
+        assert "waypoint_index" in status
+        if (status.get("state") or {}).get("phase") in {"calibrate_boundary", "explore", "review", "teach"}:
+            assert status["state"]["mission"] != "mowing"
 
         conn = HTTPConnection(host, port, timeout=6.0)
         conn.request("GET", "/api/live?n=1")
@@ -173,6 +180,8 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "map-legend" in js
         assert "Cut (idle)" in js
         assert "drawPathOverlay" in js or "path_overlay" in js
+        assert "waypoint_index" in js
+        assert "keep_out" in js or "keepOut" in js
         assert "session_summary" in js
 
         conn = HTTPConnection(host, port, timeout=6.0)
@@ -181,6 +190,8 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         conn.close()
         assert "drawPathOverlay" in vjs
         assert "ov-trail" in vjs
+        assert "ov-keepout" in vjs
+        assert "ov-target" in vjs
         assert "Pair Bluetooth" in js
         assert "rf_claim" in js
         assert "2468" in js
