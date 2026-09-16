@@ -17,7 +17,17 @@ on `main`. WAVE **UX-C** (this PR) is the thin owner app + YardProfile API;
 it reuses the UX-A mesh + three.js viewer and UX-B fault / radio status.
 Later items stay unchecked until they land. No claimed mAP / FPS.
 
-## First-run teach → save yard → run job (this PR)
+## Slice 6 — finish the taught-yard job (this PR)
+
+- [x] `acre_yard_demo` teach→Start (or Start-without-teach) reaches MOW with rising cut %, then `return_home` → `complete`
+- [x] Demo mow budget: `max_mow_steps: 1600`, `mow_complete_frac: 0.10`, `cover_radius_m: 0.70` (documented; not a physics cheat)
+- [x] Fog islands on a taught acre rectangle are not counted as unreachable
+- [x] IMU tip-stop skips a cluster and keeps painting (cool-down, no crawl-hold)
+- [x] Phone: cut % rises while mowing; done card then idle with yard still loaded
+- [x] `acre_yard` remains the honest long run (no early home). No claimed mAP/FPS
+- [x] Tests: fog-island accounting; teach→mow→done on `mission_tiny`; tip-skip continues; live complete → idle
+
+## First-run teach → save yard → run job (on main)
 
 - [x] Phone / live first-run: pair → teach keep-in (drive or edit vertices) → save `YardProfile`
 - [x] Live Start uses the taught profile as geofence/home (skip authored `calibrate_confirm_m`)

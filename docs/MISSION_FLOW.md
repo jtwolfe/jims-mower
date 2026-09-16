@@ -69,6 +69,12 @@ profile**, not a smaller world:
   frontier at `0.28`) and `max_explore_steps: 1400`. `acre_yard` stays
   at `0.72` / full fence lap. That is documented demo pacing so MAP
   READY → MOW can happen in minutes, not an hour.
+* **Demo mow finish** at `max_mow_steps: 1600` or `mow_complete_frac:
+  0.10` of the planned reachable lawn, then `return_home` → `complete`.
+  Owner cut % is that job fraction (not world-grass %). `cover_radius_m:
+  0.70` paints the 0.50 m raster so strips show; the physical trimmer
+  stays 0.16 m. IMU tip-stop skips a cluster and keeps mowing.
+  `acre_yard` does **not** early-home.
 * `--phase-budget 0.4` scales the phase caps on any yard the same way.
 
 ## First-run teach vs demo confirm fence
@@ -107,9 +113,12 @@ jims-mower-live --config acre_yard_demo --speed 5
 ```
 
 Open the viewer: session is **idle** (yard unknown) until **Start**.
-Expect **CALIBRATE → EXPLORE → MAP READY → MOW** in a few minutes
-wall-clock at `--speed 5`. MAP READY holds ~2 s (or **Start mow**).
-Full acre mow to completion is still a manual `acre_yard` run, not CI.
+Expect **CALIBRATE → EXPLORE → MAP READY → MOW → HOME → DONE** in a
+documented demo budget at `--speed 5` (or `max`). MAP READY holds ~2 s
+(or **Start mow**). Cut % should rise while mowing; the phone session
+card shows map / planned / cut / skips / duration, then idle with the
+yard still loaded. Full acre mow to completion is still a manual
+`acre_yard` run, not CI.
 
 Owner bar: Start / Pause / Resume, speed `1× 2× 5× max`, **Start mow**
 / Re-explore at MAP READY, ESTOP. Phone adds radio-path chips (BT teach
@@ -145,9 +154,12 @@ card from Teach → Save).
 * `planned_coverage_fraction`
 * `skipped_segments`
 
-A disconnected island the A* connector cannot reach is counted, not
-deleted. Strip heading uses the mowable principal axis, rotated toward
-the contour when a mean grade is present.
+A disconnected island the A* connector cannot reach because of a real
+obstacle (drain / pond / shed) is counted, not deleted. Fog islands —
+observed patches cut off only by unknown — are dropped from the planned
+set so a taught acre rectangle does not report hundreds of fake
+unreachable cells. Strip heading uses the mowable principal axis,
+rotated toward the contour when a mean grade is present.
 
 IMU tip-stop on a ridge during `mow` reverses, pivot-reverses, then
 skips a short waypoint cluster and local-replans. Ridge IMU is treated

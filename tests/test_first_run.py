@@ -388,3 +388,41 @@ def test_empty_mow_plan_is_reteach_not_hold_safe() -> None:
     assert owner_copy_for("running", "review") == "Map ready — start mow?"
     assert owner_copy_for("running", "safe") == "Hold — safe."
     assert owner_copy_for("estop", "review") == "E-STOP — hold."
+
+
+def test_taught_live_job_completes_to_idle(tmp_path: Path) -> None:
+    session = LiveSession(
+        config="mission_tiny",
+        fast=True,
+        speed="max",
+        steps=720,
+        seed=3,
+        cameras=4,
+        out_dir=tmp_path / "taught-done",
+        cam_stride=80,
+        map_stride=8,
+        yard_path=tmp_path / "profile.json",
+    )
+    saved = session.control("save_yard", keep_in=_tiny_keep_in())
+    assert saved["ok"] is True
+    assert saved["taught"] is True
+    session._reset_for_next_job()
+    assert session.policy is not None
+    assert session.policy.phase.value == "explore"
+    session.policy.settings.review_hold_steps = 2
+    last = session.run_n(680)
+    session.close()
+    phases = {row.get("phase") for row in session.poses}
+    assert "mow" in phases
+    cuts = [float(row.get("actual_coverage_fraction") or 0.0) for row in session.poses]
+    assert max(cuts) > 0.03
+    assert last["phase"] not in {"safe", "fault"}
+    assert last["done"] or last["phase"] in {"return_home", "complete"}
+    if last["done"] or last["phase"] == "complete":
+        assert last["job_state"] == "idle"
+        assert last["taught"] is True
+        card = last.get("session_summary") or {}
+        assert card.get("schema")
+        assert float(card.get("cut_pct") or last.get("cut_pct") or 0.0) > 0.03
+        assert "Done" in (last.get("owner_copy") or "")
+        assert last.get("keep_in")

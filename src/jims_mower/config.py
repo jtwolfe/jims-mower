@@ -368,6 +368,15 @@ class MissionConfig:
     phase_budget_scale: float = 1.0
     # MAP READY beat before auto-mow (steps). Owner Start mow skips this.
     review_hold_steps: int = 20
+    # 0 = mow until the plan or max_mow_steps. Demo profiles set a
+    # job-cut fraction (cut of planned reachable) that homes the robot.
+    mow_complete_frac: float = 0.0
+    # 0 = paint with the physical trimmer radius. Coarse demo rasters
+    # set this so a strip is visible on 0.50 m cells (not a bigger blade).
+    cover_radius_m: float = 0.0
+    # IMU tip-stop: skip this many waypoints, then keep painting.
+    mow_skip_cluster: int = 4
+    mow_stop_cool: int = 10
 
 
 @dataclass
@@ -817,6 +826,14 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("mission.phase_budget_scale must be in [0.05, 1]")
     if int(mission.review_hold_steps) < 1:
         raise ConfigError("mission.review_hold_steps must be >= 1")
+    if not 0.0 <= float(mission.mow_complete_frac) <= 1.0:
+        raise ConfigError("mission.mow_complete_frac must be in [0, 1]")
+    if float(mission.cover_radius_m) < 0.0:
+        raise ConfigError("mission.cover_radius_m must be >= 0")
+    if int(mission.mow_skip_cluster) < 1:
+        raise ConfigError("mission.mow_skip_cluster must be >= 1")
+    if int(mission.mow_stop_cool) < 0:
+        raise ConfigError("mission.mow_stop_cool must be >= 0")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

@@ -33,6 +33,8 @@
 #   review_hold_steps — MAP READY beat before auto-mow (owner Start mow skips)
 #   explore_complete on acre_yard_demo is a demo threshold (0.42), not the
 #   honest full-acre 0.72 on acre_yard
+#   mow_complete_frac / max_mow_steps / cover_radius_m — demo finish
+#   (acre_yard_demo only). acre_yard does not early-home.
 # world.terrain.base_gradient:
 #   slope_rad / slope_pct, yaw_rad (ascent heading), undulation_m
 #   Default yards are a mild planar grade, not a flat pad. The curriculum

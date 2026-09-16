@@ -69,3 +69,7 @@ mission:
   max_mow_steps: 240
   max_return_steps: 70
   snapshot_stride: 10
+  mow_cruise: 0.90
+  mow_complete_frac: 0.08
+  mow_skip_cluster: 4
+  mow_stop_cool: 8

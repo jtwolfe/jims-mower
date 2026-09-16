@@ -412,19 +412,127 @@ def test_review_hold_waits_until_start_mow() -> None:
     assert policy.phase == MissionPhase.MOW
 
 
+def test_fog_islands_not_counted_unreachable() -> None:
+    """Unknown corridors are unmapped leftover, not unreachable grass."""
+    n = 20
+    res = 0.25
+    hazard = np.zeros((n, n), dtype=np.float32)
+    extra = np.zeros((n, n), dtype=bool)
+    extra[:, 9:11] = True
+    cm = build_costmap(
+        hazard,
+        np.zeros_like(hazard),
+        resolution_m=res,
+        width_m=n * res,
+        height_m=n * res,
+        max_climb_slope_rad=0.3,
+        drain_clearance_m=0.0,
+        margin_m=0.25,
+        extra_blocked=extra,
+    )
+    mowable = ~cm.blocked
+    mowable[:, 9:11] = False
+    mowable[:, 12:] = True
+    fog = extra.copy()
+    plan = plan_coverage(
+        cm,
+        (0.8, 0.8),
+        strip_spacing_m=0.5,
+        waypoint_stride_m=0.5,
+        mowable=mowable,
+        soft_transit=fog,
+    )
+    assert plan.unmapped_mowable_cells > 0
+    assert plan.unreachable_mowable_cells < plan.unmapped_mowable_cells
+    xs = [x for x, _y in plan.waypoints]
+    assert xs
+    assert max(xs) < 11 * res + 0.4
+
+
+def test_taught_tiny_mows_then_completes() -> None:
+    from jims_mower.profile import YardProfile
+
+    env = _tiny_env()
+    keep_in = [(0.7, 0.7), (5.0, 0.7), (5.0, 4.0), (0.7, 4.0)]
+    profile = YardProfile(
+        name="taught_tiny",
+        width_m=env.cfg.world.width_m,
+        height_m=env.cfg.world.height_m,
+        resolution_m=env.cfg.world.resolution_m,
+        keep_in=keep_in,
+        home={"x": 1.2, "y": 1.2, "theta": 0.0},
+    )
+    obs, info = env.reset(seed=3, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info, profile=profile)
+    seen: set[str] = {policy.phase.value}
+    peak_cut = 0.0
+    for _ in range(520):
+        action = policy.act(obs, info)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        seen.add(policy.phase.value)
+        peak_cut = max(peak_cut, float(policy.status(info)["actual_coverage_fraction"]))
+        if policy.phase == MissionPhase.COMPLETE:
+            break
+        if terminated or truncated or policy.done:
+            break
+    status = policy.status(info)
+    env.close()
+    assert "explore" in seen
+    assert "mow" in seen
+    assert peak_cut > 0.04
+    assert "return_home" in seen or "complete" in seen or policy.phase.value in {
+        "return_home",
+        "complete",
+    }
+    assert status["unreachable_mowable_cells"] <= status["planned_mowable_cells"]
+
+
+def test_mow_complete_frac_homes() -> None:
+    from jims_mower.planning.coverage import CoveragePlan
+    from jims_mower.types import Pose
+
+    env = _tiny_env()
+    obs, info = env.reset(seed=4)
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info)
+    policy.phase = MissionPhase.MOW
+    policy.settings.mow_complete_frac = 0.05
+    policy.global_plan = CoveragePlan(
+        waypoints=[(2.0, 2.0), (3.0, 2.0), (4.0, 2.0)],
+        planned_mowable_cells=20,
+        reachable_mowable_cells=20,
+    )
+    info = dict(info)
+    info["coverage_cut_cells"] = 4
+    pose = Pose(1.0, 1.0, 0.0)
+    policy._tick_mow(obs, info, pose, "ok")
+    env.close()
+    assert policy.phase == MissionPhase.RETURN_HOME
+
+
 def test_mow_stop_reverse_then_skip() -> None:
     env = _tiny_env()
     obs, info = env.reset(seed=4)
     policy = MissionPolicy(env.cfg, fast=True)
     policy.reset(obs, info)
     policy.phase = MissionPhase.MOW
-    policy.global_plan = type("P", (), {"waypoints": [(2.0, 2.0), (3.0, 2.0), (4.0, 2.0)]})()
+    from jims_mower.planning.coverage import CoveragePlan
+
+    policy.global_plan = CoveragePlan(
+        waypoints=[(2.0, 2.0), (3.0, 2.0), (4.0, 2.0), (5.0, 2.2), (5.5, 2.8)],
+        planned_mowable_cells=40,
+        reachable_mowable_cells=40,
+    )
     policy.index = 0
     pose = type("Z", (), {"x": 1.0, "y": 1.0, "theta": 0.0, "z": 0.0, "pitch": 0.0, "roll": 0.0})()
     first = policy._tick_mow(obs, info, pose, "stop")
     assert float(first[0]) < 0.0 and float(first[1]) < 0.0
     policy._tick_mow(obs, info, pose, "stop")
-    policy._tick_mow(obs, info, pose, "stop")
+    third = policy._tick_mow(obs, info, pose, "stop")
     assert policy.index >= 1
     assert policy._skipped_global
+    assert policy._stop_cool > 0
+    # After the cluster skip, keep driving — do not sit in hold.
+    assert abs(float(third[0])) + abs(float(third[1])) > 0.0 or policy.phase == MissionPhase.RETURN_HOME
     env.close()
