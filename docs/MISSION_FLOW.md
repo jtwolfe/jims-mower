@@ -136,13 +136,19 @@ card from Teach → Save).
 ## Unknown-space semantics
 
 `ObservedMap` keeps explicit `observed` / `explored` / `free` / `hazard`
-/ `structure` / `elevation` / `confidence`.
+/ `structure` / `elevation` / `confidence` / `elevation_set`.
 
 * Unknown is **not** mowable and **not** safe transit.
 * Frontiers are known-free cells adjacent to unknown, inside keep-in.
-* Observer rasters are copied only onto cells this robot has stamped
-  (camera ground hits + body/ToF disk). Authored/god-view structure in
-  `obs["structure"]` is not a control input outside that mask.
+* **Cameras** grow the seen mask (ground-plane hits). That is occupancy,
+  not height.
+* **IMU pitch/roll** is local chassis attitude / tip. It is a slow prior
+  for a neighborhood around the robot, not a global hinge.
+* **Elevation** is fused from wheel/pose `z` + that slow prior on first
+  stamp in the neighborhood, then frozen (tiny revisit mix). Already
+  mapped cells do not leap when the chassis tips on a ridge.
+* Authored/god-view structure in `obs["structure"]` is not a control
+  input outside the observed mask.
 * Map-ready when `observed` fraction ≥ `mission.explore_complete`, or
   there are no frontiers and the fraction is at least
   `mission.explore_no_frontier`, or `max_explore_steps` elapses
@@ -182,11 +188,14 @@ match that: a finished god-view `yard.glb` is the true height field
 used by physics, not what the robot has learned.
 
 **Learning terrain** in the live viewer means a **partial observed
-elevation mesh** that grows with `ObservedMap`. Camera / body stamps
-lift cells into a 3D surface (grade, sheds as low boxes, ponds as
-slightly sunken cyan water). Unknown stays a dark pad + fog veil —
-not painted holes on a finished mesh. Physics still uses the true
-field; owner view and `MissionPolicy` use observed elevation only.
+elevation mesh** that grows with `ObservedMap`. Camera stamps lift the
+fog (seen mask). Body / pose `z` plus a slow local grade prior lift
+cells into a 3D surface once they have a height sample (grade, sheds
+as low boxes, ponds as slightly sunken cyan water). The mesh must not
+flop when the IMU tips — old cells keep their first height. Unknown
+stays a dark pad + fog veil — not painted holes on a finished mesh.
+Physics still uses the true field; owner view and `MissionPolicy` use
+observed elevation only.
 
 Live / owner mode **hides the true height-field mesh** by default.
 Toggle **true elev (god-view debug)** to reveal the physics mesh —

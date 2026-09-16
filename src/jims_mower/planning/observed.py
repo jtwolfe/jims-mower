@@ -1,9 +1,11 @@
 """Unknown-space semantics: observed / free / hazard with explicit confidence.
 
 Unknown cells are not safe and not mowable. The mission layer stamps camera
-ground hits, a body/ToF disk, and IMU-local cues. Observer rasters are copied
-only onto cells this robot has actually seen — authored/god-view structure
-leaked into ``obs["structure"]`` is ignored outside the observed mask.
+ground hits (seen mask), a body/ToF disk, and IMU-local cues. Elevation is
+a local sample (wheel-z + slow grade in a neighborhood), frozen after the
+first stamp — not a yard-wide plane hinged to chassis tilt. Authored /
+god-view structure leaked into ``obs["structure"]`` is ignored outside
+the observed mask.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from typing import Any, Iterable, Optional
 import numpy as np
 
 from jims_mower.cameras import attitude_plane_hits, camera_world_pose
+from jims_mower.perception.grade import LOCAL_GRADE_RADIUS_M, local_disk_mask
 from jims_mower.constants import (
     BUILDING_RGB,
     HAZARD_DRAIN,
@@ -60,6 +63,7 @@ class ObservedMap:
     elevation: np.ndarray
     confidence: np.ndarray
     occupancy: np.ndarray
+    elevation_set: np.ndarray
     width_m: float
     height_m: float
     resolution_m: float
@@ -87,6 +91,7 @@ class ObservedMap:
             elevation=np.zeros((rows, cols), dtype=np.float32),
             confidence=np.zeros((rows, cols), dtype=np.float32),
             occupancy=np.zeros((rows, cols), dtype=np.float32),
+            elevation_set=np.zeros((rows, cols), dtype=bool),
             width_m=float(width_m),
             height_m=float(height_m),
             resolution_m=res,
@@ -190,8 +195,16 @@ class ObservedMap:
         *,
         only_observed: bool = True,
         authored_structure: Optional[np.ndarray] = None,
+        pose: Optional[Pose] = None,
+        grade_radius_m: float = LOCAL_GRADE_RADIUS_M,
     ) -> None:
-        """Copy heuristic elevation/hazard onto seen cells. Not a god-view merge."""
+        """Copy heuristic hazard/structure onto seen cells. Height is local.
+
+        Cameras grow the *seen* mask. Elevation is fused only in a
+        neighborhood around ``pose`` (wheel-z + slow grade prior). Already
+        stamped heights freeze (tiny revisit mix). The current IMU plane
+        is not copied onto the whole learned sheet.
+        """
         mask = self.observed if only_observed else np.ones_like(self.observed, dtype=bool)
         if not np.any(mask):
             return
@@ -200,11 +213,7 @@ class ObservedMap:
             hz = np.asarray(hazard, dtype=np.float32)
             if hz.shape == self.hazard.shape:
                 self.hazard[mask] = np.maximum(self.hazard[mask], hz[mask])
-        elev = obs.get("elevation")
-        if elev is not None:
-            ev = np.asarray(elev, dtype=np.float32)
-            if ev.shape == self.elevation.shape:
-                self.elevation[mask] = ev[mask]
+        self._fuse_elevation(obs, mask, pose=pose, grade_radius_m=grade_radius_m)
         conf = obs.get("confidence")
         if conf is not None:
             cv = np.asarray(conf, dtype=np.float32)
@@ -316,16 +325,20 @@ class ObservedMap:
         shed_lift_m: float = SHED_LIFT_M,
         pond_drop_m: float = POND_DROP_M,
     ) -> np.ndarray:
-        """Partial height field: observed cells only. Unknown is NaN.
+        """Partial height field: observed cells that have a height sample.
 
-        Physics still uses the true field. This is what the owner mesh
-        grows from — sheds lift a little, ponds sit slightly low.
+        Physics still uses the true field. Camera-seen cells without a
+        local z stay NaN (mesh hole + fog overlay). Sheds lift a little,
+        ponds sit slightly low.
         """
         z = np.full((self.rows, self.cols), np.nan, dtype=np.float32)
         mask = np.asarray(self.observed, dtype=bool)
         elev = np.asarray(self.elevation, dtype=np.float32)
         if mask.shape != z.shape or elev.shape != z.shape:
             return z
+        have = np.asarray(self.elevation_set, dtype=bool)
+        if have.shape == mask.shape and np.any(have):
+            mask = mask & have
         if not np.any(mask):
             return z
         z[mask] = elev[mask]
@@ -347,10 +360,64 @@ class ObservedMap:
             elevation=self.elevation.copy(),
             confidence=self.confidence.copy(),
             occupancy=self.occupancy.copy(),
+            elevation_set=self.elevation_set.copy(),
             width_m=self.width_m,
             height_m=self.height_m,
             resolution_m=self.resolution_m,
         )
+
+    def _fuse_elevation(
+        self,
+        obs: dict[str, Any],
+        mask: np.ndarray,
+        *,
+        pose: Optional[Pose],
+        grade_radius_m: float,
+    ) -> None:
+        """Anchor height on first local stamp; do not hinge the sheet to IMU."""
+        ev = obs.get("elevation")
+        prior = obs.get("elevation_prior")
+        ev_a = None if ev is None else np.asarray(ev, dtype=np.float32)
+        prior_a = None if prior is None else np.asarray(prior, dtype=np.float32)
+        if ev_a is not None and ev_a.shape != self.elevation.shape:
+            ev_a = None
+        if prior_a is not None and prior_a.shape != self.elevation.shape:
+            prior_a = None
+        if ev_a is None and prior_a is None and pose is None:
+            return
+        meas = np.zeros_like(self.elevation)
+        have_meas = np.zeros_like(self.observed, dtype=bool)
+        if prior_a is not None:
+            meas = prior_a
+            have_meas[:, :] = True
+        if ev_a is not None:
+            meas = ev_a
+            have_meas[:, :] = True
+        if pose is not None and not np.any(have_meas):
+            meas[:, :] = np.float32(pose.z)
+            have_meas[:, :] = True
+        if pose is None:
+            # Tests / callers without a chassis pose: first-stamp freeze.
+            write = mask & have_meas & ~self.elevation_set
+            if np.any(write):
+                self.elevation[write] = meas[write]
+                self.elevation_set[write] = True
+            return
+        radius = max(float(grade_radius_m), self.resolution_m)
+        local = local_disk_mask(
+            self.elevation.shape,
+            (pose.x, pose.y),
+            radius,
+            self.resolution_m,
+        )
+        neighborhood = mask & local & have_meas
+        fresh = neighborhood & ~self.elevation_set
+        if np.any(fresh):
+            self.elevation[fresh] = meas[fresh]
+            self.elevation_set[fresh] = True
+        # Already-mapped cells stay put. A ridge tip must not leap them.
+        # Seen-but-far cells keep their first height (or stay unset).
+        # Never copy the current IMU plane across the yard.
 
     def _disk_indices(self, x: float, y: float, radius_m: float) -> tuple[np.ndarray, np.ndarray]:
         r = max(float(radius_m), self.resolution_m * 0.5)

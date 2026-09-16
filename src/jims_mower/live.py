@@ -3,7 +3,9 @@
 This is the owner loop that ``jims-mower-mission-demo`` + the World Viewer
 scrubber were missing. The sim still uses the true height field for
 physics. Control stays on ``ObservedMap``. The default owner view is a
-fog veil over unknown cells — not a finished god-view mesh from step 0.
+fog veil over unknown cells plus a growing observed elevation mesh —
+already-mapped heights stay put when the IMU tips. Not a finished
+god-view mesh from step 0, and not a sheet hinged to chassis tilt.
 
 No claimed mAP / FPS. Not a coverage benchmark.
 

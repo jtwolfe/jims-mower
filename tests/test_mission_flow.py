@@ -19,8 +19,10 @@ from jims_mower.profile import YardProfile
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import plan_coverage
 from jims_mower.planning.explore import plan_explore
+from jims_mower.perception.grade import PlanarGradeModel
 from jims_mower.planning.observed import ObservedMap, frontiers
 from jims_mower.scenarios import load_source
+from jims_mower.types import Pose
 
 
 def _tiny_env() -> MowerEnv:
@@ -537,4 +539,94 @@ def test_mow_stop_reverse_then_skip() -> None:
     assert policy._stop_cool > 0
     # After the cluster skip, keep driving — do not sit in hold.
     assert abs(float(third[0])) + abs(float(third[1])) > 0.0 or policy.phase == MissionPhase.RETURN_HOME
+    env.close()
+
+
+def test_observed_elevation_stable_under_pitch_roll() -> None:
+    """Already-mapped heights stay put when the chassis tips on a ridge."""
+    omap = ObservedMap.empty(8.0, 8.0, 0.25)
+    model = PlanarGradeModel()
+    pose = Pose(2.0, 2.0, 0.0, z=0.08, pitch=0.06, roll=0.0)
+    model.update(pose, None, None)
+    prior, _ = model.raster(omap.elevation.shape, omap.resolution_m)
+    omap.stamp_disk(2.0, 2.0, 1.6, explored=True)
+    omap.ingest_observer(
+        {"elevation": prior, "elevation_prior": prior},
+        pose=pose,
+        grade_radius_m=2.2,
+    )
+    locked = omap.elevation_set.copy()
+    frozen = omap.elevation.copy()
+    assert int(locked.sum()) > 10
+    # Violent synthetic pitch/roll while creeping forward — old code
+    # recopied the IMU plane onto every seen cell.
+    for i in range(14):
+        tip = Pose(2.1 + 0.04 * i, 2.0, 0.15, z=0.10, pitch=0.42 * ((-1) ** i), roll=-0.30)
+        model.update(tip, None, None)
+        swung, _ = model.raster(omap.elevation.shape, omap.resolution_m)
+        omap.stamp_disk(tip.x, tip.y, 1.6)
+        omap.ingest_observer(
+            {"elevation": swung, "elevation_prior": swung},
+            pose=tip,
+            grade_radius_m=2.2,
+        )
+    err = np.abs(omap.elevation[locked] - frozen[locked])
+    assert float(err.max()) < 1e-4
+    # The learned patch does not flip sign across the yard each step.
+    zs = omap.elevation[omap.elevation_set]
+    assert float(np.ptp(zs)) < 0.35 or float(zs.max()) * float(zs.min()) >= 0.0
+
+
+def test_observed_elevation_ignores_far_plane_copy() -> None:
+    """Camera-seen far cells must not inherit the current IMU plane."""
+    omap = ObservedMap.empty(10.0, 10.0, 0.25)
+    pose = Pose(1.2, 1.2, 0.0, z=0.05, pitch=0.0, roll=0.0)
+    prior = np.zeros(omap.elevation.shape, dtype=np.float32)
+    yy = (np.arange(omap.rows) + 0.5) * 0.25
+    xx = (np.arange(omap.cols) + 0.5) * 0.25
+    gx, gy = np.meshgrid(xx, yy)
+    prior[:, :] = (0.40 * (gx - 1.2)).astype(np.float32)
+    omap.observed[:, :] = True
+    omap.ingest_observer(
+        {"elevation": prior, "elevation_prior": prior},
+        pose=pose,
+        grade_radius_m=2.0,
+    )
+    far = omap.world_to_cell(8.5, 8.5)
+    near = omap.world_to_cell(1.3, 1.3)
+    assert far is not None and near is not None
+    assert omap.elevation_set[near]
+    assert not omap.elevation_set[far]
+    z = omap.observed_elevation()
+    assert np.isnan(z[far])
+    assert np.isfinite(z[near])
+
+
+def test_mission_mapped_elev_stable_when_heuristic_tips() -> None:
+    """Headless: heuristic + MissionPolicy must not flop mapped elevation."""
+    env = _tiny_env()
+    env.cfg.perception.terrain_mode = "heuristic"
+    obs, info = env.reset(seed=5)
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info)
+    pose = env._pose
+    policy._stamp(obs, info, pose, explored=True)
+    assert policy.observed is not None
+    locked = policy.observed.elevation_set.copy()
+    if not np.any(locked):
+        env.close()
+        pytest.skip("tiny seed did not lock a local height sample")
+    frozen = policy.observed.elevation.copy()
+    # Drive a few steps, then overwrite pose attitude in the next obs
+    # the way a ridge tip would (pitch/roll swing, same seen mask).
+    for _ in range(6):
+        action = policy.act(obs, info)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        policy._stamp(obs, info, env._pose, explored=True)
+        if terminated or truncated:
+            break
+    still = policy.observed.elevation_set & locked
+    if np.any(still):
+        err = np.abs(policy.observed.elevation[still] - frozen[still])
+        assert float(err.max()) < 0.10
     env.close()

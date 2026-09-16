@@ -102,10 +102,11 @@ running along y so it crosses the slope. The curriculum `flat` scenario
 zeros the gradient. Attitude / tip / drain checks still sample the height
 field, so pitch and roll are nonzero on a pure grade.
 
-The heuristic observer recovers that grade from IMU pitch/roll + pose
-(`elevation_prior`). See [`TERRAIN_MAPS.md`](TERRAIN_MAPS.md) for the
-observer-vs-physics failure mode, path/building layers, and golf yards
-(`golf_rough`, `golf_fairway_snip`, `acre_yard`).
+The heuristic observer keeps a *slow* `elevation_prior` from pose `z`
+plus a weak IMU tilt mix. Instantaneous pitch/roll is local chassis
+attitude (tip), not a hinge for the owner mesh. See
+[`TERRAIN_MAPS.md`](TERRAIN_MAPS.md) for the sensor model, path/building
+layers, and golf yards (`golf_rough`, `golf_fairway_snip`, `acre_yard`).
 
 ## Teach Boundary
 
