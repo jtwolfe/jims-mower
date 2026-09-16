@@ -91,12 +91,12 @@ def test_gnss_enu_roundtrip() -> None:
 def test_pose_and_valid_gnss_stop_short_of_tape() -> None:
     spec = GeofenceSpec(keep_in=list(KEEP_IN_LOCAL))
     # Heading +x toward the east tape at x=7 from just inside.
-    pose = Pose(6.72, 4.0, 0.0)
+    pose = Pose(6.80, 4.0, 0.0)
     assert geofence_advice(pose, spec, slow_m=0.8, stop_m=0.28, look_ahead_m=0.55) == "stop"
     gnss_ok = geofence_advice_from_gnss(
         pose,
         spec,
-        gnss_xy=(6.70, 4.0),
+        gnss_xy=(6.78, 4.0),
         gnss_valid=True,
         slow_m=0.8,
         stop_m=0.28,
@@ -109,7 +109,7 @@ def test_pose_and_valid_gnss_stop_short_of_tape() -> None:
 
 def test_invalid_gnss_falls_back_to_pose() -> None:
     spec = GeofenceSpec(keep_in=list(KEEP_IN_LOCAL))
-    pose = Pose(6.72, 4.0, 0.0)
+    pose = Pose(6.80, 4.0, 0.0)
     # Stale GNSS that still says "middle of the yard" must not override pose stop.
     advice = geofence_advice_from_gnss(
         pose,
@@ -184,8 +184,8 @@ def test_offset_origin_gnss_matches_world_tape() -> None:
     profile = YardProfile(name="off", keep_in=list(KEEP_IN_LOCAL), origin=origin)
     spec = profile.geofence_spec()
     # Local east tape at 7 → world x = 9.
-    pose = Pose(8.72, 5.0, 0.0)
-    enu = gps_enu_from_world(np.array([8.72, 5.0, 0.0, 1.0], dtype=np.float32), origin.as_dict())
+    pose = Pose(8.80, 5.0, 0.0)
+    enu = gps_enu_from_world(np.array([8.80, 5.0, 0.0, 1.0], dtype=np.float32), origin.as_dict())
     world = gps_world_from_enu(enu, origin.as_dict())
     advice = geofence_advice_from_gnss(
         pose,
@@ -196,4 +196,4 @@ def test_offset_origin_gnss_matches_world_tape() -> None:
         look_ahead_m=0.55,
     )
     assert advice == "stop"
-    assert float(enu[0]) == pytest.approx(6.72)
+    assert float(enu[0]) == pytest.approx(6.80)
