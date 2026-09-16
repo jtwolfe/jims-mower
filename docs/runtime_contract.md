@@ -14,13 +14,15 @@ shape.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `version` | string | `"1"` |
-| `name` | string | `front`, `rear`, … |
+| `name` | string | `CameraSpec` name. Prefer `stereo_left` / `stereo_right` + mono on the Orin path; gym look-around may use `front_left` / `front_right`. |
 | `width`, `height` | int | pixels |
 | `encoding` | string | default `rgb8` |
 | `stamp_s` | number | host time, seconds |
 | `frame_id` | string | default `camera` |
 
-Gym: `obs["cameras"][name]` is uint8 RGB `(H, W, 3)`.
+Gym: `obs["cameras"][name]` is uint8 RGB `(H, W, 3)` at the contract
+size (`sensors.width` × `sensors.height`, sim default 80×60).
+Downsample is `jims_mower.runtime.capture.downsample_rgb`.
 
 ## ImuSample
 

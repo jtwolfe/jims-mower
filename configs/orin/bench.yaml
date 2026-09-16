@@ -1,6 +1,13 @@
 # Bench-loop overlay. Fake CSI / IMU adapters are still fine.
 # Does **not** claim a real camera or IMU driver.
 #
+# Software CSI path (RT-1): FakeGstAdapter / FakeCsiDriver fill
+# obs["cameras"] at the ICD contract size (sensors.width × sensors.height).
+# Downsample happens in jims_mower.runtime.capture.downsample_rgb.
+# GstNvmmAdapter raises without JetPack/Gst. Physical CSI on Orin still
+# needs JetPack + real cameras. Prefer stereo_left / stereo_right + mono
+# (configs/orin/extrinsics_stereo.yaml). No FPS claim.
+#
 # Enable the sensor watchdog so frozen IMU or camera stamps zero wheels
 # within the stall windows. Merge onto a yard config, or load as:
 #
@@ -18,6 +25,8 @@
 
 runtime:
   enabled: true
+  cameras:
+    adapter: fake_csi
   watchdog:
     enabled: true
     imu_stall_s: 0.40

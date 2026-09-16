@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
+
 import numpy as np
 
 from jims_mower.cameras import _body_to_world_matrix
 from jims_mower.constants import GRAVITY_MPS2
+from jims_mower.kinematics import wheel_positions
 from jims_mower.types import Pose
+
+# ICD ToF order: FL, FR, RL, RR. Used by the gym board-under-wheel fixture.
+TOF_CORNER_INDEX = {"FL": 0, "FR": 1, "RL": 2, "RR": 3}
 
 
 @dataclass(frozen=True)
@@ -140,6 +146,43 @@ def simulate_tof(
 
 def imu_to_array(sample: IMUSample) -> np.ndarray:
     return np.concatenate([sample.accel_mps2, sample.gyro_radps]).astype(np.float32)
+
+
+def slide_board_under_wheel(
+    height_field: Any,
+    pose: Pose,
+    corner: str,
+    *,
+    length_m: float,
+    track_m: float,
+    thickness_m: float = 0.04,
+    radius_m: float = 0.10,
+) -> tuple[float, float]:
+    """Raise a small disk under one wheel (gym fixture, not a real ToF board).
+
+    Returns the world XY of that wheel. Next :func:`simulate_tof` on
+    :func:`wheel_clearances` should show a shorter range at that corner
+    if the chassis is not re-seated first.
+    """
+    key = str(corner).upper()
+    if key not in TOF_CORNER_INDEX:
+        raise ValueError(f"ToF corner must be one of {tuple(TOF_CORNER_INDEX)}; got {corner!r}")
+    wheels = wheel_positions(pose, length_m, track_m)
+    wx, wy = wheels[TOF_CORNER_INDEX[key]]
+    res = float(height_field.resolution_m)
+    rad = max(float(radius_m), res * 1.5)
+    thick = float(thickness_m)
+    rows, cols = height_field.rows, height_field.cols
+    yy = (np.arange(rows) + 0.5) * res
+    xx = (np.arange(cols) + 0.5) * res
+    grid_x, grid_y = np.meshgrid(xx, yy)
+    disk = (grid_x - wx) ** 2 + (grid_y - wy) ** 2 <= rad * rad
+    height_field.elevation = np.where(
+        disk, height_field.elevation + np.float32(thick), height_field.elevation
+    ).astype(np.float32)
+    if hasattr(height_field, "recompute_slope"):
+        height_field.recompute_slope()
+    return float(wx), float(wy)
 
 
 def sample_accel_bias(rng: np.random.Generator, std: float) -> np.ndarray:

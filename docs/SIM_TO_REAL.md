@@ -8,7 +8,7 @@ The on-box loop **must not** import `jims_mower.renderer` or call
 
 | Key | On-box source | Notes |
 | --- | --- | --- |
-| `cameras` | CSI / GStreamer / NVMM → `obs["cameras"][name]` | Downsample to the contract size (sim default 80×60) |
+| `cameras` | CSI / GStreamer / NVMM → `obs["cameras"][name]` | Downsample to the contract size **in** `runtime.capture.downsample_rgb` (sim default 80×60). Names match `CameraSpec`; bench / Orin prefer `stereo_left` / `stereo_right` + mono. |
 | `imu` | I2C 6-axis | Body specific force + gyro; rest ≈ `(0,0,9.81,0,0,0)` |
 | `gps` | UART GNSS | `(x, y, z, valid)`; `valid=0` on dropout |
 | `tof` | I2C downward corners | FL, FR, RL, RR; unused stay 0 |
@@ -33,7 +33,7 @@ obs key.
 
 ## What you swap on the Orin
 
-1. `FakeCsiDriver` / `FakeGstAdapter` → `GstNvmmAdapter` (when GStreamer exists)
+1. `FakeCsiDriver` / `FakeGstAdapter` → `GstNvmmAdapter` (when GStreamer / JetPack exists). Software path already fills named `obs["cameras"]` at the contract size with fresh stamps. Physical CSI is still required.
 2. `MockDetector` → your head (`TrtDetector` is a load-weights hook)
 3. `HeuristicTerrainObserver` → your head (`TrtTerrainObserver` same)
 4. Keep `SensorWatchdog` in front of wheel commands; enable it on the

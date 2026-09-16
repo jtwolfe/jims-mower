@@ -427,8 +427,9 @@ in this document and retune **software** trips.
 - Motor SKUs, camera modules, pack brand: **not picked**.
 - RF range, TRT FPS, detector mAP: **out of scope** (and forbidden as
   invented numbers).
-- Next *physical* work: wire the real NC paddle + contactor (build-order
-  §3 field line), then capture, then stereo calibration. Gym **sim
-  model + doc** for hardware ESTOP is done; the bench paddle test is
-  not. Gym CV terrain (stereo + seg stub + frozen elev) is software
-  build-order §2.
+- Next *physical* work: JetPack CSI + real cameras (build-order §5 field
+  line), then real IMU/GNSS/ToF chips (§6 field), then stereo
+  calibration (S2R-3). Software CSI → `obs["cameras"]` and gym IMU/GNSS/ToF
+  stubs are done; the physical acceptance lines are not. Gym CV terrain
+  (stereo + seg stub + frozen elev) is software build-order §2. HW ESTOP
+  sim + bench watchdog stamps are §3–4.

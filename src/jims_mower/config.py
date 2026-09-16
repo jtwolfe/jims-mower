@@ -422,6 +422,19 @@ class WatchdogConfig:
 
 
 @dataclass
+class RuntimeCamerasConfig:
+    """CSI → ``obs["cameras"]`` adapter. Default empty = gym renderer.
+
+    ``adapter``: ``renderer`` / ``""`` (gym pinhole), ``fake_gst`` /
+    ``fake_csi`` (CI / bench), ``gst`` (``GstNvmmAdapter``; raises
+    without JetPack). Downsample is ``runtime.capture.downsample_rgb``.
+    Prefer field names from ``configs/orin/extrinsics_stereo.yaml``.
+    """
+
+    adapter: str = ""
+
+
+@dataclass
 class RuntimeConfig:
     """On-box budget stub. Off by default so short gym tests stay unchanged."""
 
@@ -429,6 +442,7 @@ class RuntimeConfig:
     battery: BatteryConfig = field(default_factory=BatteryConfig)
     thermal: ThermalConfig = field(default_factory=ThermalConfig)
     watchdog: WatchdogConfig = field(default_factory=WatchdogConfig)
+    cameras: RuntimeCamerasConfig = field(default_factory=RuntimeCamerasConfig)
 
 
 @dataclass
@@ -513,6 +527,13 @@ def default_camera_rig(count: int = 6, fov_deg: float = 70.0) -> list[CameraSpec
         CameraSpec(c.name, c.x, c.y, c.z, c.yaw_deg, c.pitch_deg, fov_deg)
         for c in (by_name[n] for n in _COUNT_NAMES[count])
     ]
+
+
+def field_stereo_cameras() -> list[CameraSpec]:
+    """Preferred Orin names from ``extrinsics_stereo.yaml`` (example poses)."""
+    from jims_mower.runtime.capture import load_field_camera_specs
+
+    return load_field_camera_specs()
 
 
 def _finish_config(cfg: EnvConfig) -> EnvConfig:
@@ -698,6 +719,15 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     wd = cfg.runtime.watchdog
     if wd.imu_stall_s <= 0 or wd.vision_stall_s <= 0:
         raise ConfigError("runtime.watchdog stall windows must be positive")
+    from jims_mower.runtime.capture import adapter_kind
+
+    cam_adapter = adapter_kind(getattr(cfg.runtime.cameras, "adapter", ""))
+    if cam_adapter not in {"renderer", "fake_gst", "fake_csi", "gst"}:
+        raise ConfigError(
+            "runtime.cameras.adapter must be renderer|fake_gst|fake_csi|gst; "
+            f"got {cfg.runtime.cameras.adapter!r}"
+        )
+    cfg.runtime.cameras.adapter = "" if cam_adapter == "renderer" else cam_adapter
     radio = cfg.radio
     if radio.distance_m < 0:
         raise ConfigError("radio.distance_m must be >= 0")

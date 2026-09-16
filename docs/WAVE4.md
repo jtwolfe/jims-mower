@@ -51,8 +51,10 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
   [`configs/orin/bench.yaml`](../configs/orin/bench.yaml).
 - [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml)
   — same `CameraSpec` as the gym.
-- `GstNvmmAdapter` documented stub; CI uses `FakeGstAdapter`. GStreamer is
-  **not** a dependency.
+- `GstNvmmAdapter` raises without Gst; CI / bench use `FakeGstAdapter` /
+  `FakeCsiDriver` to fill named `obs["cameras"]` at the ICD size
+  (`runtime.capture.downsample_rgb`). Prefer `stereo_left` /
+  `stereo_right` + mono. GStreamer is **not** a dependency. No FPS.
 - `TrtDetector` / `TrtTerrainObserver` load-weights placeholders
   (`perception.detector_backend: trt`). No engine shipped; `fps_claim: null`.
 

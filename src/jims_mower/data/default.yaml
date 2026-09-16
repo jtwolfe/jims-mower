@@ -158,8 +158,12 @@ mission:
   snapshot_stride: 25
 
 # Bench watchdog: set runtime.watchdog.enabled true (configs/orin/bench.yaml).
+# CSI adapter: "" / renderer (gym), fake_csi / fake_gst (CI), gst (raises
+# without JetPack). Downsample: runtime.capture.downsample_rgb.
 runtime:
   enabled: false
+  cameras:
+    adapter: ""
   watchdog:
     enabled: false
     imu_stall_s: 0.40

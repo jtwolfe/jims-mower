@@ -138,7 +138,8 @@ import jims_mower  # registers jims_mower/Mower-v0
 
 env = gym.make("jims_mower/Mower-v0")
 obs, info = env.reset(seed=0)
-# obs["cameras"]["front"] → uint8 RGB (H, W, 3)
+# obs["cameras"][name] → uint8 RGB (H, W, 3); names match CameraSpec
+#   (prefer stereo_left / stereo_right + mono on the Orin path)
 # obs["imu"] → [ax, ay, az, gx, gy, gz]  (body z-up; level rest ≈ [0,0,9.81])
 # obs["gps"] → [x, y, z, valid]
 # obs["elevation"], obs["slope"], obs["hazard"] → yard rasters
@@ -271,12 +272,13 @@ flowchart LR
    the fused estimate as its start pose.
 
 On a **Jetson Orin Nano** this same split is the runtime: GStreamer/NVMM
-cameras + your detector / terrain head behind the protocols, the numpy
-costmap + planner + controller in-process (the rasters are small), and the
-EKF (or the complementary stub) behind `TerrainPolicy.fusion`. Do not run the
-gym renderer or `OracleTerrainObserver` on-box. Tune `max_climb_slope_rad`,
-`drain_clearance_m`, `slow_speed_factor`, and `planner.uncertainty` in YAML
-to the machine and the yard.
+cameras (software path is `FakeGstAdapter` → `GstNvmmAdapter` once
+JetPack exists) + your detector / terrain head behind the protocols, the
+numpy costmap + planner + controller in-process (the rasters are small),
+and the EKF (or the complementary stub) behind `TerrainPolicy.fusion`. Do
+not run the gym renderer or `OracleTerrainObserver` on-box. Tune
+`max_climb_slope_rad`, `drain_clearance_m`, `slow_speed_factor`, and
+`planner.uncertainty` in YAML to the machine and the yard.
 
 ## Architecture
 
@@ -502,7 +504,9 @@ detector. There are no mAP / FPS numbers here.
 This package is the **training / eval gym**, not the robot runtime.
 
 - Target board: Orin Nano 8 GB, ARM64, JetPack 6. Keep camera tensors small
-  (default 80×60 in sim; downsample real cameras to the same contract).
+  (default 80×60 in sim; downsample in `runtime.capture.downsample_rgb`
+  before `obs["cameras"]`). Fake CSI fills that dict in CI; `GstNvmmAdapter`
+  raises without Gst. Physical CSI still needs JetPack + cameras. No FPS.
 - Do not pull a desktop OpenCV GUI or a full detector / SLAM stack into this
   repo. On the robot, run GStreamer/NVMM capture + your TensorRT (or similar)
   head behind the `Detector` / `TerrainObserver` protocols.

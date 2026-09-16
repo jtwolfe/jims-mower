@@ -251,3 +251,4 @@ def test_bench_yaml_enables_watchdog() -> None:
     assert cfg.runtime.watchdog.enabled is True
     assert cfg.runtime.watchdog.imu_stall_s == pytest.approx(0.40)
     assert cfg.runtime.watchdog.vision_stall_s == pytest.approx(0.40)
+    assert cfg.runtime.cameras.adapter == "fake_csi"

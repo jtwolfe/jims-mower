@@ -13,12 +13,14 @@ versioned contract messages onto an in-process bus:
 | --- | --- | --- | --- |
 | `FakeImuDriver` | I2C 6-axis (`0x68`) | `ImuSample` | `i2c` |
 | `FakeGnssDriver` | UART GNSS (`/dev/ttyUSB0`) | `GpsFix` | `uart` |
-| `FakeCsiDriver` | CSI / NVMM (`nvarguscamerasrc`) | `CameraFrame` | `csi` |
+| `FakeCsiDriver` | CSI / NVMM (`nvarguscamerasrc`) | `CameraFrame` + `obs["cameras"]` | `csi` |
 | `FakeTofDriver` | I2C ToF (`0x29`) | `TofArray` | `i2c` |
 
 Queues are `InProcessBus` deques. Payloads pass `validate_payload`.
-Pixel rasters stay in the gym / episode `npz`; the camera message is
-metadata (name, size, encoding, stamp) matching
+Pixel rasters for the gym / episode `npz` stay numpy. `FakeCsiDriver` /
+`FakeGstAdapter` can also **fill** `obs["cameras"]` at the ICD contract
+size (named frames, fresh stamps). The bus `CameraFrame` message is
+still metadata (name, size, encoding, stamp) matching
 [`runtime_contract.md`](runtime_contract.md).
 
 These are **not** Linux `i2c-dev` or GStreamer drivers. On the Orin,
