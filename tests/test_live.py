@@ -355,3 +355,102 @@ def test_live_tiny_reaches_map_ready(tmp_path: Path) -> None:
     session.close()
     if last["done"] or last["phase"] in {"return_home", "complete"}:
         assert (tmp_path / "ready" / "session_summary.json").is_file()
+
+
+def test_live_max_speed_throttles_map_and_mesh(tmp_path: Path) -> None:
+    """--speed max must not rebuild observed mesh/PNG on every new cell."""
+    session = LiveSession(
+        config="mission_tiny",
+        fast=True,
+        speed="max",
+        steps=48,
+        seed=3,
+        cameras=4,
+        out_dir=tmp_path / "throttle",
+        cam_stride=80,
+        map_stride=4,
+        observed_mesh_stride=8,
+    )
+    session.reset()
+    budget = session._stream_budget()
+    assert budget["map_stride"] >= 16
+    assert budget["mesh_stride"] >= 32
+    assert budget["cheap"] is True
+    session.speed = 5.0
+    fast = session._stream_budget()
+    assert fast["map_stride"] >= 8
+    assert fast["mesh_stride"] >= 16
+    session.speed = 0.0
+    maps0 = session._n_map_builds
+    mesh0 = session._n_mesh_builds
+    last = session.run_n(40)
+    maps = session._n_map_builds - maps0
+    mesh = session._n_mesh_builds - mesh0
+    session.close()
+    assert last["step"] >= 20
+    assert maps <= 6
+    assert mesh <= 4
+    assert mesh < last["step"] // 4
+
+
+def test_live_acre_demo_taught_reaches_mow(tmp_path: Path, monkeypatch) -> None:
+    """Taught acre_yard_demo at --speed max must leave explore for mow."""
+    from jims_mower import live as live_mod
+    from jims_mower.profile import YardProfile
+
+    monkeypatch.setattr(live_mod, "ACRE_LIVE_CAM_WIDTH", 16)
+    monkeypatch.setattr(live_mod, "ACRE_LIVE_CAM_HEIGHT", 12)
+    keep = [(4.2, 5.2), (65.8, 5.2), (65.8, 52.8), (4.2, 52.8)]
+    session = LiveSession(
+        config="acre_yard_demo",
+        fast=False,
+        speed="max",
+        steps=560,
+        seed=3,
+        cameras=4,
+        out_dir=tmp_path / "acre-demo-mow",
+        cam_stride=200,
+        map_stride=16,
+        observed_mesh_stride=32,
+        yard_path=tmp_path / "profile.json",
+        yard_profile=YardProfile(
+            name="taught_acre",
+            width_m=70.0,
+            height_m=58.0,
+            resolution_m=0.50,
+            keep_in=keep,
+            home={"x": 12.0, "y": 12.0, "theta": 0.0},
+        ),
+    )
+    session.owner_taught = True
+    session.reset()
+    assert session.policy is not None
+    assert session.policy.phase.value == "explore"
+    assert session.policy.settings.explore_complete <= 0.32
+    assert session.policy.settings.max_explore_steps <= 500
+    session.policy.settings.review_hold_steps = 2
+    session.unattended = True
+    session.job_state = "running"
+    maps0 = session._n_map_builds
+    mesh0 = session._n_mesh_builds
+    mow_steps = 0
+    for _ in range(540):
+        session._advance()
+        phase = session.policy.phase.value
+        if phase == "mow":
+            mow_steps += 1
+            if mow_steps >= 3:
+                break
+        if phase in {"return_home", "complete"}:
+            break
+    last = session.snapshot()
+    phases = {row.get("phase") for row in session.poses}
+    maps = session._n_map_builds - maps0
+    mesh = session._n_mesh_builds - mesh0
+    session.close()
+    assert "explore" in phases
+    assert "mow" in phases or last["phase"] in {"mow", "return_home", "complete"}
+    assert last["phase"] != "explore"
+    assert int(last["step"]) <= 500
+    assert mesh <= max(8, int(last["step"]) // 16)
+    assert maps <= max(16, int(last["step"]) // 8)

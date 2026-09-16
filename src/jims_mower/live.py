@@ -6,6 +6,10 @@ physics. Control stays on ``ObservedMap``. The default owner view is a
 fog veil over unknown cells — not a finished god-view mesh from step 0.
 
 No claimed mAP / FPS. Not a coverage benchmark.
+
+At ``--speed max`` (and 5×) owner-view PNG / observed-mesh / disk flush
+is coarsened and no longer rebuilds on every newly observed cell — that
+used to starve acre physics down to ~2 Hz.
 """
 
 from __future__ import annotations
@@ -69,6 +73,17 @@ MESH_STRIDE_DEFAULT = 8
 MESH_MAX_SIDE = 48
 CAM_WALL_S = 0.40
 POSE_FLUSH_STRIDE = 20
+# High-speed floors. Per-cell map/mesh rebuilds starve acre physics.
+MAP_STRIDE_FAST = 8
+MESH_STRIDE_FAST = 16
+FLUSH_STRIDE_FAST = 40
+CAM_WALL_FAST_S = 0.80
+MAP_MAX_SIDE_FAST = 64
+MESH_MAX_SIDE_FAST = 32
+MAP_STRIDE_MAX = 16
+MESH_STRIDE_MAX = 32
+FLUSH_STRIDE_MAX = 80
+CAM_WALL_MAX_S = 1.25
 ACRE_LIVE_CAM_WIDTH = 48
 ACRE_LIVE_CAM_HEIGHT = 36
 REVIEW_HOLD_WALL_S = 2.0
@@ -251,11 +266,12 @@ def _jpeg_bytes(image: np.ndarray, *, quality: int = CAM_JPEG_QUALITY) -> bytes:
     return buf.getvalue()
 
 
-def _compact_mesh_payload(mesh: Any) -> dict[str, Any]:
+def _compact_mesh_payload(mesh: Any, *, cheap: bool = False) -> dict[str, Any]:
     payload = mesh_to_payload(mesh)
-    for key in ("positions", "normals", "colors", "uvs"):
-        raw = payload.get(key) or []
-        payload[key] = [round(float(v), 4) for v in raw]
+    if not cheap:
+        for key in ("positions", "normals", "colors", "uvs"):
+            raw = payload.get(key) or []
+            payload[key] = [round(float(v), 4) for v in raw]
     payload["kind"] = "observed"
     payload["honesty"] = "physics uses true height; this mesh is ObservedMap only"
     return payload
@@ -345,6 +361,8 @@ class LiveSession:
         self._cam_seq = 0
         self._last_cam_wall = 0.0
         self._n_observed = 0
+        self._n_map_builds = 0
+        self._n_mesh_builds = 0
         self._last_phase = ""
         self.poses: list[dict[str, Any]] = []
         self.camera_names: list[str] = []
@@ -421,6 +439,8 @@ class LiveSession:
         self._cam_seq = 0
         self._last_cam_wall = 0.0
         self._n_observed = 0
+        self._n_map_builds = 0
+        self._n_mesh_builds = 0
         self._last_phase = self.policy.phase.value
         if self.unattended:
             self.job_state = "running"
@@ -495,12 +515,18 @@ class LiveSession:
             return self.cam_jpeg.get(name, b"")
 
     def step_once(self) -> dict[str, Any]:
+        self._advance()
+        return self.snapshot()
+
+    def _advance(self) -> None:
+        """One physics step. Owner-view encode is throttled — do not snapshot."""
         if self.env is None or self.policy is None:
             raise RuntimeError("LiveSession.reset() before stepping")
         if self.done:
-            return self.snapshot()
+            return
         if self.job_state == "teach":
-            return self._step_teach()
+            self._step_teach()
+            return
         if self.estop:
             self.info = dict(self.info or {})
             self.info["estop"] = True
@@ -524,9 +550,9 @@ class LiveSession:
         self._record_pose()
         with self.lock:
             self._seq += 1
-        if self.policy.step % POSE_FLUSH_STRIDE == 0 or self.done:
+        budget = self._stream_budget()
+        if self.policy.step % int(budget["flush_stride"]) == 0 or self.done:
             self._flush_incremental()
-        return self.snapshot()
 
     def run_n(self, n: int) -> dict[str, Any]:
         self.unattended = True
@@ -534,12 +560,13 @@ class LiveSession:
         if self.job_state == "idle":
             self.job_state = "running"
             self._t0_wall = time.perf_counter()
-        last = self.snapshot() if self.started else self.reset()
+        if not self.started:
+            self.reset()
         for _ in range(max(0, int(n))):
             if self.done or self._stop.is_set():
                 break
-            last = self.step_once()
-        return last
+            self._advance()
+        return self.snapshot()
 
     def run_blocking(self) -> dict[str, Any]:
         if not self.started:
@@ -550,14 +577,13 @@ class LiveSession:
         t0 = time.perf_counter()
         step_i = 0
         last_speed = self.speed
-        last = self.snapshot()
         while not self._stop.is_set() and not self.done and step_i < self.max_steps:
             if self.job_state not in {"running", "teach"}:
                 time.sleep(0.05)
                 t0 = time.perf_counter()
                 step_i = 0
                 continue
-            last = self.step_once()
+            self._advance()
             step_i += 1
             if self.speed != last_speed:
                 t0 = time.perf_counter()
@@ -570,7 +596,7 @@ class LiveSession:
                 if delay > 0.0:
                     time.sleep(delay)
         self._flush_incremental(final=True)
-        return last
+        return self.snapshot()
 
     def start_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -1004,7 +1030,7 @@ class LiveSession:
             **self.snapshot(),
         }
 
-    def _step_teach(self) -> dict[str, Any]:
+    def _step_teach(self) -> None:
         assert self.env is not None
         if self.teach_policy is None:
             self.teach_policy = TeachPolicy(self.env.cfg, spec=self.env.geofence_spec())
@@ -1024,13 +1050,11 @@ class LiveSession:
         if terminated or truncated or self.teach_policy.done:
             self.job_state = "paused"
             self.yard_profile = self._draft_profile_from_teach()
-        force_map = False
-        self._refresh_maps(force=force_map)
+        self._refresh_maps(force=False)
         self._refresh_cameras(force=False)
         self._record_pose()
         with self.lock:
             self._seq += 1
-        return self.snapshot()
 
     def _maybe_auto_mow(self) -> None:
         if self.policy is None or self.unattended:
@@ -1093,37 +1117,92 @@ class LiveSession:
         with self.lock:
             self.poses.append(pose)
 
+    def _stream_budget(self) -> dict[str, Any]:
+        """Owner-view cadence. High speed coarsens so physics steps run.
+
+        Map / mesh used to rebuild on every newly observed cell. On acre
+        that is almost every explore step and drops ``--speed max`` to ~2 Hz.
+        """
+        speed = float(self.speed)
+        map_stride = max(1, int(self.map_stride))
+        mesh_stride = max(1, int(self.observed_mesh_stride))
+        flush_stride = POSE_FLUSH_STRIDE
+        cam_wall = CAM_WALL_S
+        map_side = MAP_MAX_SIDE
+        mesh_side = MESH_MAX_SIDE
+        cheap = False
+        skip_coverage = False
+        if speed <= 0.0:
+            map_stride = max(map_stride, MAP_STRIDE_MAX)
+            mesh_stride = max(mesh_stride, MESH_STRIDE_MAX)
+            flush_stride = FLUSH_STRIDE_MAX
+            cam_wall = CAM_WALL_MAX_S
+            map_side = MAP_MAX_SIDE_FAST
+            mesh_side = MESH_MAX_SIDE_FAST
+            cheap = True
+            skip_coverage = True
+        elif speed >= 4.5:
+            map_stride = max(map_stride, MAP_STRIDE_FAST)
+            mesh_stride = max(mesh_stride, MESH_STRIDE_FAST)
+            flush_stride = FLUSH_STRIDE_FAST
+            cam_wall = CAM_WALL_FAST_S
+            map_side = MAP_MAX_SIDE_FAST
+            mesh_side = MESH_MAX_SIDE_FAST
+            cheap = True
+            skip_coverage = True
+        return {
+            "map_stride": map_stride,
+            "mesh_stride": mesh_stride,
+            "flush_stride": flush_stride,
+            "cam_wall": cam_wall,
+            "map_side": int(map_side),
+            "mesh_side": int(mesh_side),
+            "cheap": cheap,
+            "skip_coverage": skip_coverage,
+        }
+
     def _refresh_maps(self, *, force: bool) -> None:
         assert self.policy is not None
         omap = self.policy.observed
         if omap is None:
             return
+        budget = self._stream_budget()
         n_obs = int(omap.observed.sum())
         step = int(self.policy.step)
-        changed = n_obs != self._n_observed
-        if not force and not changed and step % self.map_stride != 0:
-            return
         self._n_observed = n_obs
+        if not force and step % int(budget["map_stride"]) != 0:
+            return
         frontier_cells = [
             omap.world_to_cell(x, y)
             for x, y in self.policy._frontier_xy
             if omap.world_to_cell(x, y) is not None
         ]
-        rgb = coarsen2d(omap.as_rgb(frontiers=frontier_cells), MAP_MAX_SIDE)
-        fog = coarsen2d(fog_rgba(omap.observed), MAP_MAX_SIDE)
+        rgb = coarsen2d(omap.as_rgb(frontiers=frontier_cells), int(budget["map_side"]))
+        fog = coarsen2d(fog_rgba(omap.observed), int(budget["map_side"]))
         observed_png = _png_bytes(rgb)
         fog_png = _png_bytes(fog)
         coverage_png = b""
-        if self.env is not None and hasattr(self.env, "_coverage"):
+        phase = self.policy.phase.value
+        want_coverage = (
+            force
+            or not budget["skip_coverage"]
+            or phase in {"mow", "return_home", "complete"}
+        )
+        if want_coverage and self.env is not None and hasattr(self.env, "_coverage"):
             try:
-                cov = coarsen2d(coverage_to_rgb(self.env._coverage.as_float()), MAP_MAX_SIDE)
+                cov = coarsen2d(coverage_to_rgb(self.env._coverage.as_float()), int(budget["map_side"]))
                 coverage_png = _png_bytes(cov)
             except Exception:
                 coverage_png = b""
         mesh_json = b""
-        if force or step % self.observed_mesh_stride == 0 or changed:
-            mesh = mesh_from_observed(omap, stride=1, max_side=MESH_MAX_SIDE)
-            mesh_json = json.dumps(_compact_mesh_payload(mesh), separators=(",", ":")).encode("utf-8")
+        if force or step % int(budget["mesh_stride"]) == 0:
+            mesh = mesh_from_observed(omap, stride=1, max_side=int(budget["mesh_side"]))
+            mesh_json = json.dumps(
+                _compact_mesh_payload(mesh, cheap=bool(budget["cheap"])),
+                separators=(",", ":"),
+            ).encode("utf-8")
+            self._n_mesh_builds += 1
+        self._n_map_builds += 1
         with self.lock:
             self.observed_png = observed_png
             self.fog_png = fog_png
@@ -1136,7 +1215,8 @@ class LiveSession:
 
     def _refresh_cameras(self, *, force: bool) -> None:
         now = time.perf_counter()
-        if not force and (now - self._last_cam_wall) < CAM_WALL_S:
+        wall = float(self._stream_budget()["cam_wall"])
+        if not force and (now - self._last_cam_wall) < wall:
             return
         cameras = (self.obs or {}).get("cameras") or {}
         if not cameras:
@@ -1336,6 +1416,8 @@ class LiveSession:
         dest.mkdir(parents=True, exist_ok=True)
         maps_dir = dest / "maps"
         maps_dir.mkdir(parents=True, exist_ok=True)
+        budget = self._stream_budget()
+        cheap = bool(budget["cheap"]) and not final
         with self.lock:
             poses = list(self.poses)
             observed_png = self.observed_png
@@ -1343,8 +1425,9 @@ class LiveSession:
             observed_mesh_json = self.observed_mesh_json
             coverage_png = self.coverage_png
             card = dict(self.session_card)
+        pose_kwargs: dict[str, Any] = {"separators": (",", ":")} if cheap else {"indent": 2}
         (dest / "poses.json").write_text(
-            json.dumps({"schema": VIEWER_SCHEMA, "poses": poses}, indent=2),
+            json.dumps({"schema": VIEWER_SCHEMA, "poses": poses}, **pose_kwargs),
             encoding="utf-8",
         )
         if observed_png:
@@ -1368,13 +1451,19 @@ class LiveSession:
         )
         card.setdefault("yard", str(self.config_name))
         timeline["session_summary"] = card
-        (dest / "session_summary.json").write_text(json.dumps(card, indent=2), encoding="utf-8")
-        (dest / "mission.json").write_text(json.dumps(timeline, indent=2), encoding="utf-8")
+        card_kwargs: dict[str, Any] = {"separators": (",", ":")} if cheap else {"indent": 2}
+        (dest / "session_summary.json").write_text(json.dumps(card, **card_kwargs), encoding="utf-8")
+        (dest / "mission.json").write_text(json.dumps(timeline, **card_kwargs), encoding="utf-8")
         if self.policy.profile is not None:
             if not self.policy.profile.keep_out and self.env is not None:
                 self.policy.profile.keep_out = keepouts_from_env(self.env)
             write_yard_profile(dest / "profile.json", self.policy.profile)
-        if final or (self.policy.step % self.cam_stride == 0 and self.obs.get("cameras")):
+        dump_cams = final or (
+            not cheap
+            and self.policy.step % self.cam_stride == 0
+            and self.obs.get("cameras")
+        )
+        if dump_cams:
             dump_step_frames(
                 dest / f"step_{self.policy.step:03d}",
                 self.obs,

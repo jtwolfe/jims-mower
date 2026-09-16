@@ -47,7 +47,9 @@ reach `mow` / `complete`. The full acre / golf run is longer and is
 
 `--speed` on `jims-mower-live` is a wall-clock multiplier (`1`, `2`,
 `5`, or `max`). The sim sleeps so each step lands near `dt / speed`
-(env `dt` is 0.10 s). `max` is unpaced for CI.
+(env `dt` is 0.10 s). `max` is unpaced: physics steps as fast as the
+CPU can, and live map / observed-mesh / PNG / disk flush is coarsened
+so owner-view encode does not drop acre to ~2 Hz.
 
 ## Acre live pacing (`acre_yard_demo`)
 
@@ -65,10 +67,11 @@ profile**, not a smaller world:
   physics lie.
 * Faster calibrate cruise / stride. Live also downsamples acre cameras
   to 48×36 so `--speed 5` can keep up.
-* **Demo map-ready** at `explore_complete: 0.42` (or no remaining
-  frontier at `0.28`) and `max_explore_steps: 1400`. `acre_yard` stays
-  at `0.72` / full fence lap. That is documented demo pacing so MAP
-  READY → MOW can happen in minutes, not an hour.
+* **Demo map-ready** at `explore_complete: 0.30` (or no remaining
+  frontier at `0.22`) **or** `max_explore_steps: 420` even if frontiers
+  remain. `acre_yard` stays at `0.72` / 4000 explore steps / full fence
+  lap. That is documented demo pacing so MAP READY → MOW can happen in
+  a live `--speed 5` / `max` window, not after 1400 starved steps.
 * **Demo mow finish** at `max_mow_steps: 1600` or `mow_complete_frac:
   0.10` of the planned reachable lawn, then `return_home` → `complete`.
   Owner cut % is that job fraction (not world-grass %). `cover_radius_m:
@@ -142,7 +145,8 @@ card from Teach → Save).
   `obs["structure"]` is not a control input outside that mask.
 * Map-ready when `observed` fraction ≥ `mission.explore_complete`, or
   there are no frontiers and the fraction is at least
-  `mission.explore_no_frontier`.
+  `mission.explore_no_frontier`, or `max_explore_steps` elapses
+  (demo: leftover frontiers are OK).
 
 ## Coverage plan
 
