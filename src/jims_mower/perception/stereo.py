@@ -79,12 +79,33 @@ def depth_resolution_m(
     return (z * z / denom) * float(disparity_error_px)
 
 
+def baseline_cm(pair: StereoPair) -> float:
+    """Baseline in centimetres. Field band is 6–12 cm."""
+    return float(pair.baseline_m) * 100.0
+
+
+class StereoPairError(ValueError):
+    """Cameras are not a 6–12 cm stereo pair (look-around, yaw mismatch, …)."""
+
+
+def require_stereo_pair(cameras: Iterable[CameraSpec]) -> StereoPair:
+    """Like :func:`find_stereo_pair` but reject non-pairs with a clear error."""
+    pair = find_stereo_pair(cameras)
+    if pair is None:
+        raise StereoPairError(
+            "no stereo pair: need stereo_left/stereo_right (or a 6–12 cm "
+            "same-yaw pair). Default gym look-arounds are not a pair."
+        )
+    return pair
+
+
 def find_stereo_pair(cameras: Iterable[CameraSpec]) -> Optional[StereoPair]:
-    """Prefer named ``front_left`` / ``front_right`` if they are a true pair.
+    """Prefer named ``stereo_left`` / ``stereo_right`` if they are a true pair.
 
     A pair must share yaw/pitch (≤2°) and sit on a 6–12 cm baseline.
     The default gym look-around cams (40° yaw, 40 cm apart) are **not**
-    a stereo pair.
+    a stereo pair. Named ``front_left`` / ``front_right`` are accepted
+    only when they also sit in that band (the gym defaults do not).
     """
     cams = {c.name: c for c in cameras}
     named = None

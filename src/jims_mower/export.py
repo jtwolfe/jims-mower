@@ -28,8 +28,9 @@ import numpy as np
 from PIL import Image
 
 from jims_mower.constants import DATASET_SCHEMA, LABEL_TO_ID
-from jims_mower.dataset import validate_dataset_meta
+from jims_mower.dataset import assign_frame_split, validate_dataset_meta
 from jims_mower.env import MowerEnv
+from jims_mower.runtime.capture import adapter_kind
 from jims_mower.metrics import POLICIES, _random_action, _scripted_action
 from jims_mower.planning import TerrainPolicy
 from jims_mower.scenarios import load_source
@@ -49,11 +50,17 @@ Synced multi-camera RGB plus oracle yard labels. No claimed mAP / FPS.
   labels/{frame:06d}_elevation.npy  float32 metres, same grid as coverage
   labels/{frame:06d}_slope.npy      float32 radians
   frames/{frame:06d}.json           imu, gps, optional tof, pose, file paths
+  split.json                train / val frame indices (last-frac val)
 ```
 
 `coco.json` lists every camera frame as an image and mock/oracle boxes as
 annotations (`bbox` is `[u, v, w, h]` in pixels). Semantic rasters are
 referenced from each frame sidecar, not as COCO RLE (keep it numpy/PNG).
+
+Train/val: last ``val_frac`` of frames are val (see ``meta.split`` /
+``split.json``). Fake CSI / FakeGst frames are valid for the *pipeline*
+in CI — they are not real photos. Label protocol: ``docs/DATASET.md``.
+No published mAP / IoU.
 """
 
 
@@ -85,6 +92,8 @@ def export_dataset(
     include_tof: bool = True,
     terrain_observer: Optional[str] = None,
     domain_rand: bool = False,
+    adapter: Optional[str] = None,
+    val_frac: float = 0.20,
 ) -> dict[str, Any]:
     name = (policy or "terrain").strip().lower()
     if name not in POLICIES:
@@ -107,6 +116,15 @@ def export_dataset(
         cfg.domain_randomization.shadow_blobs = True
         cfg.domain_randomization.camera_dirt = True
         cfg.domain_randomization.vignette = True
+    if adapter:
+        kind = adapter_kind(adapter)
+        if kind not in {"renderer", "fake_gst", "fake_csi", "gst"}:
+            raise ValueError(
+                "adapter must be renderer|fake_gst|fake_csi|gst; "
+                f"got {adapter!r}"
+            )
+        cfg.runtime.cameras.adapter = "" if kind == "renderer" else kind
+    source_kind = adapter_kind(getattr(cfg.runtime.cameras, "adapter", ""))
     env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
     obs, info = env.reset(seed=seed)
     out_dir = Path(out_dir)
@@ -249,6 +267,11 @@ def export_dataset(
             "camera_dirt": bool(env.cfg.domain_randomization.camera_dirt),
             "vignette": bool(env.cfg.domain_randomization.vignette),
         },
+        "source": source_kind,
+        "adapter": source_kind,
+        "split": assign_frame_split(dumped, val_frac=val_frac),
+        "map_claim": None,
+        "fps_claim": None,
     }
     coco = {
         "info": {
@@ -267,6 +290,9 @@ def export_dataset(
     validate_dataset_meta(meta)
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     (out_dir / "coco.json").write_text(json.dumps(coco, indent=2), encoding="utf-8")
+    (out_dir / "split.json").write_text(
+        json.dumps(meta["split"], indent=2), encoding="utf-8"
+    )
     (out_dir / "LAYOUT.md").write_text(LAYOUT_MD, encoding="utf-8")
     env.close()
     return meta
@@ -292,6 +318,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable renderer domain randomisation for training exports (see docs/WAVE2B.md)",
     )
+    p.add_argument(
+        "--adapter",
+        choices=("renderer", "fake_gst", "fake_csi", "gst"),
+        default=None,
+        help="Camera source. fake_csi / fake_gst are OK in CI (not real photos).",
+    )
+    p.add_argument(
+        "--val-frac",
+        type=float,
+        default=0.20,
+        help="Last-fraction val split written to meta.split / split.json",
+    )
     return p
 
 
@@ -307,6 +345,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         include_tof=not args.no_tof,
         terrain_observer=args.terrain_observer,
         domain_rand=args.domain_rand,
+        adapter=args.adapter,
+        val_frac=args.val_frac,
     )
     print(
         f"Wrote {meta['frames']} frames, cameras={meta['cameras']}, "

@@ -50,7 +50,10 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
   (`runtime.watchdog.enabled`, off by default). Bench overlay:
   [`configs/orin/bench.yaml`](../configs/orin/bench.yaml).
 - [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml)
-  — same `CameraSpec` as the gym.
+  — same `CameraSpec` as the gym (look-around, **not** a stereo pair).
+- [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
+  — EXAMPLE 6–12 cm pair (`calibration.measured: false`). Bench:
+  [`CALIBRATION.md`](CALIBRATION.md), `jims-mower-calibrate`.
 - `GstNvmmAdapter` raises without Gst; CI / bench use `FakeGstAdapter` /
   `FakeCsiDriver` to fill named `obs["cameras"]` at the ICD size
   (`runtime.capture.downsample_rgb`). Prefer `stereo_left` /

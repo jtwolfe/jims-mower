@@ -71,6 +71,8 @@ def test_export_layout(tmp_path: Path) -> None:
     assert meta["world_size"] == [8.0, 8.0]
     assert "domain_randomization" in meta
     assert meta["domain_randomization"]["enabled"] is False
+    assert meta["source"] == "renderer"
+    assert meta["split"]["n_train"] + meta["split"]["n_val"] == meta["frames"]
 
 
 def test_export_omits_tof_when_requested(tmp_path: Path) -> None:
@@ -99,6 +101,42 @@ def test_export_domain_rand_flag(tmp_path: Path) -> None:
     )
     assert meta["domain_randomization"]["enabled"] is True
     assert meta["domain_randomization"]["lighting"] is True
+
+
+def test_export_fake_csi_dataset_v1_and_split(tmp_path: Path) -> None:
+    """CV-8 harness: FakeCsi frames land in jims_mower.dataset.v1 with a split."""
+    meta = export_dataset(
+        tmp_path,
+        steps=4,
+        seed=3,
+        config=_tiny_export_cfg(),
+        cameras=4,
+        policy="scripted",
+        adapter="fake_csi",
+        val_frac=0.25,
+    )
+    assert meta["schema"] == "jims_mower.dataset.v1"
+    assert meta["source"] == "fake_csi"
+    assert meta["adapter"] == "fake_csi"
+    assert meta["map_claim"] is None
+    assert meta["fps_claim"] is None
+    split = meta["split"]
+    assert split["rule"] == "last_frac_val"
+    assert split["n_train"] + split["n_val"] == meta["frames"]
+    assert split["val_frames"]
+    assert (tmp_path / "split.json").is_file()
+    disk = json.loads((tmp_path / "split.json").read_text(encoding="utf-8"))
+    assert disk["train_frames"] == split["train_frames"]
+    # Fake CSI still writes named RGB at the contract size.
+    assert (tmp_path / "images" / "000000_front.png").is_file()
+
+
+def test_assign_frame_split_last_frac() -> None:
+    from jims_mower.dataset import assign_frame_split
+
+    split = assign_frame_split(10, val_frac=0.20)
+    assert split["train_frames"] == list(range(8))
+    assert split["val_frames"] == [8, 9]
 
 
 def test_export_deterministic(tmp_path: Path) -> None:

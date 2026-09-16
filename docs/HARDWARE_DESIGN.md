@@ -281,7 +281,10 @@ low-texture; live control is near-field disparity in the 0.8–4 m band,
 not COLMAP / full-yard SfM.
 
 Preferred example: [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
-— **example poses, not calibrated**:
+— **EXAMPLE poses, not calibrated** (`calibration.measured: false`).
+Bench procedure + gym checks: [`CALIBRATION.md`](CALIBRATION.md).
+Physical measure-and-commit is still required
+(`extrinsics_stereo_measured.yaml`).
 
 | Name | Body \(x,y,z\) m | yaw / pitch | FOV | Role |
 | --- | --- | --- | --- | --- |
@@ -300,8 +303,10 @@ Depth resolution \(\delta Z \approx (Z^2 / fB)\,\delta d\) gets worse
 with range. Size ObservedMap cells from that in the 0.8–4 m band.
 
 Mount pitch is a **lip visibility** choice (see `jims-mower-study
---kind pitch`). After fab, replace the YAML with **measured**
-extrinsics and a taped baseline (PRODUCT_TO_HARDWARE S2R-2).
+--kind pitch`). After fab, follow [`CALIBRATION.md`](CALIBRATION.md):
+tape the 6–12 cm baseline, shoot the checkerboard / lip fixture,
+commit **measured** YAML (PRODUCT_TO_HARDWARE S2R-2 / S2R-3). The
+software bench is ready; the tape numbers are not.
 
 | Sensor | Placement | ICD |
 | --- | --- | --- |
@@ -428,8 +433,11 @@ in this document and retune **software** trips.
 - RF range, TRT FPS, detector mAP: **out of scope** (and forbidden as
   invented numbers).
 - Next *physical* work: JetPack CSI + real cameras (build-order §5 field
-  line), then real IMU/GNSS/ToF chips (§6 field), then stereo
-  calibration (S2R-3). Software CSI → `obs["cameras"]` and gym IMU/GNSS/ToF
-  stubs are done; the physical acceptance lines are not. Gym CV terrain
-  (stereo + seg stub + frozen elev) is software build-order §2. HW ESTOP
-  sim + bench watchdog stamps are §3–4.
+  line), then real IMU/GNSS/ToF chips (§6 field), then **tape** the
+  stereo pair and commit `extrinsics_stereo_measured.yaml` (S2R-3).
+  Software CSI → `obs["cameras"]`, gym IMU/GNSS/ToF stubs, and the
+  calibration **procedure + gym fixture** are done; the physical
+  acceptance lines are not. Gym CV terrain (stereo + seg stub + frozen
+  elev) is software build-order §2. HW ESTOP sim + bench watchdog
+  stamps are §3–4. Dataset harness (CV-8) records FakeCsi →
+  `jims_mower.dataset.v1`; real labels are still a follow-up.

@@ -84,7 +84,9 @@ Do not claim real CSI/IMU. Hardware ESTOP is a separate rail latch
 (`HardwareEstop`) — see [`ESTOP.md`](ESTOP.md).
 
 Prefer [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
-(`stereo_left` / `stereo_right` + mono). The look-around file
+(`stereo_left` / `stereo_right` + mono) as the **EXAMPLE**. After the
+bench in [`CALIBRATION.md`](CALIBRATION.md), load the measured YAML.
+The look-around file
 [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml)
 is the gym default and is **not** a stereo pair.
 

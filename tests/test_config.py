@@ -82,6 +82,13 @@ def test_rejects_bad_camera_adapter() -> None:
         load_config({"runtime": {"cameras": {"adapter": "webcam"}}})
 
 
+def test_calibration_defaults_unmeasured() -> None:
+    cfg = load_config()
+    assert cfg.calibration.measured is False
+    assert cfg.calibration.template is False
+    assert cfg.calibration.tape_baseline_cm is None
+
+
 def test_field_stereo_yaml_names() -> None:
     from pathlib import Path
 

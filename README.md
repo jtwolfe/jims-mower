@@ -126,7 +126,8 @@ jims-mower-app --backend memory --yard configs/yards/example_profile.json --port
 
 Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md),
 [`docs/SCHEDULE.md`](docs/SCHEDULE.md), [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md),
-[`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md).
+[`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md),
+[`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/DATASET.md`](docs/DATASET.md).
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
 Health `#/health` enable toggle arms the weekly window (SOC / rain / fault
@@ -634,10 +635,12 @@ jims-mower-export-trt --dry-run
 | Immobilised vs stuck | Dead motor → `FAULT_IMMOBILISED` + SOS; terrain stuck still recovers |
 | Radio sim | [`radio.py`](src/jims_mower/radio.py) — Wi-Fi → BT → LoRa, no RF hardware |
 | Self-test | `jims-mower-selftest` — spin / IMU still / frame entropy |
-| Notes | [`docs/UX_B.md`](docs/UX_B.md) |
+| Stereo bench | `jims-mower-calibrate` — EXAMPLE YAML + gym lip / tape (not a field measure) |
+| Notes | [`docs/UX_B.md`](docs/UX_B.md), [`docs/CALIBRATION.md`](docs/CALIBRATION.md) |
 
 ```bash
 jims-mower-selftest
+jims-mower-calibrate --fixture
 ```
 
 ## Layout

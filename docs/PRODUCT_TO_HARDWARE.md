@@ -105,7 +105,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | CV-5 | Hand signals | **stub** | Oracle person labels or crop brightness / red-bias classifier. | Confusion matrix on real stop/go/back clips, or **drop the feature** until CV-3 works. | CV-3 |
 | CV-6 | Train → ONNX → TensorRT | **stub** | `jims-mower-export-trt --dry-run` prints a `trtexec` line. `TrtDetector` / `TrtTerrainObserver` load an engine **if you provide one**, else mock/heuristic. No ONNX in-repo. | `trtexec` builds your engine on the Orin; `fps_claim` stays null until you measure. | CV-1 or CV-3 weights |
 | CV-7 | Domain gap (wet / dawn / night) | **partial** | Renderer tints only. Not HDR, IR, or wet-lens. | Same route at noon vs dusk vs wet; hazard stamps must not invert drain vs grass. | CV-1, RT-1 |
-| CV-8 | Dataset (real) | **partial** | Exporter writes oracle PNG + COCO-like index (`jims_mower.dataset.v1`). That is **sim**. No field bag, no label protocol for drain/lip on real CSI. | N frames from the rig, labeled, versioned, train/val split documented. | RT-1, HD-cam |
+| CV-8 | Dataset (real) | **partial** (harness this PR) | Exporter writes `jims_mower.dataset.v1` (oracle PNG + COCO-like index) from renderer **or** FakeCsi/Gst (`--adapter`). Train/val is last-frac (`meta.split` / `split.json`). Label protocol: [`DATASET.md`](DATASET.md). Fake CSI is OK in CI — not real photos. No field bag yet. No published mAP. | N frames from the rig, labeled, versioned, train/val documented. CI: FakeCsi → v1 + split. | RT-1, HD-cam |
 
 ### 2. Mapping
 
@@ -177,8 +177,8 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | S2R-1 | ICD key match | **partial** | Contract is written. Camera software path fills `obs["cameras"]`; IMU/GNSS/ToF/Gst chips are still fakes. | Laptop gym and Orin process the same key set; renderer never imported on-box. | RT-1…RT-3 |
-| S2R-2 | Extrinsics YAML | **partial** | `extrinsics_6cam.yaml` is the gym look-around **example**. Prefer `extrinsics_stereo.yaml` (6–12 cm forward pair + mono) for the field article. Neither is calibrated. | Reproject a checkerboard / drain lip; stereo pair verifies baseline + disparity vs tape. | HD-cam |
-| S2R-3 | Calibration bench | **missing** | No procedure beyond “copy, measure, replace the numbers.” | Written steps + a fixture; saved YAML committed as *measured*. | S2R-2 |
+| S2R-2 | Extrinsics YAML | **partial** (this PR) | `extrinsics_stereo.yaml` is the documented **EXAMPLE** (`calibration.measured: false`). Load + baseline-cm helper rejects non-pairs. Prefer it (6–12 cm forward pair + mono) for the field article. `extrinsics_6cam.yaml` stays the gym look-around. **Neither is taped.** | Reproject a checkerboard / drain lip; stereo pair verifies baseline + disparity vs tape. Gym: `jims-mower-calibrate` / `tests/test_calibration.py`. Field: still measure. | HD-cam |
+| S2R-3 | Calibration bench | **partial** (procedure + gym this PR) | Written steps: [`CALIBRATION.md`](CALIBRATION.md). Gym lip / checkerboard fixture stamps the right ObservedMap cells; ideal disparity matches tape in 0.8–4 m. MEASURED template: `extrinsics_stereo_measured.template.yaml`. Physical measure-and-commit still required. | Human tapes the baseline, writes `extrinsics_stereo_measured.yaml`, `calibration.measured: true`. Not claimed here. | S2R-2 |
 | S2R-4 | Wheel / trimmer scale | **partial** | Action is ±1 of `max_wheel_speed_mps` (1.2). Real motors have different Kv / gearing. | 1.0 command → measured m/s within a stated %. | HD-drive |
 
 ICD keys that **must** match (do not rename): `cameras`, `imu`, `gps`,
@@ -242,15 +242,20 @@ Stop when only **fab + field test** remain.
    Level rest IMU ≈ `(0,0,9.81,0,0,0)`; GNSS `valid` bit toggles; ToF
    corners change when a board is slid under a wheel.
 
-7. **Extrinsics + stereo calibration bench (S2R-2, S2R-3).** Measure
-   the 6–12 cm baseline, write YAML.  
-   *Test:* lip / checkerboard lands in the right ObservedMap cells;
-   disparity vs tape in the 0.8–4 m band.
+7. **Extrinsics + stereo calibration bench (S2R-2, S2R-3).** Procedure
+   + gym checks (this PR). [`CALIBRATION.md`](CALIBRATION.md),
+   `jims-mower-calibrate`, gym lip / tape fixture. EXAMPLE YAML stays
+   unmeasured. Physical tape-and-commit still required on the rig.  
+   *Test:* `pytest tests/test_calibration.py tests/test_stereo.py`.  
+   *Honesty:* no FPS / mAP. Human still measures.
 
-8. **Dataset harness on the rig (CV-8).** Record + label protocol only.
-   No trained production head yet.  
-   *Test:* `jims_mower.dataset.v1` from **real** cameras; train stub may
-   still run; do not publish mAP.
+8. **Dataset harness on the rig (CV-8).** Record + label protocol
+   (this PR, focused). [`DATASET.md`](DATASET.md). FakeCsi/Gst →
+   `jims_mower.dataset.v1` with a documented train/val split. Train
+   stub may still run. No trained production head.  
+   *Test:* `pytest tests/test_export.py tests/test_calibration.py -k dataset`.  
+   *Honesty:* Fake CSI in CI; real CSI + human labels after JetPack.
+   Do not publish mAP.
 
 9. **Terrain seg train → ONNX → TRT (CV-1, CV-6).** Replace heuristic /
    numpy stub.  
@@ -300,17 +305,21 @@ not another WAVE of gym stubs.
 
 ## What this PR ships
 
-- Build-order **§5** (software path): CSI / GStreamer → `obs["cameras"]`
-  (`runtime.capture`, `FakeGstAdapter` / `FakeCsiDriver`,
-  `GstNvmmAdapter` still raises without Gst). Named frames at the ICD
-  contract size with fresh stamps. Bench overlay
-  [`configs/orin/bench.yaml`](../configs/orin/bench.yaml) sets
-  `runtime.cameras.adapter: fake_csi`. Prefer
+- Build-order **§7** (S2R-2 / S2R-3): stereo calibration **procedure +
+  gym acceptance**. [`CALIBRATION.md`](CALIBRATION.md),
+  `jims-mower-calibrate`, `perception/calibration.py`. EXAMPLE
   [`extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
-  names. **Not** physical CSI. No FPS.
-- Build-order **§6** (gym stubs): Fake IMU level-rest, GNSS `valid`
-  toggle, ToF board-under-wheel fixture so the gym acceptance tests
-  are green. Addresses remain documentation. **Not** real BMI / GNSS /
-  VL53.
-- Honest leftover: JetPack + cameras + chips still required for the
-  physical acceptance lines. Calibration bench (S2R-3) is the next PR.
+  stays `calibration.measured: false`. MEASURED template:
+  [`extrinsics_stereo_measured.template.yaml`](../configs/orin/extrinsics_stereo_measured.template.yaml).
+  Gym lip / checkerboard fixture stamps ObservedMap cells; ideal
+  disparity matches tape in the 0.8–4 m band. **Not** a taped
+  baseline. No FPS / mAP.
+- Build-order **§8** (CV-8, focused): label protocol
+  [`DATASET.md`](DATASET.md); FakeCsi/Gst frames export to
+  `jims_mower.dataset.v1` with a documented train/val split
+  (`meta.split` / `split.json`). Train stub may still run. **Not** a
+  field bag. Do not publish mAP.
+- Honest leftover: a human on the rig still measures and commits
+  `extrinsics_stereo_measured.yaml`. JetPack + real CSI still required
+  for the physical acceptance lines. Do not start §9 (ONNX/TRT heads)
+  from this PR.

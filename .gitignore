@@ -36,6 +36,9 @@ htmlcov/
 .vscode/
 *.swp
 
+# Local measured extrinsics (commit only after a real tape bench)
+configs/orin/extrinsics_stereo_measured.yaml
+
 # Demo / local artifacts (keep the package configs/)
 /artifacts/
 /demo_out/
