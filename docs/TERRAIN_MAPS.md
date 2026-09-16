@@ -126,8 +126,9 @@ move, not so the job finishes. Mesh export should use `--stride 3` or
 
 `acre_yard_demo` is a **live demo profile**: same 70×58 m physics and
 authored pond/sheds, slightly tighter keep-in, `calibrate_confirm_m: 28`,
-and `explore_complete: 0.42` so `--speed 5` can reach **MAP READY then
-MOW** in minutes. `acre_yard` stays at `0.72` and a full fence lap.
+and `explore_complete: 0.30` / `max_explore_steps: 420` so `--speed 5`
+and `--speed max` can reach **MAP READY then MOW** in minutes.
+`acre_yard` stays at `0.72` / 4000 and a full fence lap.
 A first-run teach (`jims-mower-owner --live` → Teach → Save) replaces
 that authored confirm with a `YardProfile` keep-in; the acre physics
 world does not shrink. The live viewer shows a growing **observed**

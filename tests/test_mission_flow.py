@@ -306,14 +306,14 @@ def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
     cfg.sensors.height = 12
     cfg.sensors.camera_count = 4
     cfg.sensors.cameras = []
-    cfg.max_steps = 1100
+    cfg.max_steps = 720
     env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
     obs, info = env.reset(seed=3)
     policy = MissionPolicy(env.cfg)
     policy.reset(obs, info)
     seen: list[str] = []
     cut = 0.0
-    for _ in range(1000):
+    for _ in range(680):
         if policy.phase.value not in seen:
             seen.append(policy.phase.value)
         action = policy.act(obs, info)
@@ -328,8 +328,10 @@ def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
     assert "explore" in seen
     assert "review" in seen
     assert "mow" in seen or policy.phase.value == "mow"
-    assert status["map_completion"] >= 0.40
-    assert policy.step < 1000
+    assert policy.settings.explore_complete <= 0.32
+    assert policy.settings.max_explore_steps <= 500
+    assert status["map_completion"] >= 0.18
+    assert policy.step < 700
     # Ridge recovery must leave a first paint, not park on tip-stop.
     assert cut > 0.0
 

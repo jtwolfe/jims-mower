@@ -27,6 +27,7 @@
 #   same keys as EnvConfig (merged onto `base`)
 # mission:
 #   explore_complete, stamp_radius_m, max_*_steps — calibrate→explore→mow
+#   acre_yard_demo: 0.30 / 420 steps (leftover frontiers OK). acre_yard: 0.72 / 4000
 # world.terrain.base_gradient:
 #   slope_rad / slope_pct, yaw_rad (ascent heading), undulation_m
 #   Default yards are a mild planar grade, not a flat pad. The curriculum

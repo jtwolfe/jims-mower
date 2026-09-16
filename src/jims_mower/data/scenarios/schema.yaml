@@ -31,8 +31,9 @@
 #   calibrate_confirm_m — demo: close after N metres, use authored keep-in
 #   phase_budget_scale — live --phase-budget (does not change physics)
 #   review_hold_steps — MAP READY beat before auto-mow (owner Start mow skips)
-#   explore_complete on acre_yard_demo is a demo threshold (0.42), not the
-#   honest full-acre 0.72 on acre_yard
+#   explore_complete on acre_yard_demo is a demo threshold (0.30 / 420
+#   steps, leftover frontiers OK), not the honest full-acre 0.72 / 4000
+#   on acre_yard
 #   mow_complete_frac / max_mow_steps / cover_radius_m — demo finish
 #   (acre_yard_demo only). acre_yard does not early-home.
 # world.terrain.base_gradient:

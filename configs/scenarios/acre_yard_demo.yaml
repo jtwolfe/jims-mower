@@ -2,16 +2,19 @@
 # Same ~1 acre world (70×58 m @ 0.50 m) and the same pond / sheds /
 # paths / drains as acre_yard. Calibrate closes after a short
 # confirmation drive on the authored keep-in (~28 m), then EXPLORE.
-# A full 226 m fence lap is acre_yard, not this file.
+# Demo explore finishes around 0.30 map or ~420 steps even with leftover
+# frontiers so a live --speed 5 / max window can reach MAP READY → MOW.
+# A full 226 m fence lap / 0.72 map-ready is acre_yard, not this file.
 kind: scenario
 name: acre_yard_demo
 description: >
   LIVE DEMO of the one-acre yard: same 70×58 m features and true-height
   physics as acre_yard, with a slightly tighter keep-in, a short
-  calibrate confirmation, demo explore_complete (0.42), then a demo mow
-  budget (max_mow_steps / mow_complete_frac) so --speed 5 can paint and
-  return_home → complete. Full acre_yard stays at 0.72 / full fence lap
-  and is the honest long run. Not a coverage benchmark.
+  calibrate confirmation, demo explore_complete (0.30) / max_explore_steps
+  (420), then a demo mow budget (max_mow_steps / mow_complete_frac) so
+  --speed 5 and --speed max can paint and return_home → complete. Full
+  acre_yard stays at 0.72 / 4000 explore steps / full fence lap and is
+  the honest long run. Not a coverage benchmark.
 base: default
 weather:
   lighting: day
@@ -168,14 +171,16 @@ mission:
   stamp_radius_m: 3.20
   camera_range_m: 10.5
   max_calibrate_steps: 280
-  max_explore_steps: 1400
+  max_explore_steps: 420
   # Demo mow budget. acre_yard stays at 8000 / no early home.
   max_mow_steps: 1600
   max_return_steps: 400
   snapshot_stride: 40
-  # Demo threshold only. acre_yard stays at 0.72 / full lap.
-  explore_complete: 0.42
-  explore_no_frontier: 0.28
+  # Demo threshold only. acre_yard stays at 0.72 / 4000 / full lap.
+  # 0.30 or the 420-step cap ends explore while frontiers remain so a
+  # live laptop window can reach MAP READY. Not a coverage benchmark.
+  explore_complete: 0.30
+  explore_no_frontier: 0.22
   explore_cruise: 0.98
   mow_cruise: 0.92
   mow_complete_frac: 0.10

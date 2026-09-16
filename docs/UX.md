@@ -38,9 +38,10 @@ browser does not OOM.
 `acre_yard_demo` is a **live demo profile**: same ~1 acre features and
 physics as `acre_yard`, slightly tighter keep-in, short calibrate
 confirmation (`calibrate_confirm_m: 28`), and a **demo**
-`explore_complete: 0.42` so `--speed 5` can reach **MAP READY then
-MOW** in a practical window. `acre_yard` stays at `0.72` and a full
-fence lap. It is not a coverage benchmark. See
+`explore_complete: 0.30` / `max_explore_steps: 420` so `--speed 5` and
+`--speed max` can reach **MAP READY then MOW** in a practical window
+even with leftover frontiers. `acre_yard` stays at `0.72` / 4000 and a
+full fence lap. It is not a coverage benchmark. See
 [`MISSION_FLOW.md`](MISSION_FLOW.md). The viewer owner bar starts,
 pauses, sets speed, holds MAP READY for a 2 s beat (or **Start mow**),
 and ESTOPs locally. The phone app (`jims-mower-owner --live`) is the

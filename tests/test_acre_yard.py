@@ -110,8 +110,10 @@ def test_acre_yard_demo_is_same_acre_with_faster_calibrate() -> None:
     assert cfg.mission.calibrate_confirm_m >= 20.0
     assert cfg.mission.max_calibrate_steps < full.mission.max_calibrate_steps
     assert cfg.mission.explore_complete < full.mission.explore_complete
-    assert cfg.mission.explore_complete <= 0.45
-    assert cfg.mission.max_explore_steps <= 1400
+    assert cfg.mission.explore_complete <= 0.32
+    assert cfg.mission.max_explore_steps <= 500
+    assert full.mission.explore_complete >= 0.70
+    assert full.mission.max_explore_steps >= 3000
     area = (cfg.mission.calibrate_confirm_m or 0.0) < 80.0
     assert area
     # Tighter keep-in than the full fence, still covers pond + sheds.
