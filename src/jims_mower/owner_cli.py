@@ -37,12 +37,19 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def resolve_owner_live_config(config: Optional[str], *, fast: bool) -> str:
+    """``--fast`` is mission_tiny. Interactive default is acre_yard_demo."""
+    if config:
+        return config
+    return "mission_tiny" if fast else "acre_yard_demo"
+
+
 def main(argv: Optional[list[str]] = None) -> None:
     args = build_parser().parse_args(argv)
     if args.live:
         from jims_mower.app.cli import main as app_main
 
-        config = args.config or "acre_yard_demo"
+        config = resolve_owner_live_config(args.config, fast=args.fast)
         port = args.port if args.port is not None else APP_LIVE_PORT
         launch = [
             "--live",
@@ -67,6 +74,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             launch.append("--first-run")
         if args.yard is not None:
             launch.extend(["--yard", str(args.yard)])
+        if args.out is not None and args.out != Path("owner_overlay.html"):
+            launch.extend(["--out", str(args.out)])
         app_main(launch)
         return
     payload = export_owner_overlay(
