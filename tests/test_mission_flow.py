@@ -290,6 +290,11 @@ def test_review_hold_waits_until_start_mow() -> None:
         action = policy.act(obs, info)
         obs, _reward, _term, _trunc, info = env.step(action)
         assert policy.phase == MissionPhase.REVIEW
+    if policy.global_plan is None or len(getattr(policy.global_plan, "waypoints", [])) < 2:
+        from jims_mower.planning.coverage import CoveragePlan
+
+        policy.global_plan = CoveragePlan(waypoints=[(1.2, 1.2), (2.4, 1.8), (3.0, 2.2)])
+        policy.plan = policy.global_plan
     assert policy.request_start_mow() is True
     policy.act(obs, info)
     env.close()
