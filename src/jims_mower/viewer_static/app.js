@@ -205,7 +205,7 @@ function applyPhaseLayerDefaults(phase) {
   if (!phase || phase === state.lastDefaultPhase) return;
   state.lastDefaultPhase = phase;
   const mapping = phase === "explore" || phase === "calibrate_boundary" || phase === "teach";
-  const mowing = phase === "mow" || phase === "return_home" || phase === "complete";
+  const mowing = phase === "mow" || phase === "return_home" || phase === "charging" || phase === "complete";
   if (mapping) {
     if ($("tog-explore")) $("tog-explore").checked = true;
     if ($("tog-trail")) $("tog-trail").checked = true;
@@ -370,7 +370,7 @@ function updatePose(i) {
   setPhaseBar(phase);
   setMissionMetrics(i);
   updateObservedOverlay(i);
-  const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
+  const showMow = phase === "mow" || phase === "return_home" || phase === "charging" || phase === "complete" || phase === "review";
   if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
   if (state.exploreLine) {
     const exploreOn = $("tog-explore") ? $("tog-explore").checked : true;
@@ -769,9 +769,13 @@ function setOwnerBar(frame) {
   const resume = $("btn-job-resume");
   if (resume) resume.disabled = frame.job_state !== "paused" && frame.job_state !== "hold";
   const startMow = $("btn-start-mow");
-  if (startMow) startMow.hidden = !frame.can_start_mow;
+  if (startMow) startMow.disabled = !!frame.needs_reteach;
   const reexplore = $("btn-reexplore");
   if (reexplore) reexplore.hidden = !frame.can_reexplore;
+  const fullBtn = $("btn-full-explore");
+  if (fullBtn) fullBtn.classList.toggle("active", !!frame.full_explore);
+  const reason = frame.explore_reason || {};
+  if (reason.label) $("save-status").textContent = reason.label;
   setPhaseBar(idle ? "" : (frame.phase || ""));
   applyPhaseLayerDefaults(idle ? "" : (frame.phase || ""));
   const chip = $("phase-chip");
@@ -811,7 +815,17 @@ function bindOwnerBar() {
     btn.addEventListener("click", () => postControl("speed", { speed: btn.dataset.speed }).catch(() => {}));
   });
   const startMow = $("btn-start-mow");
-  if (startMow) startMow.addEventListener("click", () => postControl("start_mow").catch(() => {}));
+  if (startMow) startMow.addEventListener("click", () => postControl("mow").catch(() => {}));
+  const explore = $("btn-explore");
+  if (explore) explore.addEventListener("click", () => postControl("explore").catch(() => {}));
+  const ret = $("btn-return");
+  if (ret) ret.addEventListener("click", () => postControl("return").catch(() => {}));
+  const fullBtn = $("btn-full-explore");
+  if (fullBtn) {
+    fullBtn.addEventListener("click", () => {
+      postControl("full_explore", { enabled: !fullBtn.classList.contains("active") }).catch(() => {});
+    });
+  }
   const reexplore = $("btn-reexplore");
   if (reexplore) reexplore.addEventListener("click", () => postControl("reexplore").catch(() => {}));
   const estop = $("btn-estop");
@@ -862,7 +876,7 @@ function applyLiveFrame(frame) {
         `planned ${(100 * (frame.planned_pct || 0)).toFixed(1)}%  cut ${(100 * (frame.cut_pct || 0)).toFixed(1)}%\n` +
         `skips ${frame.skips || 0}`;
     }
-    const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
+    const showMow = phase === "mow" || phase === "return_home" || phase === "charging" || phase === "complete" || phase === "review";
     if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
     applyPhaseLayerDefaults(phase);
   }

@@ -27,6 +27,7 @@ MODE_ROWS: dict[str, dict[str, str]] = {
     "review": {"label": "Map ready — review", "tone": "review", "kind": "mapping"},
     "mow": {"label": "Mowing", "tone": "mow", "kind": "mowing"},
     "return_home": {"label": "Returning home", "tone": "home", "kind": "mowing"},
+    "charging": {"label": "Charging", "tone": "home", "kind": "idle"},
     "complete": {"label": "Done", "tone": "done", "kind": "done"},
     "safe": {"label": "Hold — safe", "tone": "idle", "kind": "idle"},
     "fault": {"label": "Fault", "tone": "idle", "kind": "idle"},
@@ -51,6 +52,14 @@ OVERLAY_COLORS = {
     "keepout": "#c82828",
     "target": "#ffee88",
     "pose": "#f3f6f1",
+    "grass": "#2e8c3a",
+    "mowable": "#7de66e",
+    "path": "#80807a",
+    "sand": "#d2b478",
+    "building": "#b08a56",
+    "water": "#1ca4d6",
+    "drain": "#c46024",
+    "beds": "#58763c",
 }
 
 
@@ -182,6 +191,7 @@ def mission_from_phase(phase: str, job_state: str = "running") -> str:
         "review": "review",
         "mow": "mowing",
         "return_home": "returning",
+        "charging": "charging",
         "complete": "idle",
         "safe": "idle",
         "idle": "idle",
@@ -229,7 +239,7 @@ def build_path_overlay(
             trail_xy = [[pose_row["x"], pose_row["y"]]]
 
     show_explore = key in TEACH_PHASES or key == "explore"
-    show_plan = key in MOWING_PHASES or key in {"review", "complete"}
+    show_plan = key in MOWING_PHASES or key in {"review", "complete", "charging"}
     plan_xy = downsample_xy(plan or [], PLAN_MAX_POINTS) if show_plan else []
     explore_xy = downsample_xy(explore or [], EXPLORE_MAX_POINTS) if show_explore else []
     frontier_xy = downsample_xy(frontiers or [], FRONTIER_MAX_POINTS) if show_explore else []

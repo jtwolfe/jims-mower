@@ -72,7 +72,7 @@ JSON in / JSON out. Same origin as the static shell.
 | `POST` | `/yards/select` | `{name}` — switch profile; keep-in/home replace (no fence bleed) |
 | `GET` | `/notifications` | in-app skip/finish list (not SMS; UX-2) |
 | `GET` | `/ota` | SAF-4 documented no-op (`available: false`) |
-| `POST` | `/command` | `{cmd, reason?, pin?}` — `start` / `stop` / `return` / `estop` / `teach` / `pair` / `unpair` |
+| `POST` | `/command` | `{cmd, reason?, pin?}` — `start` / `stop` / `return` / `estop` / `teach` / `pair` / `unpair` / `explore` / `mow` |
 | `GET` | `/map/mesh` | coarse occupancy mesh + `ux_a_href` |
 | `GET` | `/map/coverage` | downsampled cut/uncut raster |
 | `GET` | `/events` | SSE `data: <status>`; `?n=2` bounds the stream for tests |
@@ -86,17 +86,23 @@ JSON in / JSON out. Same origin as the static shell.
 
 `--live` `/status` also carries `backend: live`, `robot`
 (idle / pairing / live / fault), `owner_copy`, `radio_path` chips,
-map/cut/planned %, `session_summary`, fog / observed / coverage URLs, and a
+map/cut/planned %, `session_summary`, fog / observed / coverage / areas
+URLs, `explore_reason` (seeking frontier / path blocked / tip recovery /
+map % of target / step cap), `full_explore`, `charge_state`, and a
 `path_overlay` (`trail` / `plan` / `frontiers` / `pose` / `target` /
 `phase`) plus `mode_banner` so the phone can tell **Mapping** from
 **Mowing** without the 3D viewer. `state.mission` follows **phase**
 (explore / review / teach — never `running` → mowing). Overlay arrays
 are downsampled for SSE. Keep-out holes draw red on the phone fence.
-No mAP / RF range claimed.
+Area-type legend: grass / mow-this / path / sand / building / water /
+drain / beds / keep-out / fog. No mAP / RF range claimed.
 
 `POST /command` `start` after ESTOP is the operator clear. On `--live`
 it forwards to `LiveSession.control` (`start` / `pause` / `estop` /
-`start_mow` / `inject` / `pair` / `teach` / `save_yard` / `load_yard`).
+`explore` / `mow` / `return` / `full_explore` / `start_mow` / `inject` /
+`pair` / `teach` / `save_yard` / `load_yard`). Manual Explore / Mow /
+Return do not wait for auto phase transitions. Low-SOC inject docks,
+charges in gym, and resumes the leftover uncut plan.
 
 ## Thin app shell
 
@@ -105,8 +111,9 @@ Narrow phone chrome (~390 px). Hash routes:
 
 - `#/onboard/unbox` → `pair` → `home` → `teach` → `mow`
 - `#/map` — live job: large **Mapping yard** / **Mowing** mode chip,
-  fog + observed + cut raster, SVG trail / plan / frontiers / pose,
-  Map% vs Cut% emphasis, and a Fog/Mapped/Trail/Plan/Cut legend.
+  fog + observed + cut + area-type raster, SVG trail / plan / frontiers / pose,
+  Map% vs Cut% emphasis, Explore / Mow / Return, Full explore toggle,
+  and a Fog/Mapped/Trail/Plan/Cut plus area-type legend.
   Pause / Hold / ESTOP stay as a hold badge on the same phase. Pair
   still required before Start. Else 2D SVG yard.
 - `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run
@@ -185,7 +192,7 @@ Inject stuck vs dead-motor SOS from the job or SOS tab.
 ## Tests
 
 ```bash
-pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_first_run.py tests/test_live.py tests/test_path_overlay.py tests/test_schedule.py
+pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_first_run.py tests/test_live.py tests/test_path_overlay.py tests/test_schedule.py tests/test_owner_phases.py
 jims-mower-app --live --help
 jims-mower-owner --live --first-run --help
 ```

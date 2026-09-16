@@ -459,13 +459,34 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     </div>`;
   }
 
-  function legendHtml() {
+  function areaLegendRows(st, live) {
+    const rows = (st && st.area_legend) || (live && live.area_legend) || [];
+    if (rows.length) return rows;
+    return [
+      { id: "grass", label: "Grass", color: "#2e8c3a" },
+      { id: "mowable", label: "Mow this", color: "#7de66e" },
+      { id: "path", label: "Path", color: "#80807a" },
+      { id: "sand", label: "Sand", color: "#d2b478" },
+      { id: "building", label: "Building", color: "#b08a56" },
+      { id: "water", label: "Water", color: "#1ca4d6" },
+      { id: "drain", label: "Drain", color: "#c46024" },
+      { id: "beds", label: "Beds", color: "#58763c" },
+      { id: "keepout", label: "Keep-out", color: "#c82828" },
+      { id: "fog", label: "Fog", color: "#1c1e22" },
+    ];
+  }
+
+  function legendHtml(st, live) {
+    const areas = areaLegendRows(st, live)
+      .map((row) => `<span><i class="swatch area" style="background:${row.color}"></i>${row.label}</span>`)
+      .join("");
     return `<div class="map-legend" id="map-legend" aria-label="map legend">
       <span><i class="swatch fog"></i>Fog</span>
       <span><i class="swatch mapped"></i>Mapped</span>
       <span><i class="swatch trail"></i>Trail</span>
       <span><i class="swatch plan"></i>Plan</span>
       <span><i class="swatch cut"></i>Cut</span>
+      ${areas}
     </div>`;
   }
 
@@ -487,10 +508,14 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const copy = st.owner_copy || live.owner_copy || "Yard unknown — start a job when ready.";
     const speed = String(st.speed_label || live.speed_label || "5");
     const needsReteach = !!(st.needs_reteach || live.needs_reteach || st.fence_unusable || live.fence_unusable);
-    const canMow = !!(st.can_start_mow || live.can_start_mow) && !needsReteach;
+    const canMow = !needsReteach;
+    const reason = (st.explore_reason || live.explore_reason || {});
+    const reasonLine = reason.label || "";
+    const fullExplore = !!(st.full_explore || live.full_explore);
     const fog = live.fog_url || st.fog_url || "/api/live/fog.png";
     const observed = live.observed_url || st.observed_url || "/api/live/observed.png";
     const coverage = live.coverage_url || st.coverage_url || "/api/live/coverage.png";
+    const areas = live.areas_url || st.areas_url || "/api/live/areas.png";
     const path = st.radio_path || live.radio_path || {};
     const yardName = (state.yard && state.yard.name) || st.yard || live.yard || "yard";
     const saved = !!(st.yard_saved || live.yard_saved);
@@ -501,14 +526,16 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       ${radioChipsHtml(path)}
       ${modeBannerHtml(st, live)}
       <p class="owner-copy secondary" id="owner-copy">${copy}</p>
+      <p class="sub explore-reason" id="explore-reason" ${reasonLine ? "" : "hidden"}>${reasonLine}</p>
       <p class="sub" id="yard-chip">${yardName}${taught ? " · taught fence" : " · authored demo fence until you teach"}</p>
       <div class="live-preview kind-${kind}" id="live-preview">
         <img class="obs" id="obs-img" alt="observed terrain" src="${observed}"/>
         <img class="cut" id="cut-img" alt="cut coverage" src="${coverage}"/>
+        <img class="areas" id="areas-img" alt="area types and mowable mask" src="${areas}"/>
         <img class="fog" id="fog-img" alt="fog of war" src="${fog}"/>
         ${fenceOverlayHtml(st, live)}
       </div>
-      ${legendHtml()}
+      ${legendHtml(st, live)}
       ${progressRowHtml(st, live)}
       <div class="speed-row" id="speed-row">
         <button type="button" data-speed="1">1×</button>
@@ -526,14 +553,21 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <button class="btn ghost" id="pause" ${job !== "running" && job !== "teach" ? "disabled" : ""}>Pause</button>
       </div>
       <button class="btn ghost" id="resume" ${job !== "paused" && job !== "hold" ? "disabled" : ""}>Resume</button>
+      <div class="row phase-row" id="phase-row">
+        <button class="btn ghost" id="cmd-explore">Explore</button>
+        <button class="btn warn" id="cmd-mow" ${canMow ? "" : "disabled"}>Mow</button>
+        <button class="btn ghost" id="cmd-return">Return</button>
+      </div>
+      <button class="btn ghost ${fullExplore ? "on" : ""}" id="full-explore" aria-pressed="${fullExplore ? "true" : "false"}">${fullExplore ? "Full explore on" : "Full explore off"}</button>
       ${needsReteach ? `<button class="btn warn" id="reteach-cmd">Re-teach fence</button>` : ""}
-      ${canMow ? `<button class="btn warn" id="start-mow">Start mow</button>` : ""}
+      ${canMow && (st.can_start_mow || live.can_start_mow) ? `<button class="btn warn" id="start-mow">Start mow</button>` : ""}
       <button class="btn danger" id="estop">ESTOP</button>
       ${sessionCardHtml(st, live)}
       <div class="row">
         <button class="btn ghost" id="inj-stuck">Inject stuck</button>
         <button class="btn ghost" id="inj-sos">Inject SOS</button>
         <button class="btn ghost" id="inj-radio">Inject radio lost</button>
+        <button class="btn ghost" id="inj-soc">Inject low SOC</button>
         <button class="btn ghost" id="unpair">Unpair</button>
       </div>
       <p style="margin-top:10px"><a class="linkish" href="/viewer">Open live fog viewer</a></p>`;
@@ -551,9 +585,26 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     $("#pause").onclick = () => liveControl("pause");
     $("#resume").onclick = () => liveControl("resume");
     const mow = $("#start-mow");
-    if (mow) mow.onclick = () => liveControl("start_mow");
+    if (mow) mow.onclick = () => liveControl("mow");
+    const exploreBtn = $("#cmd-explore");
+    if (exploreBtn) {
+      exploreBtn.onclick = () => {
+        const fullEl = $("#full-explore");
+        liveControl("explore", { full: !!(fullEl && fullEl.classList.contains("on")) });
+      };
+    }
+    const mowBtn = $("#cmd-mow");
+    if (mowBtn) mowBtn.onclick = () => liveControl("mow");
+    const returnBtn = $("#cmd-return");
+    if (returnBtn) returnBtn.onclick = () => liveControl("return");
+    const fullBtn = $("#full-explore");
+    if (fullBtn) {
+      fullBtn.onclick = () => liveControl("full_explore", { enabled: !fullBtn.classList.contains("on") });
+    }
     $("#estop").onclick = () => liveControl("estop");
     $("#inj-stuck").onclick = () => liveControl("inject", { kind: "stuck" });
+    const injSoc = $("#inj-soc");
+    if (injSoc) injSoc.onclick = () => liveControl("inject", { kind: "low_soc", soc: 0.12 });
     $("#inj-sos").onclick = async () => {
       await liveControl("inject", { kind: "sos" });
       go("fault");
@@ -729,13 +780,20 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const phaseChanged = prev.phase !== frame.phase || prev.job_state !== frame.job_state;
     const buttonsChanged =
       !!prev.can_start_mow !== !!frame.can_start_mow ||
-      !!prev.needs_reteach !== !!frame.needs_reteach;
+      !!prev.needs_reteach !== !!frame.needs_reteach ||
+      !!prev.full_explore !== !!frame.full_explore ||
+      String(prev.charge_state || "") !== String(frame.charge_state || "");
     if (state.status) {
       state.status.cut_pct = 100 * Number(frame.cut_pct || 0);
       state.status.map_pct = 100 * Number(frame.map_pct || 0);
       state.status.done = !!(frame.done || frame.phase === "complete");
       state.status.owner_copy = frame.owner_copy;
       state.status.can_start_mow = frame.can_start_mow;
+      state.status.explore_reason = frame.explore_reason;
+      state.status.full_explore = frame.full_explore;
+      state.status.charge_state = frame.charge_state;
+      state.status.areas_url = frame.areas_url || state.status.areas_url;
+      state.status.area_legend = frame.area_legend || state.status.area_legend;
       state.status.needs_reteach = frame.needs_reteach;
       state.status.path_overlay = frame.path_overlay;
       state.status.mode_banner = frame.mode_banner;
@@ -758,6 +816,12 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     }
     const copy = $("#owner-copy");
     if (copy && frame.owner_copy) copy.textContent = frame.owner_copy;
+    const reasonEl = $("#explore-reason");
+    if (reasonEl) {
+      const label = (frame.explore_reason && frame.explore_reason.label) || "";
+      reasonEl.textContent = label;
+      reasonEl.hidden = !label;
+    }
     const mode = frame.mode_banner || (frame.path_overlay && frame.path_overlay.mode) || {};
     const banner = $("#mode-banner");
     if (banner) {
@@ -809,6 +873,14 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (obs && frame.observed_url) obs.src = frame.observed_url;
     const cutImg = $("#cut-img");
     if (cutImg && frame.coverage_url) cutImg.src = frame.coverage_url;
+    const areasImg = $("#areas-img");
+    if (areasImg && frame.areas_url) areasImg.src = frame.areas_url;
+    const fullBtn = $("#full-explore");
+    if (fullBtn && frame.full_explore != null) {
+      fullBtn.classList.toggle("on", !!frame.full_explore);
+      fullBtn.setAttribute("aria-pressed", frame.full_explore ? "true" : "false");
+      fullBtn.textContent = frame.full_explore ? "Full explore on" : "Full explore off";
+    }
     paintLiveOverlay(state.status || {}, frame);
   }
 

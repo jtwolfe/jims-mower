@@ -428,6 +428,9 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         if path == "/api/live/coverage.png":
             self._send_live_bytes(self._live_coverage(), "image/png")
             return
+        if path == "/api/live/areas.png":
+            self._send_live_bytes(self._live_areas(), "image/png")
+            return
         if path == "/api/live/observed_mesh.json":
             self._send_live_bytes(self._live_observed_mesh(), "application/json")
             return
@@ -486,6 +489,16 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         if hasattr(session, "coverage_png_bytes"):
             return session.coverage_png_bytes()
         path = self.data_dir / "maps" / "coverage.png"
+        return path.read_bytes() if path.is_file() else b""
+
+    def _live_areas(self) -> bytes:
+        session = self.session
+        if session is None:
+            path = self.data_dir / "maps" / "areas.png"
+            return path.read_bytes() if path.is_file() else b""
+        if hasattr(session, "areas_png_bytes"):
+            return session.areas_png_bytes()
+        path = self.data_dir / "maps" / "areas.png"
         return path.read_bytes() if path.is_file() else b""
 
     def _live_observed_mesh(self) -> bytes:

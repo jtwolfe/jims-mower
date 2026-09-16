@@ -85,6 +85,7 @@ def test_mission_from_phase_not_running_equals_mowing() -> None:
     assert mission_from_phase("review", "running") == "review"
     assert mission_from_phase("mow", "running") == "mowing"
     assert mission_from_phase("return_home", "running") == "returning"
+    assert mission_from_phase("charging", "running") == "charging"
     assert mission_from_phase("explore", "paused") == "idle"
     assert mission_from_phase("mow", "estop") == "estop"
     assert mission_from_phase("calibrate_boundary", "idle") == "idle"
@@ -123,6 +124,7 @@ def test_build_path_overlay_explore_hides_mow_plan() -> None:
     assert overlay["mission"] == "explore"
     assert overlay["colors"]["trail"] == "#aa88ff"
     assert overlay["colors"]["plan"] == "#2ad4e6"
+    assert overlay["colors"]["mowable"] == "#7de66e"
 
 
 def test_build_path_overlay_mow_shows_plan_not_frontiers() -> None:

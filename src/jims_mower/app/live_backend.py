@@ -243,6 +243,15 @@ class LiveBackend:
             "owner_copy": snap.get("owner_copy"),
             "can_start_mow": bool(snap.get("can_start_mow")),
             "can_reexplore": bool(snap.get("can_reexplore")),
+            "can_explore": bool(snap.get("can_explore", True)),
+            "can_mow": bool(snap.get("can_mow", snap.get("can_start_mow"))),
+            "can_return": bool(snap.get("can_return")),
+            "explore_reason": snap.get("explore_reason") or {},
+            "full_explore": bool(snap.get("full_explore")),
+            "charge_state": snap.get("charge_state") or "",
+            "return_kind": snap.get("return_kind") or "",
+            "area_legend": snap.get("area_legend") or [],
+            "areas_url": snap.get("areas_url"),
             "needs_reteach": bool(snap.get("needs_reteach")),
             "fence_unusable": bool(snap.get("fence_unusable")),
             "session_summary": snap.get("session_summary") or {},
@@ -294,7 +303,7 @@ class LiveBackend:
 
     def command(self, cmd: str, *, reason: str = "", **kwargs: Any) -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
-        mapped = {"stop": "pause", "return": "hold"}.get(key, key)
+        mapped = {"stop": "pause"}.get(key, key)
         extra: dict[str, Any] = dict(kwargs)
         if reason:
             extra["reason"] = reason

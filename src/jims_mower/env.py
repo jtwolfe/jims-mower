@@ -331,6 +331,8 @@ class MowerEnv(gym.Env):
         self._yard_profile = None
         self._observed_map = None
         self._mission_phase = ""
+        self._charging = False
+        self._charge_delta = 0.12
         self._observed_loaded = False
         self._blackbox = None
 
@@ -352,6 +354,8 @@ class MowerEnv(gym.Env):
         self._observed_loaded = False
         self._observed_map = None
         self._mission_phase = ""
+        self._charging = False
+        self._charge_delta = 0.12
         self._episode_seed = seed
         self._yard_profile = None
         raw_profile = options.get("yard_profile") or options.get("profile")
@@ -690,11 +694,15 @@ class MowerEnv(gym.Env):
             steep=terrain_ev.steep,
         )
         self._steps += 1
-        self.budget.step(
-            self.cfg.dt,
-            np.array([left_n, right_n, 1.0 if self._trimmer_on else 0.0], dtype=np.float32),
-            n_cameras=len(self.cameras),
-        )
+        if getattr(self, "_charging", False):
+            delta = float(getattr(self, "_charge_delta", 0.12) or 0.12)
+            self.budget.charge_step(delta)
+        else:
+            self.budget.step(
+                self.cfg.dt,
+                np.array([left_n, right_n, 1.0 if self._trimmer_on else 0.0], dtype=np.float32),
+                n_cameras=len(self.cameras),
+            )
         terminated = bool(
             hit is not None
             or oob

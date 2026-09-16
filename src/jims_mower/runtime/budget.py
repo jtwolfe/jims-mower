@@ -48,6 +48,16 @@ class OrinBudget:
         if t_c is not None:
             self.t_c = float(t_c)
 
+    def set_soc(self, soc: float) -> float:
+        """Gym inject / test hook. Not a BMS write."""
+        self.soc = float(np.clip(soc, 0.0, 1.0))
+        return self.soc
+
+    def charge_step(self, delta: float = 0.12) -> float:
+        """Dock charge increment. Gym pacing, not a charger curve."""
+        self.soc = float(np.clip(self.soc + float(delta), 0.0, 1.0))
+        return self.soc
+
     def step(
         self,
         dt: float,

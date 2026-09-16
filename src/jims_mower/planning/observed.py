@@ -31,6 +31,7 @@ from jims_mower.constants import (
     STRUCTURE_GARDEN,
     STRUCTURE_GREEN,
     STRUCTURE_NONE,
+    STRUCTURE_PATH,
     STRUCTURE_POND,
 )
 from jims_mower.geofence import GeofenceSpec, rasterize_geofence
@@ -47,7 +48,26 @@ STRUCTURE_RGB = (92, 92, 110)
 # Physics / CV still use POND_RGB / BUILDING_RGB on the true field.
 POND_VIEW_RGB = (28, 164, 214)
 BUILDING_VIEW_RGB = (176, 138, 86)
+PATH_VIEW_RGB = (128, 128, 122)
+BUNKER_VIEW_RGB = (210, 180, 120)
+GARDEN_VIEW_RGB = (88, 118, 56)
+DRAIN_VIEW_RGB = (196, 96, 36)
+MOWABLE_VIEW_RGB = (125, 230, 110)
+KEEPOUT_VIEW_RGB = (200, 40, 40)
 FRONTIER_RGB = (42, 196, 220)
+
+AREA_LEGEND: tuple[dict[str, str], ...] = (
+    {"id": "grass", "label": "Grass", "color": "#2e8c3a"},
+    {"id": "mowable", "label": "Mow this", "color": "#7de66e"},
+    {"id": "path", "label": "Path", "color": "#80807a"},
+    {"id": "sand", "label": "Sand", "color": "#d2b478"},
+    {"id": "building", "label": "Building", "color": "#b08a56"},
+    {"id": "water", "label": "Water", "color": "#1ca4d6"},
+    {"id": "drain", "label": "Drain", "color": "#c46024"},
+    {"id": "beds", "label": "Beds", "color": "#58763c"},
+    {"id": "keepout", "label": "Keep-out", "color": "#c82828"},
+    {"id": "fog", "label": "Fog", "color": "#1c1e22"},
+)
 FOG_RGB = (16, 18, 22)
 FOG_ALPHA_UNKNOWN = 236
 SHED_LIFT_M = 0.20
@@ -368,17 +388,29 @@ class ObservedMap:
             blocked = blocked | ~np.asarray(keep_in, dtype=bool)
         return blocked
 
+    def _paint_area_types(self, rgb: np.ndarray, *, observed_only: bool = True) -> np.ndarray:
+        """Colour grass / path / sand / building / water / drain / beds."""
+        mask = np.asarray(self.observed, dtype=bool) if observed_only else np.ones(
+            (self.rows, self.cols), dtype=bool
+        )
+        rgb[mask] = FREE_RGB
+        explored = mask & np.asarray(self.explored, dtype=bool)
+        rgb[explored] = EXPLORED_RGB
+        rgb[mask & (self.hazard >= HAZARD_STEEP)] = (210, 168, 48)
+        rgb[mask & (self.hazard >= HAZARD_DRAIN_EDGE)] = DRAIN_VIEW_RGB
+        rgb[mask & (self.structure == STRUCTURE_PATH)] = PATH_VIEW_RGB
+        rgb[mask & (self.structure == STRUCTURE_BUNKER)] = BUNKER_VIEW_RGB
+        rgb[mask & (self.structure == STRUCTURE_GARDEN)] = GARDEN_VIEW_RGB
+        rgb[mask & (self.structure == STRUCTURE_GREEN)] = GARDEN_VIEW_RGB
+        rgb[mask & (self.structure == STRUCTURE_BUILDING)] = BUILDING_VIEW_RGB
+        rgb[mask & (self.structure == STRUCTURE_POND)] = POND_VIEW_RGB
+        return rgb
+
     def as_rgb(self, *, frontiers: Optional[list[tuple[int, int]]] = None) -> np.ndarray:
         """Unknown stays dark so exploration growth is visible frame-to-frame."""
         rgb = np.zeros((self.rows, self.cols, 3), dtype=np.uint8)
         rgb[:, :] = UNKNOWN_RGB
-        rgb[self.observed] = FREE_RGB
-        rgb[self.explored] = EXPLORED_RGB
-        rgb[self.observed & (self.hazard >= HAZARD_STEEP)] = (210, 168, 48)
-        rgb[self.observed & (self.hazard >= HAZARD_DRAIN_EDGE)] = HAZARD_RGB
-        rgb[self.observed & (self.structure != STRUCTURE_NONE)] = STRUCTURE_RGB
-        rgb[self.observed & (self.structure == STRUCTURE_BUILDING)] = BUILDING_VIEW_RGB
-        rgb[self.observed & (self.structure == STRUCTURE_POND)] = POND_VIEW_RGB
+        self._paint_area_types(rgb, observed_only=True)
         if frontiers:
             for row, col in frontiers:
                 if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -389,14 +421,43 @@ class ObservedMap:
         """Unflipped owner-view RGB for the observed terrain mesh."""
         rgb = np.zeros((self.rows, self.cols, 3), dtype=np.uint8)
         rgb[:, :] = UNKNOWN_RGB
-        rgb[self.observed] = FREE_RGB
-        rgb[self.explored] = EXPLORED_RGB
-        rgb[self.observed & (self.hazard >= HAZARD_STEEP)] = (210, 168, 48)
-        rgb[self.observed & (self.hazard >= HAZARD_DRAIN_EDGE)] = HAZARD_RGB
-        rgb[self.observed & (self.structure != STRUCTURE_NONE)] = STRUCTURE_RGB
-        rgb[self.observed & (self.structure == STRUCTURE_BUILDING)] = BUILDING_VIEW_RGB
-        rgb[self.observed & (self.structure == STRUCTURE_POND)] = POND_VIEW_RGB
+        self._paint_area_types(rgb, observed_only=True)
         return rgb
+
+    def areas_rgb(
+        self,
+        keep_in: Optional[np.ndarray] = None,
+        *,
+        mowable: Optional[np.ndarray] = None,
+        keep_out: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Owner area-type sheet: classified cells + planned mowable mask.
+
+        Flipped like ``as_rgb`` so a PNG lines up with the phone overlay.
+        """
+        rgb = np.zeros((self.rows, self.cols, 3), dtype=np.uint8)
+        rgb[:, :] = UNKNOWN_RGB
+        self._paint_area_types(rgb, observed_only=True)
+        if mowable is None:
+            paint = self.mowable_mask(keep_in)
+        else:
+            paint = np.asarray(mowable, dtype=bool)
+            if paint.shape != (self.rows, self.cols):
+                paint = self.mowable_mask(keep_in)
+        # Highlight the automatic mow region without hiding grass class.
+        if np.any(paint):
+            base = rgb[paint].astype(np.float32)
+            tint = np.asarray(MOWABLE_VIEW_RGB, dtype=np.float32)
+            rgb[paint] = np.clip(0.45 * base + 0.55 * tint, 0, 255).astype(np.uint8)
+        if keep_out is not None:
+            hole = np.asarray(keep_out, dtype=bool)
+            if hole.shape == (self.rows, self.cols):
+                rgb[hole & np.asarray(self.observed, dtype=bool)] = KEEPOUT_VIEW_RGB
+        return rgb[::-1]
+
+    @staticmethod
+    def area_legend() -> list[dict[str, str]]:
+        return [dict(row) for row in AREA_LEGEND]
 
     def observed_elevation(
         self,

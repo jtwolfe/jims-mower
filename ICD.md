@@ -197,7 +197,7 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 | --- | --- | --- |
 | `GET` | `/status` | `jims_mower.app_status.v1` — `pose`, `battery`, `state` (`mission` + SafeState `machine`), `radio` (`rf_claim: null`), `pairing`, `faults` |
 | `GET` / `PUT` | `/yard` | full [`YardProfile`](src/jims_mower/profile.py) (`jims_mower.yard.v1`) — `schedule` is evaluated by [`ScheduleEngine`](src/jims_mower/schedule.py) |
-| `POST` | `/command` | `{cmd, pin?}` ∈ `start` / `stop` / `return` / `estop` / `teach` / `pair` / `unpair` (live also `save_yard` / `load_yard`) |
+| `POST` | `/command` | `{cmd, pin?}` ∈ `start` / `stop` / `return` / `estop` / `teach` / `pair` / `unpair` / `explore` / `mow` (live also `save_yard` / `load_yard` / `full_explore`) |
 | `GET` | `/map/mesh` | UX-A `mesh_to_payload` + `ux_a_href: /viewer` |
 | `GET` | `/map/coverage` | downsampled cut / uncut / non-grass |
 | `GET` | `/events` | SSE of `/status` |
@@ -206,9 +206,10 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 
 `--live` `/status` adds `backend`, `robot` (idle / pairing / live /
 fault), `owner_copy`, `radio_path`, map/cut %, `session_summary`,
-`path_overlay`, and `mode_banner` (Mapping vs Mowing). `/api/live` and
-`/api/live/snapshot` carry the same overlay (downsampled trail / plan /
-frontiers). No RF range or mAP claim.
+`explore_reason`, `full_explore`, `charge_state`, `path_overlay`,
+`mode_banner` (Mapping vs Mowing), and `areas_url` / `area_legend`.
+`/api/live` and `/api/live/snapshot` carry the same overlay (downsampled
+trail / plan / frontiers). No RF range or mAP claim.
 `start` after `estop` is the operator clear of the software latch.
 `/status` also carries `schedule` (`jims_mower.schedule.v1`) and
 `weather.rain`. The weekly window arms `start` / duration-stops when

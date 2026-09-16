@@ -34,6 +34,7 @@
     <div class="phase-seg" data-phase="review">MAP READY</div>
     <div class="phase-seg" data-phase="mow">MOW</div>
     <div class="phase-seg" data-phase="return_home">RETURN</div>
+    <div class="phase-seg" data-phase="charging">CHARGE</div>
     <div class="phase-seg" data-phase="complete">DONE</div>
   </div>
   <div id="owner-bar" hidden>
@@ -56,8 +57,11 @@
         <button type="button" class="speed-btn" data-speed="5">5×</button>
         <button type="button" class="speed-btn" data-speed="max">max</button>
       </span>
-      <button type="button" id="btn-start-mow" hidden>Start mow</button>
+      <button type="button" id="btn-explore">Explore</button>
+      <button type="button" id="btn-start-mow">Mow</button>
+      <button type="button" id="btn-return">Return</button>
       <button type="button" id="btn-reexplore" hidden>Re-explore</button>
+      <button type="button" id="btn-full-explore">Full explore</button>
       <button type="button" id="btn-estop" class="danger">ESTOP</button>
     </div>
   </div>

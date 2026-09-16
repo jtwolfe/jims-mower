@@ -429,6 +429,18 @@ class MissionConfig:
     # IMU tip-stop: skip this many waypoints, then keep painting.
     mow_skip_cluster: int = 4
     mow_stop_cool: int = 10
+    # Demo profiles may set explore_complete 0.30 / a short step cap.
+    # Owner full-explore ignores that early exit and keeps seeking frontiers
+    # until the production target (or no reachable frontier).
+    full_explore: bool = False
+    full_explore_complete: float = 0.80
+    full_explore_steps: int = 4000
+    min_explore_steps: int = 8
+    # 0 = use YardProfile schedule.min_soc, else runtime.battery.limp_soc.
+    min_soc_return: float = 0.0
+    charge_resume_soc: float = 0.80
+    # Gym charge increment per mission tick at the dock (not a BMS claim).
+    gym_charge_soc_per_step: float = 0.12
 
 
 @dataclass
@@ -992,6 +1004,18 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("mission.mow_skip_cluster must be >= 1")
     if int(mission.mow_stop_cool) < 0:
         raise ConfigError("mission.mow_stop_cool must be >= 0")
+    if not 0.0 <= float(mission.full_explore_complete) <= 1.0:
+        raise ConfigError("mission.full_explore_complete must be in [0, 1]")
+    if int(mission.full_explore_steps) < 1:
+        raise ConfigError("mission.full_explore_steps must be >= 1")
+    if int(mission.min_explore_steps) < 0:
+        raise ConfigError("mission.min_explore_steps must be >= 0")
+    if not 0.0 <= float(mission.min_soc_return) <= 1.0:
+        raise ConfigError("mission.min_soc_return must be in [0, 1]")
+    if not 0.0 <= float(mission.charge_resume_soc) <= 1.0:
+        raise ConfigError("mission.charge_resume_soc must be in [0, 1]")
+    if not 0.0 < float(mission.gym_charge_soc_per_step) <= 1.0:
+        raise ConfigError("mission.gym_charge_soc_per_step must be in (0, 1]")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()
