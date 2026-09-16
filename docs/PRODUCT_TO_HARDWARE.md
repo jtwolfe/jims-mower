@@ -115,8 +115,8 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | --- | --- | --- | --- | --- | --- |
 | CV-1 | Terrain segmentation (drain / lip / bank / grass) | **partial** (software path this PR) | Trainable gym path: `jims_mower.dataset.v1` → numpy (or optional torch) MLP → optional ONNX. `OnnxTerrainObserver` loads via onnxruntime when present. Heuristic remains the **live default**. Sim weights are `sim_only` / not field-ready. Palette heuristic will not survive daylight grass. | Held-out **real** frames; report IoU per class only after a locked test set. Fail if you only have sim loss. **No invented IoU.** `iou_claim` stays null. Software tests: `tests/test_onnx.py`. | CV-8 dataset, RT-1 capture, HD-cam extrinsics |
 | CV-2 | Grass coverage observer | **partial** (gym this PR) | `ClassAwareGrassObserver` (`grass_mode: class`) uses terrain-seg classes (grass vs drain/lip/bank) when labels exist, else the palette heuristic. `ColorGrassObserver` / `FeatureGrassObserver` stay as fallbacks. Gym painted-strip error is in `tests/test_grass_coverage.py` — **not** field mAP. Phone cut % default is still the *gym grass grid* (`coverage_source: gym_grid`). Opt-in `coverage_source: observer` uses the class-aware BEV and sets `info["coverage_source"]`. Field strip test still needed. | Gym: coverage drift vs a painted cut/uncut/path fixture (report error in tests). Field: on-box vs painted/measured strips on one lawn, same day. No invented IoU. | CV-1, MAP-1 |
-| CV-3 | Person / animal / obstacle detect | **stub** | `MockDetector` **projects** `context.obstacles` (sim-only) and stays the gym default. `AppearanceDetector` (`detector_backend: appearance\|onnx`) ignores that list and returns `[]` until a real ONNX box head exists. `BlindDetector` returns `[]`. | Precision/recall on a recorded real walk-through with a person + dog + chair. Publish the set size. No fake mAP. | CV-8, RT-1 |
-| CV-4 | Tracking / tracklets | **stub** | Temporal association on whatever `detections` the detector emitted (`info["tracklets"]`). Not MOT. Still consumes the ICD `detections` key for living interlock. | ID-switch count on a 30 s real clip with one crossing. | CV-3 |
+| CV-3 | Person / animal / obstacle detect | **partial** (gym RGB this PR) | `MockDetector` still **projects** `context.obstacles` (gym default). `AppearanceDetector` (`detector_backend: appearance`) ignores that list and finds KIND_RGB **blobs in the camera image**. Gym living interlock can consume those dets (`interlock_source: detections` / `auto`). Not a field head. `map_claim` stays null. | Gym: painted person blob in the front camera trips trimmer-off; oracle person behind / out of view does not. Field: recorded walk-through. No fake mAP. | CV-8, RT-1 |
+| CV-4 | Tracking / tracklets | **partial** (IoU/centroid this PR) | Associate consecutive dets by world XY **or** bbox IoU / image centroid when `world_xy` is missing (appearance). Not MOT. No mAP. | Gym: overlapping boxes keep one id. Field: ID-switch on a 30 s clip. | CV-3 |
 | CV-5 | Hand signals | **stub** | Oracle person labels or crop brightness / red-bias classifier. | Confusion matrix on real stop/go/back clips, or **drop the feature** until CV-3 works. | CV-3 |
 | CV-6 | Train → ONNX → TensorRT | **partial** (software path this PR) | `jims-mower-train-terrain --onnx` writes a sim_only Gemm graph when the `onnx` extra is installed. `jims-mower-export-trt --dry-run` still prints `trtexec`. `TrtTerrainObserver` / `TrtDetector` load an engine **if you provide one**, else heuristic / mock. No production ONNX in git. | `trtexec` builds your engine on the Orin; `fps_claim` stays null until you measure. Software pipeline ≠ field head. | CV-1 or CV-3 weights |
 | CV-7 | Domain gap (wet / dawn / night) | **partial** | Renderer tints only. Not HDR, IR, or wet-lens. | Same route at noon vs dusk vs wet; hazard stamps must not invert drain vs grass. | CV-1, RT-1 |
@@ -142,7 +142,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | PLN-1 | Explore | **partial** (gym regression this PR) | Frontier walk on ObservedMap. `tests/test_pln_regression.py` runs explore → MAP READY on `mission_tiny` with a taught profile. Needs real maps in the field. | MAP READY on a real lawn without counting fog islands as unreachable (already true in sim). | MAP-1 |
 | PLN-2 | Coverage | **partial** (gym regression this PR) | Boustrophedon + A* on observer costmap; energy strip order uses stub SOC. Regression freezes the observed map then mows. | Leftover uncut vs planned cells on a marked 10×10 m patch. | MAP-1, CV-2 |
 | PLN-3 | Tip recovery | **partial** (gym regression this PR) | Reverse → pivot → help; IMU tip-skip continues paint in sim. Thresholds (`tip_roll_rad=0.40`) are gym constants — **not retuned**. | Tip the chassis to the software trip on a known ramp; wheels stop; recover without drain entry. | RT-2 IMU, HD-mass |
-| PLN-4 | Living-thing interlock | **partial** | Trimmer off inside `safety_radius_m` of a **detection**. With MockDetector this is god-view (and the gym interlock still reads the obstacle list). With BlindDetector detections are `[]` — a dets-only interlock never fires. | Person steps into the radius on the real rig; trimmer request is refused within one control cycle. | CV-3, CV-4 |
+| PLN-4 | Living-thing interlock | **partial** (dets-from-camera this PR) | Mock + `interlock_source: obstacles` (default) still uses the oracle list. `appearance` / `interlock_source: detections` trips on a living blob in a **forward camera** only — a person on the oracle list behind the robot does not fire. No invented metres. | Gym: painted front-camera person → trimmer off; behind / out of view → trimmer stays. Field: person in the radius on the rig. | CV-3, CV-4 |
 | PLN-5 | Resume after stop | **partial** (this PR) | Mission save/load + owner Pause/Resume in live + cold `restore_session`. Schedule duration-stop unchanged. Field “battery died mid-strip” is untested. | Pause 10 min, resume; uncut cells still planned. Gym: `tests/test_pln_regression.py`. | MAP-4, SCH-1 |
 
 ### 4. Scheduling
@@ -165,7 +165,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | RT-4 | Watchdog | **partial** (bench config + gym stamp stall this PR) | Zeros wheels if IMU/vision **stamps** freeze (`runtime.watchdog.enabled`). Off in default gym tests. Bench overlay: [`configs/orin/bench.yaml`](../configs/orin/bench.yaml). Fake adapters — not real CSI/IMU. | Gym: freeze IMU or camera stamps → wheels zero within `vision_stall_s` / configured stall (`tests/test_hardware_estop.py`, `tests/test_wave4_ops.py`). Field: unplug a camera on the wired rig (needs RT-1). | RT-1, RT-2 |
 | RT-5 | Battery / thermal telemetry | **partial** (procedure this PR) | `OrinBudget` still an RC. Default `capacity_wh: 50`, `measured: false`. Template: [`configs/orin/pack_measured.template.yaml`](../configs/orin/pack_measured.template.yaml). Procedure: [`PACK_THERMAL.md`](PACK_THERMAL.md). `measured: true` refuses the silent 50 Wh default. Numbers **null** until bench. Not a BMS. | SOC and board °C from hardware; limp/stop match measured limits. Software: `tests/test_pack.py`. | HD-batt |
 | RT-6 | Hardware ESTOP | **partial** (sim + doc this PR) | Gym `HardwareEstop` drops traction + trimmer **rails** underneath policy / `SafeStateMachine`. Wiring + reset: [`ESTOP.md`](ESTOP.md), [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §10. No physical paddle. | Gym: dummy load commanding wheels+trimmer; paddle latch zeros outputs; software clear does **not** restore; only `hw_reset` does (`tests/test_hardware_estop.py`). Field: hit a real paddle while a dummy load spins — **not claimed**. | HD-wire |
-| RT-7 | On-box loop (no renderer) | **partial** | Documented; not a shipped systemd unit. | Process runs without importing `jims_mower.renderer`. | RT-1…RT-4 |
+| RT-7 | On-box loop (no renderer) | **partial** (this PR) | `jims-mower-onbox` loads bench/Orin YAML, Fake* / Gst adapters, watchdog, HW ESTOP, black box. Never imports `jims_mower.renderer` (guard + test). Systemd example: [`deploy/jims-mower.service`](../deploy/jims-mower.service). [`docs/ONBOX.md`](ONBOX.md). | Process runs without importing `jims_mower.renderer`. Loop steps with fake sensors. Field: real CSI still later. | RT-1…RT-4 |
 
 ### 6. Safety / ops
 
@@ -194,7 +194,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | S2R-1 | ICD key match | **partial** | Contract is written. Camera software path fills `obs["cameras"]`; IMU/GNSS/ToF/Gst chips are still fakes. | Laptop gym and Orin process the same key set; renderer never imported on-box. | RT-1…RT-3 |
 | S2R-2 | Extrinsics YAML | **partial** (this PR) | `extrinsics_stereo.yaml` is the documented **EXAMPLE** (`calibration.measured: false`). Load + baseline-cm helper rejects non-pairs. Prefer it (6–12 cm forward pair + mono) for the field article. `extrinsics_6cam.yaml` stays the gym look-around. **Neither is taped.** | Reproject a checkerboard / drain lip; stereo pair verifies baseline + disparity vs tape. Gym: `jims-mower-calibrate` / `tests/test_calibration.py`. Field: still measure. | HD-cam |
 | S2R-3 | Calibration bench | **partial** (procedure + gym this PR) | Written steps: [`CALIBRATION.md`](CALIBRATION.md). Gym lip / checkerboard fixture stamps the right ObservedMap cells; ideal disparity matches tape in 0.8–4 m. MEASURED template: `extrinsics_stereo_measured.template.yaml`. Physical measure-and-commit still required. | Human tapes the baseline, writes `extrinsics_stereo_measured.yaml`, `calibration.measured: true`. Not claimed here. | S2R-2 |
-| S2R-4 | Wheel / trimmer scale | **partial** | Action is ±1 of `max_wheel_speed_mps` (1.2). Real motors have different Kv / gearing. | 1.0 command → measured m/s within a stated %. | HD-drive |
+| S2R-4 | Wheel / trimmer scale | **partial** (procedure + gym this PR) | YAML `robot.drive.scale` / `robot.trimmer.scale`, `measured: false` default. Gym: 1.0 command moves at `max_wheel_speed_mps × scale`. Procedure: [`SCALE.md`](SCALE.md). **No invented Kv.** | Gym: scale 0.5 halves distance (`tests/test_scale.py`). Field: tape 1.0 command → m/s; tach RPM. | HD-drive |
 
 ICD keys that **must** match (do not rename): `cameras`, `imu`, `gps`,
 `tof`, `occupancy`, `elevation`, `slope`, `hazard`, `confidence`,
@@ -285,14 +285,14 @@ Stop when only **fab + field test** remain.
    **not** ship the head. `iou_claim` / `map_claim` / `fps_claim` stay
    null. Real labels: [`DATASET.md`](DATASET.md).
 
-10. **Detector + tracker (CV-3, CV-4).** Scaffolding (this PR, focused).
-    `AppearanceDetector` can load ONNX later and does **not** read
-    `context.obstacles`. `MockDetector` remains the gym default.
-    Tracklets stay a stub. Living interlock still consumes `detections`.  
-    *Test (software):* empty dets when appearance/onnx; mock default
-    unchanged (`tests/test_onnx.py`).  
-    *Test (field):* recorded walk-through; living interlock (PLN-4) on
-    those dets. No fake mAP.
+10. **Detector + tracker (CV-3, CV-4)** (gym RGB this PR).
+    `AppearanceDetector` finds KIND_RGB blobs in the camera image and
+    does **not** read `context.obstacles`. `MockDetector` remains the
+    gym default. Tracklets associate by IoU / centroid when `world_xy`
+    is missing. Living interlock can consume those dets (row 15).  
+    *Test (software):* painted blob → det; black frame + oracle list →
+    no det (`tests/test_appearance_interlock.py`, `tests/test_onnx.py`).  
+    *Test (field):* recorded walk-through. No fake mAP. `map_claim` null.
 
 11. **Grass coverage observer (CV-2)** (gym this PR). Class-aware
     observer + painted-strip fixture. Phone cut % default remains
@@ -324,7 +324,9 @@ Stop when only **fab + field test** remain.
     (gym regression this PR) on observed maps (`mission_tiny`). Gym
     constants were **not** retuned. Do not “fix” physics.  
     *Test:* `pytest tests/test_pln_regression.py tests/test_mission_flow.py`.  
-    *Honesty:* BlindDetector detections stay `[]`. Field maps still later.
+    *Honesty:* BlindDetector detections stay `[]`. Appearance +
+    `interlock_source: detections` trips only on a forward-camera blob
+    (`tests/test_appearance_interlock.py`). Field maps still later.
 
 16. **Self-test on hardware, incident black box, immobilised vs stuck
     (SAF-1…3)** (gym/bench black box this PR). Self-test still gym
@@ -362,23 +364,36 @@ After row 20 the remaining work is **human fab, measure pack/CG,
 commit measured extrinsics, collect real labels, field scorecard** —
 not another WAVE of gym stubs.
 
+### Post-§20 software leftovers (this PR)
+
+§18–§20 shipped **procedures**. The software leftovers that still
+blocked a first Orin boot and Jamie's original CV ask (people /
+animals / obstacles) are here — still **not** a license to invent
+field numbers.
+
+| Leftover | What shipped | Still later |
+| --- | --- | --- |
+| On-box unit (RT-7) | `jims-mower-onbox` + systemd example + [`ONBOX.md`](ONBOX.md). No renderer. | Real CSI, real IMU, flashed image |
+| Appearance gym (CV-3/4, PLN-4) | RGB blob dets + dets-from-camera interlock + IoU tracklets | Real dets, real CSI, field mAP (never invent) |
+| Scale cal (S2R-4) | YAML + gym × scale + [`SCALE.md`](SCALE.md) | Tape m/s + tach RPM on the rig |
+| Bring-up | `jims-mower-bringup` PASS/FAIL/SKIP | Physical paddle, JetPack CSI |
+| Field RF / OTA / IoU | Honest stubs (UX-4, SAF-4). Do not claim SIL | BT/LoRa, A/B OTA, held-out IoU |
+
 ---
 
 ## What this PR ships
 
-- Build-order **§18** (RT-5 / HD-batt): pack / thermal **procedure +
-  config hooks**. `runtime.battery.measured` defaults false; gym 50 Wh
-  stub stays. `measured: true` refuses silent defaults.
-  [`PACK_THERMAL.md`](PACK_THERMAL.md). `OrinBudget` and the schedule
-  SOC gate read configured `capacity_wh`. **No acre-runtime claim.**
-  Numbers null until bench.
-- Build-order **§19**: fab checklist + BOM freeze (part **classes**,
-  no SKUs / prices). [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md),
-  [`configs/hardware/bom.yaml`](../configs/hardware/bom.yaml). Hang-
-  measure → revise tip math in HARDWARE_DESIGN §2. Chassis not fabbed.
-- Build-order **§20**: residential-acre scorecard template (tips /
-  drains / leftover uncut / ESTOP — not mAP).
-  [`FIELD_TEST.md`](FIELD_TEST.md). Field not run.
-- Honest leftover: human fab, measure pack/CG, commit measured
-  extrinsics, collect real labels, run the scorecard. Do **not**
-  start another WAVE of gym stubs.
+- **RT-7:** `jims-mower-onbox` runs the control loop on Fake* / Gst
+  adapters with watchdog, HW ESTOP, and a black-box path. Import
+  guard + test: `jims_mower.renderer` stays out. Systemd example
+  under `deploy/` / `configs/orin/`. [`ONBOX.md`](ONBOX.md).
+- **Bring-up:** `jims-mower-bringup` walks selftest, HW ESTOP sim,
+  watchdog freeze, calibrate YAML, pack `measured` flag, survey
+  origin. Prints PASS/FAIL/SKIP. Never invents measurements.
+- **CV-3 / PLN-4:** `AppearanceDetector` finds gym person / animal /
+  obstacle **from RGB**. Living interlock has a dets-from-camera
+  mode. `MockDetector` stays the default. `map_claim` stays null.
+- **S2R-4:** `drive.scale` / `trimmer.scale` (`measured: false`).
+  Gym 1.0 command × scale. [`SCALE.md`](SCALE.md). No invented Kv.
+- Honest leftover: real CSI, real dets, field RF / OTA / IoU. Do
+  **not** claim SIL or acre runtime.

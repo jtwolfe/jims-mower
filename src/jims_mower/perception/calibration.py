@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional, Union
+from typing import TYPE_CHECKING, Any, Iterable, Optional, Union
 
 import numpy as np
 import yaml
@@ -32,8 +32,10 @@ from jims_mower.perception.stereo import (
     require_stereo_pair,
     synthetic_stereo_points,
 )
-from jims_mower.planning.observed import ObservedMap
 from jims_mower.types import CameraSpec, Pose
+
+if TYPE_CHECKING:
+    from jims_mower.planning.observed import ObservedMap
 
 # Field band, centimetres. Same as stereo.py metres.
 STEREO_BASELINE_MIN_CM = STEREO_BASELINE_MIN_M * 100.0
@@ -515,6 +517,8 @@ def run_lip_fixture(
         width_m=world,
         height_m=world,
     )
+    from jims_mower.planning.observed import ObservedMap
+
     omap = ObservedMap.empty(world, world, res)
     omap.stamp_disk(fixture.robot.x, fixture.robot.y, max(fixture.tape_m + 1.2, 2.5))
     written = omap.stamp_metric_elevation(raster, hits, respect_lock=True)

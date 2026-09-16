@@ -31,7 +31,8 @@ trained TensorRT engine.
 | Desktop OpenCV HighGUI / Qt | No display on a headless mower. |
 | Full VIO / SLAM stack in this repo | Keep fusion behind `EkfPoseFilter` / your EKF. |
 
-On-box loop (your code, not shipped):
+On-box loop (shipped: `jims-mower-onbox` — must not import
+`jims_mower.renderer`; see [`ONBOX.md`](ONBOX.md)):
 
 ```
 CSI / GStreamer / NVMM  →  CameraFrame   (`GstNvmmAdapter` raises without Gst;

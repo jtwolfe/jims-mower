@@ -11,6 +11,9 @@ Linked from [`SIM_TO_REAL.md`](SIM_TO_REAL.md),
 [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md),
 [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 
+Wheel / trimmer command scale (1.0 → m/s and RPM) is a separate
+bench: [`SCALE.md`](SCALE.md). Do not invent Kv.
+
 ---
 
 ## What you are measuring

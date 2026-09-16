@@ -17,7 +17,9 @@ Wave notes and the on-box message contract live here.
 | [`UX_B.md`](UX_B.md) | FaultBus, dead-motor SOS, radio sim, `jims-mower-selftest` |
 | [`UX_C.md`](UX_C.md) | Thin owner app, YardProfile API, buy→mow (BT / optional Wi-Fi / LoRa) |
 | [`SCHEDULE.md`](SCHEDULE.md) | Weekly window actually arms / skips / stops jobs |
-| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order. Software path complete for fab+field; §18–§20 are procedures |
+| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order. Software path complete for fab+field; §18–§20 are procedures; post-§20 leftovers: on-box + appearance gym + scale |
+| [`ONBOX.md`](ONBOX.md) | RT-7 on-box loop: `jims-mower-onbox`, systemd, journal. ESTOP still hardware. No renderer |
+| [`SCALE.md`](SCALE.md) | S2R-4: measure 1.0 command → m/s and trimmer RPM. `measured: false`. No invented Kv |
 | [`SURVEY_ORIGIN.md`](SURVEY_ORIGIN.md) | MAP-5 peg + metre keep-in; MAP-4 cold session load. No WGS84 survey in this repo. |
 | [`CALIBRATION.md`](CALIBRATION.md) | Stereo / extrinsics bench: EXAMPLE vs MEASURED, tape procedure, gym lip / disparity checks |
 | [`DATASET.md`](DATASET.md) | CV-8 record + label protocol; FakeCsi → `jims_mower.dataset.v1` + train/val; real labels required before any IoU |

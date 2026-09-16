@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -174,3 +177,36 @@ def test_demo_mission_flags(tmp_path: Path) -> None:
         load_mission=str(mission),
     )
     assert summary["mission_loaded"] is True
+
+
+def test_import_jims_mower_mission_no_circular() -> None:
+    """Fresh process: mission must load without ObservedMap circular import."""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import jims_mower.mission; print('MISSION_OK')",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "MISSION_OK" in proc.stdout
+    assert "circular import" not in (proc.stdout + proc.stderr).lower()
+
+
+def test_mission_inspect_tiny_npz_no_circular_import(tmp_path: Path) -> None:
+    """CI smoke: `jims-mower-mission inspect` on a tiny saved npz."""
+    coverage = GrassCoverageMap(4.0, 4.0, 0.5)
+    coverage.mark_circle(2.0, 2.0, 0.6)
+    path = tmp_path / "tiny.npz"
+    save_mission(path, coverage, Pose(1.0, 1.5, 0.2), scenario="tiny", seed=1, steps=2)
+    proc = subprocess.run(
+        [sys.executable, "-m", "jims_mower.mission", "inspect", "--in", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    meta = json.loads(proc.stdout)
+    assert str(meta.get("schema", "")).startswith("jims_mower.mission")
+    assert meta.get("steps") == 2

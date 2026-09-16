@@ -17,12 +17,20 @@ robot:
   tip_pitch_rad: 0.45
   wheel_drop_m: 0.08
   steep_slope_rad: 0.30
+  drive:
+    # 1.0 command → max_wheel_speed_mps * scale. measured: false until tape.
+    # See docs/SCALE.md. Do not invent Kv.
+    scale: 1.0
+    measured: false
   trimmer:
     # Front-mounted whipper-snipper, not an under-deck blade.
     offset_m: 0.32
     radius_m: 0.16
     safety_radius_m: 1.50
     height_m: 0.12
+    # 1.0 command → measured RPM * scale. measured: false until tach.
+    scale: 1.0
+    measured: false
 
 sensors:
   width: 80
@@ -112,6 +120,8 @@ perception:
   # raster). observer is opt-in CV-2 BEV — still not a field strip test.
   coverage_source: gym_grid
   detector_backend: mock
+  # auto: detections when appearance/onnx/blind; obstacles when mock
+  interlock_source: auto
 
 planner:
   # Coverage planner + controller. Steep below max_climb is a slow corridor;

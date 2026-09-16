@@ -102,4 +102,8 @@ jobs:
       - name: UX-B self-test + fault/radio smoke
         run: |
           jims-mower-selftest --out /tmp/jims-mower-ci-selftest.json
+          jims-mower-onbox --help
+          jims-mower-bringup --help
+          jims-mower-onbox --config configs/orin/bench.yaml --steps 3 --blackbox /tmp/jims-mower-ci-onbox.jsonl
+          jims-mower-bringup --config configs/orin/bench.yaml --json --out /tmp/jims-mower-ci-bringup.json
 
