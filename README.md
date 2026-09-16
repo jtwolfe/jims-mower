@@ -57,14 +57,14 @@ jims-mower-mission-demo --config golf_rough --out mission_out
 jims-mower-mission-demo --fast --out mission_fast
 jims-mower-viewer --episode mission_out
 
-# Live owner session (fog-of-war, wall-clock). One command: sim + viewer.
-# Default yard is acre_yard. Open http://127.0.0.1:8765/ while it runs —
-# do not wait for the episode folder to finish.
-jims-mower-live
+# Live owner session (observed terrain + fog, wall-clock). One command.
+# Open http://127.0.0.1:8765/ while it runs — do not wait for the folder.
+# acre_yard_demo is the Jamie live command: same ~1 acre features, short
+# calibrate confirmation, then EXPLORE at --speed 5.
+jims-mower-live --config acre_yard_demo --speed 5
 jims-mower-live --config acre_yard --speed 5
 jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
-# CI / laptop smoke uses --fast (mission_tiny). Acre explore→mow to
-# completion is a manual run, not a benchmark.
+# CI / laptop smoke uses --fast (mission_tiny). Full acre mow is manual.
 
 # Keep the old scripted creep or random wheels:
 python -m jims_mower.demo --policy scripted --out demo_scripted
@@ -206,10 +206,12 @@ speeds. When the heuristic map grows new lips, the planner replans.
 
 That policy still plans from the **current** observer raster, so a 160-step
 clip only covers a few metres. For a visual yard job use
-`jims-mower-live` (wall-clock + fog-of-war viewer) or
+`jims-mower-live` (wall-clock + growing observed terrain + fog) or
 `jims-mower-mission-demo` (writes a finished episode, then scrub it):
 calibrate the keep-in, explore unknown space, freeze the map, then mow
-every reachable mowable cell. Unknown cells are not assumed safe. See
+every reachable mowable cell. Unknown cells are not assumed safe. The
+owner mesh is the **observed** elevation surface (holes stay fog);
+physics still uses the true height field. See
 [`docs/MISSION_FLOW.md`](docs/MISSION_FLOW.md).
 
 ## From detection to a wheel command

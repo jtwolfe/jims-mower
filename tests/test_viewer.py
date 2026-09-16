@@ -43,6 +43,9 @@ def test_viewer_static_assets_present() -> None:
     assert "EventSource" in js
     assert "unknownPad" in js
     assert "setOwnerMeshVis" in js
+    assert "applyObservedMesh" in js
+    assert "observedTerrain" in js
+    assert "observed_mesh" in js
     assert "observed_fog" in js or "fog of war" in html.lower() or "fog" in js
 
 

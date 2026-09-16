@@ -30,6 +30,7 @@ def _shrink(scn):
 def test_acre_yard_registered() -> None:
     names = list_scenarios()
     assert "acre_yard" in names
+    assert "acre_yard_demo" in names
     assert "acre_yard" in WORLD_LAYOUTS
 
 
@@ -96,3 +97,22 @@ def test_acre_yard_env_smoke() -> None:
     assert not mesh.is_empty()
     assert mesh.vertex_count >= 16
     env.close()
+
+
+def test_acre_yard_demo_is_same_acre_with_faster_calibrate() -> None:
+    cfg, scn = load_source("acre_yard_demo")
+    full, _full_scn = load_source("acre_yard")
+    assert scn is not None
+    assert cfg.world.width_m == full.world.width_m
+    assert cfg.world.height_m == full.world.height_m
+    assert cfg.world.layout == "acre_yard"
+    assert scn.ponds and scn.buildings
+    assert cfg.mission.calibrate_confirm_m >= 20.0
+    assert cfg.mission.max_calibrate_steps < full.mission.max_calibrate_steps
+    area = (cfg.mission.calibrate_confirm_m or 0.0) < 80.0
+    assert area
+    # Tighter keep-in than the full fence, still covers pond + sheds.
+    xs = [p[0] for p in scn.geofence]
+    ys = [p[1] for p in scn.geofence]
+    assert min(xs) > 1.6 and max(xs) < 68.4
+    assert min(ys) > 1.6 and max(ys) < 56.4

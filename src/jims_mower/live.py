@@ -30,10 +30,12 @@ from jims_mower.mission_demo import (
     FAST_STEPS,
     resolve_mission_config,
 )
+from jims_mower.mesh import mesh_from_observed, mesh_to_payload
 from jims_mower.mission_flow import (
     PHASE_LABELS,
     MissionPolicy,
     mission_timeline,
+    scale_mission_budget,
 )
 from jims_mower.planning.observed import fog_rgba
 from jims_mower.profile import write_yard_profile
@@ -55,8 +57,12 @@ MAP_MAX_SIDE = 96
 PLAN_MAX_POINTS = 160
 CAM_JPEG_QUALITY = 62
 MAP_STRIDE_DEFAULT = 4
+MESH_STRIDE_DEFAULT = 8
+MESH_MAX_SIDE = 48
 CAM_WALL_S = 0.40
 POSE_FLUSH_STRIDE = 20
+ACRE_LIVE_CAM_WIDTH = 48
+ACRE_LIVE_CAM_HEIGHT = 36
 
 SPEED_ALIASES = {
     "1": 1.0,
@@ -121,6 +127,16 @@ def _jpeg_bytes(image: np.ndarray, *, quality: int = CAM_JPEG_QUALITY) -> bytes:
     return buf.getvalue()
 
 
+def _compact_mesh_payload(mesh: Any) -> dict[str, Any]:
+    payload = mesh_to_payload(mesh)
+    for key in ("positions", "normals", "colors", "uvs"):
+        raw = payload.get(key) or []
+        payload[key] = [round(float(v), 4) for v in raw]
+    payload["kind"] = "observed"
+    payload["honesty"] = "physics uses true height; this mesh is ObservedMap only"
+    return payload
+
+
 def _downsample_xy(points: list[tuple[float, float]], limit: int = PLAN_MAX_POINTS) -> list[dict[str, float]]:
     if not points:
         return []
@@ -164,6 +180,10 @@ class LiveSession:
         cam_stride: int = 20,
         map_stride: int = MAP_STRIDE_DEFAULT,
         mesh_stride: Optional[int] = None,
+        observed_mesh_stride: int = MESH_STRIDE_DEFAULT,
+        phase_budget: float = 1.0,
+        calibrate_stride: Optional[float] = None,
+        calibrate_confirm: Optional[float] = None,
     ) -> None:
         self.config_name = resolve_live_config(config, fast=fast)
         self.fast = bool(fast)
@@ -174,6 +194,10 @@ class LiveSession:
         self.cam_stride = max(1, int(cam_stride))
         self.map_stride = max(1, int(map_stride))
         self.mesh_stride = mesh_stride
+        self.observed_mesh_stride = max(1, int(observed_mesh_stride))
+        self.phase_budget = min(1.0, max(0.05, float(phase_budget)))
+        self.calibrate_stride = calibrate_stride
+        self.calibrate_confirm = calibrate_confirm
         self.max_steps = int(steps if steps is not None else (FAST_STEPS if fast else DEFAULT_STEPS))
         self.env: Optional[MowerEnv] = None
         self.policy: Optional[MissionPolicy] = None
@@ -184,6 +208,7 @@ class LiveSession:
         self._thread: Optional[threading.Thread] = None
         self._seq = 0
         self._map_seq = 0
+        self._mesh_seq = 0
         self._cam_seq = 0
         self._last_cam_wall = 0.0
         self._n_observed = 0
@@ -192,6 +217,7 @@ class LiveSession:
         self.camera_names: list[str] = []
         self.observed_png = b""
         self.fog_png = b""
+        self.observed_mesh_json = b""
         self.cam_jpeg: dict[str, bytes] = {}
         self.done = False
         self.started = False
@@ -210,6 +236,18 @@ class LiveSession:
             cfg.sensors.width = min(int(cfg.sensors.width), FAST_CAM_WIDTH)
             cfg.sensors.height = min(int(cfg.sensors.height), FAST_CAM_HEIGHT)
         cfg.max_steps = max(int(cfg.max_steps), self.max_steps + 2)
+        if not self.fast:
+            cells = (float(cfg.world.width_m) / max(float(cfg.world.resolution_m), 1e-6)) * (
+                float(cfg.world.height_m) / max(float(cfg.world.resolution_m), 1e-6)
+            )
+            if cells >= 8000:
+                cfg.sensors.width = min(int(cfg.sensors.width), ACRE_LIVE_CAM_WIDTH)
+                cfg.sensors.height = min(int(cfg.sensors.height), ACRE_LIVE_CAM_HEIGHT)
+        if self.calibrate_stride is not None:
+            cfg.mission.calibrate_stride_m = float(self.calibrate_stride)
+        if self.calibrate_confirm is not None:
+            cfg.mission.calibrate_confirm_m = float(self.calibrate_confirm)
+        scale_mission_budget(cfg.mission, self.phase_budget)
         if self.env is not None:
             self.env.close()
         self.env = MowerEnv(config=cfg, scenario=scenario, render_mode="rgb_array")
@@ -222,6 +260,7 @@ class LiveSession:
         self.started = True
         self._seq = 0
         self._map_seq = 0
+        self._mesh_seq = 0
         self._cam_seq = 0
         self._last_cam_wall = 0.0
         self._n_observed = 0
@@ -243,8 +282,9 @@ class LiveSession:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 data["live"] = True
-                data["owner_mode"] = "observed_fog"
+                data["owner_mode"] = "observed_terrain"
                 data["fog"] = True
+                data["observed_mesh"] = True
                 return data
             except json.JSONDecodeError:
                 pass
@@ -257,8 +297,9 @@ class LiveSession:
         return {
             "schema": VIEWER_SCHEMA,
             "live": True,
-            "owner_mode": "observed_fog",
+            "owner_mode": "observed_terrain",
             "fog": True,
+            "observed_mesh": True,
             "policy": "mission",
             "width_m": width,
             "height_m": height,
@@ -267,8 +308,8 @@ class LiveSession:
             "relief_scale": 4.0,
             "not_a_benchmark": True,
             "note": (
-                "Live owner session — fog-of-war hides unknown cells. "
-                "True elev is a debug toggle. No mAP/FPS."
+                "Live owner session — observed elevation grows with the map. "
+                "Unknown stays fog. True elev is a debug toggle. No mAP/FPS."
             ),
         }
 
@@ -279,6 +320,10 @@ class LiveSession:
     def fog_png_bytes(self) -> bytes:
         with self.lock:
             return self.fog_png
+
+    def observed_mesh_bytes(self) -> bytes:
+        with self.lock:
+            return self.observed_mesh_json
 
     def camera_bytes(self, name: str) -> bytes:
         with self.lock:
@@ -384,10 +429,17 @@ class LiveSession:
         fog = coarsen2d(fog_rgba(omap.observed), MAP_MAX_SIDE)
         observed_png = _png_bytes(rgb)
         fog_png = _png_bytes(fog)
+        mesh_json = b""
+        if force or step % self.observed_mesh_stride == 0 or changed:
+            mesh = mesh_from_observed(omap, stride=1, max_side=MESH_MAX_SIDE)
+            mesh_json = json.dumps(_compact_mesh_payload(mesh), separators=(",", ":")).encode("utf-8")
         with self.lock:
             self.observed_png = observed_png
             self.fog_png = fog_png
             self._map_seq += 1
+            if mesh_json:
+                self.observed_mesh_json = mesh_json
+                self._mesh_seq += 1
 
     def _refresh_cameras(self, *, force: bool) -> None:
         now = time.perf_counter()
@@ -453,6 +505,7 @@ class LiveSession:
             "unreachable": int(status.get("unreachable_mowable_cells") or 0),
             "n_frontiers": int(status["n_frontiers"]),
             "n_observed": n_obs,
+            "mesh_seq": self._mesh_seq,
             "n_waypoints": int(status["n_waypoints"]),
             "frontiers": frontiers,
             "explore": explore,
@@ -463,10 +516,11 @@ class LiveSession:
             "trimmer_allowed": bool(status["trimmer_allowed"]),
             "observed_url": f"/api/live/observed.png?v={self._map_seq}",
             "fog_url": f"/api/live/fog.png?v={self._map_seq}",
+            "observed_mesh_url": f"/api/live/observed_mesh.json?v={self._mesh_seq}",
             "cam_url": f"/api/live/cam/{cam_name}?v={self._cam_seq}",
             "cameras": list(self.camera_names),
             "done": bool(self.done),
-            "owner_mode": "observed_fog",
+            "owner_mode": "observed_terrain",
             "speed": self.speed,
             "dt": self.dt,
             "not_a_benchmark": True,
@@ -495,6 +549,8 @@ class LiveSession:
             (maps_dir / "observed.png").write_bytes(self.observed_png)
         if self.fog_png:
             (maps_dir / "fog.png").write_bytes(self.fog_png)
+        if self.observed_mesh_json:
+            (maps_dir / "observed_mesh.json").write_bytes(self.observed_mesh_json)
         timeline = mission_timeline(
             self.policy,
             actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
@@ -525,6 +581,7 @@ class LiveSession:
             poses = list(self.poses)
             observed_png = self.observed_png
             fog_png = self.fog_png
+            observed_mesh_json = self.observed_mesh_json
         (dest / "poses.json").write_text(
             json.dumps({"schema": VIEWER_SCHEMA, "poses": poses}, indent=2),
             encoding="utf-8",
@@ -533,6 +590,8 @@ class LiveSession:
             (maps_dir / "observed.png").write_bytes(observed_png)
         if fog_png:
             (maps_dir / "fog.png").write_bytes(fog_png)
+        if observed_mesh_json:
+            (maps_dir / "observed_mesh.json").write_bytes(observed_mesh_json)
         timeline = mission_timeline(
             self.policy,
             actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
@@ -554,12 +613,15 @@ class LiveSession:
             except json.JSONDecodeError:
                 manifest = {}
             manifest["live"] = True
-            manifest["owner_mode"] = "observed_fog"
+            manifest["owner_mode"] = "observed_terrain"
             manifest["fog"] = True
+            manifest["observed_mesh"] = True
             manifest["n_poses"] = len(poses)
             manifest["maps"] = manifest.get("maps") or {}
             manifest["maps"]["observed"] = "maps/observed.png"
             manifest["maps"]["fog"] = "maps/fog.png"
+            if observed_mesh_json:
+                manifest["maps"]["observed_mesh"] = "maps/observed_mesh.json"
             (dest / "viewer.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
@@ -578,6 +640,10 @@ def run_live(
     cam_stride: int = 20,
     map_stride: int = MAP_STRIDE_DEFAULT,
     mesh_stride: Optional[int] = None,
+    observed_mesh_stride: int = MESH_STRIDE_DEFAULT,
+    phase_budget: float = 1.0,
+    calibrate_stride: Optional[float] = None,
+    calibrate_confirm: Optional[float] = None,
 ) -> dict[str, Any]:
     """Start a live mission. ``prepare_only`` runs unattended (CI) then exits."""
     session = LiveSession(
@@ -591,6 +657,10 @@ def run_live(
         cam_stride=cam_stride,
         map_stride=map_stride,
         mesh_stride=mesh_stride,
+        observed_mesh_stride=observed_mesh_stride,
+        phase_budget=phase_budget,
+        calibrate_stride=calibrate_stride,
+        calibrate_confirm=calibrate_confirm,
     )
     summary = session.reset()
     if prepare_only:
@@ -606,7 +676,8 @@ def run_live(
     server = serve_viewer(session.out_dir, host=host, port=port, session=session)
     url = f"http://{host}:{port}/"
     print(f"Live mission {session.config_name} @ {session.speed or 'max'}× → {url}")
-    print("Owner view: fog-of-war (unknown hidden). Toggle true elev for god-view.")
+    print("Owner view: growing observed terrain + fog. Toggle true elev for god-view.")
+    print("Physics uses true height; owner/control use ObservedMap.")
     print(f"phase {summary.get('phase')}  map {float(summary.get('map_pct') or 0.0):.1%}")
     try:
         server.serve_forever()
@@ -620,13 +691,13 @@ def run_live(
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Jim's Mower live mission: wall-clock calibrate → explore → mow + fog viewer"
+        description="Jim's Mower live mission: wall-clock calibrate → explore → mow + observed terrain"
     )
     p.add_argument(
         "--config",
         type=str,
         default=DEFAULT_CONFIG,
-        help="scenario (default acre_yard; --fast defaults to mission_tiny)",
+        help="scenario (default acre_yard; live demo: acre_yard_demo; --fast → mission_tiny)",
     )
     p.add_argument("--out", type=Path, default=Path("live_out"))
     p.add_argument("--steps", type=int, default=None, help="episode budget (default 8000, or 420 with --fast)")
@@ -652,7 +723,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--cam-stride", type=int, default=20)
     p.add_argument("--map-stride", type=int, default=MAP_STRIDE_DEFAULT)
-    p.add_argument("--stride", type=int, default=None, help="mesh decimation stride (acre default 4)")
+    p.add_argument("--stride", type=int, default=None, help="true-mesh decimation stride (acre default 4)")
+    p.add_argument(
+        "--observed-mesh-stride",
+        type=int,
+        default=MESH_STRIDE_DEFAULT,
+        help="rebuild the observed elevation mesh every N steps (default 8)",
+    )
+    p.add_argument(
+        "--phase-budget",
+        type=float,
+        default=1.0,
+        help="scale mission phase caps (0.05–1). Live demos can use 0.4; does not change physics.",
+    )
+    p.add_argument(
+        "--calibrate-stride",
+        type=float,
+        default=None,
+        help="calibrate waypoint spacing in metres (0/omit = auto from yard size)",
+    )
+    p.add_argument(
+        "--calibrate-confirm",
+        type=float,
+        default=None,
+        help="close calibrate after this many metres of trail (demo). 0 = full lap.",
+    )
     return p
 
 
@@ -672,6 +767,10 @@ def main(argv: Optional[list[str]] = None) -> None:
         cam_stride=args.cam_stride,
         map_stride=args.map_stride,
         mesh_stride=args.stride,
+        observed_mesh_stride=args.observed_mesh_stride,
+        phase_budget=args.phase_budget,
+        calibrate_stride=args.calibrate_stride,
+        calibrate_confirm=args.calibrate_confirm,
     )
     if args.prepare_only:
         print(

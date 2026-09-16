@@ -105,8 +105,14 @@ cells (same “stay tractable” idea as `property_scale` at 48×40 m @
 | Sheds | Main shed (NE) and a small outbuilding (SE) |
 | Water | `ponds:` keep-out (NW) + two drains + `n_puddles: 3` leftover wet spots |
 
+Live owner view paints ponds as saturated cyan (slightly sunken) and
+sheds as tan low boxes on the **observed** mesh once cameras stamp
+those cells. That is a readability cue, not photoreal water.
+
 ```bash
 jims-mower-demo --config acre_yard --steps 80 --out demo_acre
+# Live owner demo (same acre features; short calibrate confirm → EXPLORE):
+jims-mower-live --config acre_yard_demo --speed 5
 jims-mower-live --config acre_yard --speed 5
 jims-mower-mission-demo --config acre_yard --out mission_acre
 jims-mower-viewer --episode mission_acre
@@ -117,6 +123,12 @@ Do **not** expect CI or a short demo to mow the whole acre. Strip
 spacing is 1.20 m and mission step caps are raised so explore/mow can
 move, not so the job finishes. Mesh export should use `--stride 3` or
 `4` (default stride 2 is still loadable, just heavier).
+
+`acre_yard_demo` is a **live demo profile**: same 70×58 m physics and
+authored pond/sheds, slightly tighter keep-in, `calibrate_confirm_m: 28`
+so the owner loop can leave CALIBRATE without a 226 m fence lap. The
+live viewer shows a growing **observed** elevation mesh (unknown stays
+fog). Physics still uses the true field.
 
 ### DEM hook (optional, not used in CI)
 

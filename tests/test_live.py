@@ -35,6 +35,9 @@ def test_parse_speed_and_config() -> None:
     assert "--speed" in help_text
     assert "acre_yard" in help_text
     assert "--fast" in help_text
+    assert "--phase-budget" in help_text
+    assert "--calibrate-stride" in help_text
+    assert "acre_yard_demo" in help_text
 
 
 def test_fog_rgba_unknown_opaque_observed_clear() -> None:
@@ -70,7 +73,7 @@ def test_live_session_grows_observed_and_streams_phase(tmp_path: Path) -> None:
     assert start["schema"] == LIVE_SCHEMA
     assert start["live"] is True
     assert start["phase"] == "calibrate_boundary"
-    assert start["owner_mode"] == "observed_fog"
+    assert start["owner_mode"] == "observed_terrain"
     assert start["map_pct"] < 1.0
     start_obs = int(start["n_observed"])
     assert start_obs > 0
@@ -94,7 +97,11 @@ def test_live_session_grows_observed_and_streams_phase(tmp_path: Path) -> None:
     manifest = json.loads((tmp_path / "live" / "viewer.json").read_text(encoding="utf-8"))
     assert manifest["schema"] == VIEWER_SCHEMA
     assert manifest["live"] is True
-    assert manifest.get("owner_mode") == "observed_fog"
+    assert manifest.get("owner_mode") == "observed_terrain"
+    assert session.observed_mesh_bytes()
+    mesh = json.loads(session.observed_mesh_bytes().decode("utf-8"))
+    assert mesh.get("kind") == "observed"
+    assert "honesty" in mesh
     session.close()
 
 
@@ -137,7 +144,7 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         assert code == 200
         manifest = json.loads(raw.decode("utf-8"))
         assert manifest["live"] is True
-        assert manifest["owner_mode"] == "observed_fog"
+        assert manifest["owner_mode"] == "observed_terrain"
 
         code, _headers, raw = _get(host, port, "/api/live/snapshot")
         assert code == 200
@@ -147,6 +154,7 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         assert "map_pct" in snap
         assert snap["observed_url"].startswith("/api/live/observed.png")
         assert snap["fog_url"].startswith("/api/live/fog.png")
+        assert snap["observed_mesh_url"].startswith("/api/live/observed_mesh.json")
 
         code, headers, raw = _get(host, port, "/api/live?n=2")
         assert code == 200
@@ -172,6 +180,11 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         code, _headers, observed = _get(host, port, "/api/live/observed.png")
         assert code == 200
         assert observed[:8] == b"\x89PNG\r\n\x1a\n"
+
+        code, _headers, mesh_raw = _get(host, port, "/api/live/observed_mesh.json")
+        assert code == 200
+        mesh = json.loads(mesh_raw.decode("utf-8"))
+        assert mesh.get("kind") == "observed"
 
         cam = (snap.get("cameras") or ["front"])[0]
         code, _headers, jpeg = _get(host, port, f"/api/live/cam/{cam}")
@@ -212,3 +225,4 @@ def test_live_cli_prepare_only(tmp_path: Path) -> None:
     assert manifest["live"] is True
     assert (out / "maps" / "fog.png").is_file()
     assert (out / "maps" / "observed.png").is_file()
+    assert (out / "maps" / "observed_mesh.json").is_file()

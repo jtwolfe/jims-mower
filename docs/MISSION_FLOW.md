@@ -28,10 +28,10 @@ CLI:
 
 ```bash
 # Live owner session (preferred): wall-clock sim + streaming viewer.
-# Fog-of-war from step 0 — do not wait for a finished episode folder.
-jims-mower-live
+# Observed terrain grows from step 0 — do not wait for a finished folder.
+jims-mower-live --config acre_yard_demo --speed 5
 jims-mower-live --config acre_yard --speed 1
-jims-mower-live --config acre_yard --speed 5
+jims-mower-live --config acre_yard --speed 5 --phase-budget 0.4
 jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
 
 # Post-hoc scrub of a finished episode (old path):
@@ -48,6 +48,29 @@ reach `mow` / `complete`. The full acre / golf run is longer and is
 `--speed` on `jims-mower-live` is a wall-clock multiplier (`1`, `2`,
 `5`, or `max`). The sim sleeps so each step lands near `dt / speed`
 (env `dt` is 0.10 s). `max` is unpaced for CI.
+
+## Acre live pacing (`acre_yard_demo`)
+
+`acre_yard` is a ~226 m fence. At `dt=0.1` that is many minutes of
+calibrate even at `--speed 5`, and a laptop often cannot hold 5×
+because each acre step is expensive. **`acre_yard_demo` is a live demo
+profile**, not a smaller world:
+
+* Same 70×58 m layout, pond, sheds, paths, drains, and **true-height
+  physics**.
+* Slightly tighter authored keep-in (still covers the pond and sheds).
+* Calibrate **confirms** the fence (`mission.calibrate_confirm_m: 28`)
+  then closes on the authored keep-in. It does **not** require a full
+  acre lap before EXPLORE. That is documented demo pacing, not a
+  physics lie.
+* Faster calibrate cruise / stride. Live also downsamples acre cameras
+  to 48×36 so `--speed 5` can keep up.
+* `--phase-budget 0.4` scales the phase caps on any yard the same way.
+
+Jamie command: `jims-mower-live --config acre_yard_demo --speed 5`.
+Expect **EXPLORE within a few minutes wall-clock**, with the observed
+mesh growing during explore. Full acre mow to completion is still a
+manual run, not CI.
 
 ## Unknown-space semantics
 
@@ -77,28 +100,36 @@ A disconnected island the A* connector cannot reach is counted, not
 deleted. Strip heading uses the mowable principal axis, rotated toward
 the contour when a mean grade is present.
 
+IMU tip-stop on a ridge during `mow` now reverses one step, then skips
+the waypoint and local-replans. Twelve skipped ridge segments still
+end the mow (return home). A fuller reverse/replan around long ridges
+is follow-up — this is the live-safe cheap recovery.
+
 Structures (path / building / bunker / bed / green) stay no-mow or
 blocked exactly as in `docs/TERRAIN_MAPS.md`. Physics and evaluation
 still use the true height field; control does not.
 
-## Fog of war (owner map)
+## Fog of war + observed terrain (owner map)
 
 Unknown cells are **not** mowable and **not** safe. The owner view must
 match that: a finished god-view `yard.glb` is the true height field
 used by physics, not what the robot has learned.
 
-Live / owner mode **hides the true height-field mesh** and shows a dark
-unknown pad plus an **opaque fog veil** over cells the cameras / body
-have not stamped. Observed holes paint the growing `ObservedMap`
-(free / hazard / pond / shed / frontiers). Toggle **true elev
-(god-view debug)** to reveal the physics mesh — that is evaluation,
-same idea as **observer vs true elev**. Control never reads the
-unfogged mesh. The `yard.glb` on disk is still the true field so
-debug / replay can show it.
+**Learning terrain** in the live viewer means a **partial observed
+elevation mesh** that grows with `ObservedMap`. Camera / body stamps
+lift cells into a 3D surface (grade, sheds as low boxes, ponds as
+slightly sunken cyan water). Unknown stays a dark pad + fog veil —
+not painted holes on a finished mesh. Physics still uses the true
+field; owner view and `MissionPolicy` use observed elevation only.
 
-Acre rasters (70×58 @ 0.50 m) are coarsened to ≤96 on a side before
-they hit the browser. Cameras are JPEG-throttled (~2.5 Hz). Full acre
-explore→mow need not finish in CI.
+Live / owner mode **hides the true height-field mesh** by default.
+Toggle **true elev (god-view debug)** to reveal the physics mesh —
+evaluation only, same idea as **observer vs true elev**. The `yard.glb`
+on disk is still the true field so debug / replay can show it.
+
+Acre rasters coarsen to ≤96 px (2D) / ≤48 (observed mesh). Mesh
+rebuilds every `--observed-mesh-stride` steps (default 8). Cameras are
+JPEG-throttled (~2.5 Hz). Full acre explore→mow need not finish in CI.
 
 ## Viewer
 
@@ -107,9 +138,10 @@ explore→mow need not finish in CI.
 `jims-mower-live` starts `MissionPolicy` and the World Viewer together.
 Open `http://127.0.0.1:8765/` immediately. Stdlib HTTP + SSE
 (`GET /api/live`) pushes pose, phase, map %, cut %, frontiers, plan
-(after freeze), and URLs for the latest fog / observed / camera
-frames. History is also flushed into `live_out/` so you can scrub
-later. You do not need a finished episode folder to watch the robot.
+(after freeze), and URLs for the latest fog / observed / **observed
+mesh** / camera frames. History is also flushed into `live_out/` so
+you can scrub later. You do not need a finished episode folder to
+watch the robot.
 
 ### Scrub (finished episode)
 

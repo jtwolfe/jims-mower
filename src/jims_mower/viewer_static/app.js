@@ -36,6 +36,8 @@ const state = {
   lastStep: -1,
   liveSource: null,
   unknownPad: null,
+  observedTerrain: null,
+  lastMeshSeq: -1,
 };
 
 const renderer = new THREE.WebGLRenderer({ canvas: $("view"), antialias: true });
@@ -125,7 +127,9 @@ async function loadTerrain(manifest) {
   if (manifest.mesh_json) {
     try {
       const payload = await fetch(`/data/${manifest.mesh_json}`).then((r) => r.json());
-      group.add(applyMeshPayload(payload));
+      const trueMesh = applyMeshPayload(payload);
+      trueMesh.userData.kind = "true";
+      group.add(trueMesh);
       loaded = true;
     } catch (err) {
       console.warn("mesh json failed", err);
@@ -134,6 +138,10 @@ async function loadTerrain(manifest) {
   if (!loaded && manifest.mesh) {
     try {
       const gltf = await new GLTFLoader().loadAsync(`/data/${manifest.mesh}`);
+      gltf.scene.userData.kind = "true";
+      gltf.scene.traverse((obj) => {
+        if (obj.isMesh) obj.userData.kind = "true";
+      });
       group.add(gltf.scene);
       loaded = true;
     } catch (err) {
@@ -512,22 +520,52 @@ function ensureUnknownPad() {
 }
 
 function setOwnerMeshVis(fogOn) {
-  // Owner fog hides the true height-field mesh. Physics may still use it;
-  // the owner map must not look finished from t=0.
+  // Owner mode: growing observed elevation + fog. God-view shows the
+  // true physics mesh. Control never reads the unfogged field.
   const hideTrue = !!fogOn;
   ensureUnknownPad();
   if (state.unknownPad) state.unknownPad.visible = hideTrue;
+  if (state.observedTerrain) state.observedTerrain.visible = hideTrue;
   if (state.meshGroup) {
     const overlaySet = new Set(Object.values(state.overlays).filter(Boolean));
     state.meshGroup.traverse((obj) => {
       if (!obj.isMesh) return;
       if (overlaySet.has(obj)) return;
+      if (obj === state.observedTerrain) return;
+      if (obj.userData && obj.userData.kind === "observed") return;
       obj.visible = !hideTrue;
     });
   }
   if (state.overlays.observed && state.overlays.observed.material) {
-    state.overlays.observed.material.opacity = hideTrue ? 0.92 : 0.42;
+    state.overlays.observed.material.opacity = hideTrue ? 0.28 : 0.42;
   }
+}
+
+function disposeMesh(mesh) {
+  if (!mesh) return;
+  if (mesh.geometry) mesh.geometry.dispose();
+  if (mesh.material) mesh.material.dispose();
+}
+
+function applyObservedMesh(payload) {
+  if (!payload || !payload.positions || (payload.vertex_count || 0) < 3) return;
+  if ((payload.indices || []).length < 3) return;
+  const mesh = applyMeshPayload(payload);
+  mesh.name = "observedTerrain";
+  mesh.userData.kind = "observed";
+  if (state.observedTerrain) {
+    if (state.meshGroup) state.meshGroup.remove(state.observedTerrain);
+    else scene.remove(state.observedTerrain);
+    disposeMesh(state.observedTerrain);
+  }
+  state.observedTerrain = mesh;
+  if (state.meshGroup) state.meshGroup.add(mesh);
+  else scene.add(mesh);
+  const chip = $("mesh-chip");
+  if (chip && payload.vertex_count) {
+    chip.textContent = `observed ${payload.vertex_count} v / ${payload.triangle_count || 0} t`;
+  }
+  setOverlayVis();
 }
 
 function ensureOverlayPlane(key, opacity) {
@@ -644,8 +682,15 @@ function applyLiveFrame(frame) {
     if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
     if (phase === "mow" && $("tog-coverage")) $("tog-coverage").checked = true;
   }
+  if (frame.mesh_seq != null && frame.mesh_seq !== state.lastMeshSeq && frame.observed_mesh_url) {
+    fetch(frame.observed_mesh_url)
+      .then((r) => r.json())
+      .then((payload) => applyObservedMesh(payload))
+      .catch((err) => console.warn("observed mesh", err));
+    state.lastMeshSeq = frame.mesh_seq;
+  }
   if (frame.map_seq != null && frame.map_seq !== state.lastMapSeq) {
-    loadOverlayUrl("observed", frame.observed_url, 0.48);
+    loadOverlayUrl("observed", frame.observed_url, 0.28);
     loadOverlayUrl("fog", frame.fog_url, 1.0);
     state.lastMapSeq = frame.map_seq;
     replaceFrontiers(frame.frontiers || []);
@@ -681,7 +726,7 @@ function startLive() {
   }
   if ($("tog-fog")) $("tog-fog").checked = true;
   if ($("tog-god")) $("tog-god").checked = false;
-  if ($("tog-observed")) $("tog-observed").checked = true;
+  if ($("tog-observed")) $("tog-observed").checked = false;
   if ($("tog-error")) $("tog-error").checked = false;
   if ($("btn-play")) $("btn-play").textContent = "Follow";
   setOverlayVis();
@@ -720,7 +765,7 @@ async function boot() {
   }
   const live = !!manifest.live;
   $("subtitle").textContent = live
-    ? `LIVE ${manifest.policy || "mission"} · fog-of-war · ${state.width.toFixed(1)}×${state.height.toFixed(1)} m · no mAP/FPS`
+    ? `LIVE ${manifest.policy || "mission"} · observed terrain + fog · ${state.width.toFixed(1)}×${state.height.toFixed(1)} m · no mAP/FPS`
     : `${manifest.policy || "sim"} · ${state.width.toFixed(1)}×${state.height.toFixed(1)} m · no mAP/FPS`;
   $("mesh-chip").textContent = `mesh ${manifest.vertex_count || 0} v / ${manifest.triangle_count || 0} t`;
   controls.target.set(state.width / 2, 0, state.height / 2);
@@ -730,6 +775,14 @@ async function boot() {
   // Viewer-only lift so a ~5% yard grade and 10–20 cm drains read on a 12 m pad.
   state.meshGroup.scale.y = 4;
   scene.add(state.meshGroup);
+  if (manifest.maps && manifest.maps.observed_mesh) {
+    try {
+      const payload = await fetch(`/data/${manifest.maps.observed_mesh}`).then((r) => r.json());
+      applyObservedMesh(payload);
+    } catch (err) {
+      console.warn("observed mesh boot", err);
+    }
+  }
 
   if (manifest.poses) {
     const pack = await fetch(`/data/${manifest.poses}`).then((r) => r.json());

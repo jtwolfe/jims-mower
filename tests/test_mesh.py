@@ -6,13 +6,19 @@ from pathlib import Path
 
 import numpy as np
 
-from jims_mower.constants import POND_RGB, STRUCTURE_POND
+from jims_mower.constants import POND_RGB, STRUCTURE_BUILDING, STRUCTURE_POND
 from jims_mower.mesh import (
     export_mesh,
     mesh_from_elevation,
+    mesh_from_observed,
     write_glb,
     write_mesh_json,
     write_obj,
+)
+from jims_mower.planning.observed import (
+    BUILDING_VIEW_RGB,
+    POND_VIEW_RGB,
+    ObservedMap,
 )
 from jims_mower.mesh import main as mesh_main
 
@@ -99,6 +105,45 @@ def test_mesh_cli(tmp_path: Path) -> None:
     mesh_main(["--out", str(dest), "--seed", "1", "--cameras", "4", "--stride", "3"])
     assert dest.is_file()
     assert dest.with_suffix(".json").is_file()
+
+
+def test_mesh_from_observed_grows_and_leaves_holes() -> None:
+    omap = ObservedMap.empty(4.0, 4.0, 0.25)
+    empty = mesh_from_observed(omap, stride=1, max_side=32)
+    assert empty.triangle_count == 0
+    omap.elevation[:, :] = 0.05
+    omap.elevation[4:10, 4:12] = 0.40
+    omap.stamp_disk(1.6, 1.6, 0.70, explored=True)
+    omap.ingest_observer({"elevation": omap.elevation})
+    grown = mesh_from_observed(omap, stride=1, max_side=32)
+    assert grown.triangle_count > 0
+    assert grown.extras.get("kind") == "observed"
+    full = mesh_from_elevation(
+        omap.elevation,
+        width_m=4.0,
+        height_m=4.0,
+        resolution_m=0.25,
+        stride=1,
+    )
+    assert grown.triangle_count < full.triangle_count
+    ys = grown.positions[:, 1]
+    # Observed bump must lift; unknown verts stay at the pad.
+    assert float(ys.max()) > 0.25
+
+
+def test_mesh_from_observed_pond_and_shed_relief() -> None:
+    omap = ObservedMap.empty(3.2, 3.2, 0.20)
+    omap.observed[:, :] = True
+    omap.elevation[:, :] = 0.10
+    omap.structure[2:5, 2:5] = STRUCTURE_POND
+    omap.structure[8:12, 8:12] = STRUCTURE_BUILDING
+    mesh = mesh_from_observed(omap, stride=1, max_side=32)
+    pond = np.asarray(POND_VIEW_RGB, dtype=np.float32) / 255.0
+    shed = np.asarray(BUILDING_VIEW_RGB, dtype=np.float32) / 255.0
+    assert np.any(np.linalg.norm(mesh.colors - pond, axis=1) < 0.05)
+    assert np.any(np.linalg.norm(mesh.colors - shed, axis=1) < 0.05)
+    zs = mesh.positions[:, 1]
+    assert float(zs.max()) > float(zs.min()) + 0.15
 
 
 def test_mesh_preserves_yard_gradient() -> None:
