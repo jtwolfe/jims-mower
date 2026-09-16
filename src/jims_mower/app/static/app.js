@@ -14,12 +14,18 @@
   const $ = (sel) => document.querySelector(sel);
   const screen = () => $("#screen");
 
+  function needsFirstRun() {
+    const st = state.status || {};
+    return !!(st.first_run && !st.taught);
+  }
+
   function route() {
     const hash = location.hash || "";
     if (hash.startsWith("#/onboard/")) return hash.slice(2);
     if (hash === "#/map" || hash === "#/live") return "map";
     if (hash === "#/health") return "health";
     if (hash === "#/fault") return "fault";
+    if (needsFirstRun()) return "onboard/unbox";
     if (localStorage.getItem(KEY)) return "map";
     return "onboard/unbox";
   }
@@ -179,10 +185,11 @@
       screen().innerHTML = onboardFrame(
         "teach",
         "Teach the yard",
-        `<p class="lead">Keep-in is the yellow fence. Keep-outs stay red. Tap the map to add a keep-in vertex, or keep the loaded polygon.</p>
+        `<p class="lead">Drive the perimeter in sim, or tap the map to edit keep-in vertices. This writes a YardProfile — the same fence UX-A teach uses.</p>
          <svg id="yard-svg" viewBox="0 0 16 12"></svg>
-         <button class="btn ghost" id="teach-cmd">Enter teach mode</button>`,
-        "Save boundary",
+         <button class="btn ghost" id="teach-cmd">Drive perimeter</button>
+         <button class="btn ghost" id="load-yard" ${!(state.status && state.status.yard_saved) ? "hidden" : ""}>Load saved yard</button>`,
+        "Save yard",
         null
       );
       const svg = $("#yard-svg");
@@ -199,9 +206,19 @@
           window.JimsViewer.drawYard(svg, state);
         }
       };
-      $("#teach-cmd").onclick = () => command("teach");
+      $("#teach-cmd").onclick = () => (isLive() ? liveControl("teach") : command("teach"));
+      const loadBtn = $("#load-yard");
+      if (loadBtn) loadBtn.onclick = async () => {
+        if (isLive()) await liveControl("load_yard");
+        go("onboard/mow");
+      };
       $("#next").onclick = async () => {
-        if (state.teachPts.length >= 3) await saveYard({ keep_in: state.teachPts });
+        if (isLive()) {
+          const extra = state.teachPts.length >= 3 ? { keep_in: state.teachPts } : {};
+          await liveControl("save_yard", extra);
+        } else if (state.teachPts.length >= 3) {
+          await saveYard({ keep_in: state.teachPts });
+        }
         go("onboard/mow");
       };
       return;
@@ -217,11 +234,7 @@
     );
     $("#next").onclick = async () => {
       localStorage.setItem(KEY, "1");
-      if (isLive()) go("map");
-      else {
-        await command("start");
-        go("map");
-      }
+      go("map");
     };
     $("#skip").onclick = () => {
       localStorage.setItem(KEY, "1");
@@ -267,6 +280,20 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     $("#pair-bt").onclick = () => command("pair");
   }
 
+  function fenceOverlayHtml(st, live) {
+    const yard = state.yard || {};
+    const keep = (live && live.keep_in) || st.keep_in || yard.keep_in || [];
+    if (!keep.length) return "";
+    const w = Number(yard.width_m || live.width_m || 16);
+    const h = Number(yard.height_m || live.height_m || 12);
+    const pts = keep.map((p) => `${Number(p[0] != null ? p[0] : p.x)},${Number(p[1] != null ? p[1] : p.y)}`).join(" ");
+    return `<svg class="fence-overlay" id="fence-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <g transform="translate(0 ${h}) scale(1 -1)">
+        <polygon points="${pts}" fill="none" stroke="#ffcc33" stroke-width="0.18"/>
+      </g>
+    </svg>`;
+  }
+
   function renderLiveJob() {
     const st = state.status || {};
     const live = state.live || {};
@@ -276,6 +303,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       return;
     }
     const job = live.job_state || (st.state || {}).job_state || "idle";
+    const taught = !!(st.taught || live.taught);
     const copy = st.owner_copy || live.owner_copy || "Yard unknown — start a job when ready.";
     const mapPct = Number(st.map_pct != null ? st.map_pct : 100 * (live.map_pct || 0));
     const cutPct = Number(st.cut_pct != null ? st.cut_pct : 100 * (live.cut_pct || 0));
@@ -284,13 +312,18 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const fog = live.fog_url || st.fog_url || "/api/live/fog.png";
     const observed = live.observed_url || st.observed_url || "/api/live/observed.png";
     const path = st.radio_path || live.radio_path || {};
+    const yardName = (state.yard && state.yard.name) || st.yard || live.yard || "yard";
+    const saved = !!(st.yard_saved || live.yard_saved);
+    const teaching = job === "teach";
     screen().innerHTML = `
       <h1>Live job</h1>
       ${radioChipsHtml(path)}
       <p class="owner-copy" id="owner-copy">${copy}</p>
+      <p class="sub" id="yard-chip">${yardName}${taught ? " · taught fence" : " · authored demo fence until you teach"}</p>
       <div class="live-preview">
         <img class="obs" id="obs-img" alt="observed terrain" src="${observed}"/>
         <img class="fog" id="fog-img" alt="fog of war" src="${fog}"/>
+        ${fenceOverlayHtml(st, live)}
       </div>
       <div class="row">
         <div class="chip">Map<b id="map-pct">${mapPct.toFixed(1)}%</b></div>
@@ -303,8 +336,13 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <button type="button" data-speed="max">max</button>
       </div>
       <div class="row">
-        <button class="btn primary" id="start" ${job === "running" ? "disabled" : ""}>Start job</button>
-        <button class="btn ghost" id="pause" ${job !== "running" ? "disabled" : ""}>Pause</button>
+        <button class="btn ghost" id="teach-cmd" ${job === "running" ? "disabled" : ""}>Teach boundary</button>
+        <button class="btn ghost" id="save-yard">${teaching ? "Save yard" : "Save yard"}</button>
+      </div>
+      <button class="btn ghost" id="load-yard" ${saved ? "" : "hidden"}>Load saved yard</button>
+      <div class="row">
+        <button class="btn primary" id="start" ${job === "running" || job === "teach" ? "disabled" : ""}>Start job</button>
+        <button class="btn ghost" id="pause" ${job !== "running" && job !== "teach" ? "disabled" : ""}>Pause</button>
       </div>
       <button class="btn ghost" id="resume" ${job !== "paused" && job !== "hold" ? "disabled" : ""}>Resume</button>
       ${canMow ? `<button class="btn warn" id="start-mow">Start mow</button>` : ""}
@@ -319,6 +357,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       btn.classList.toggle("on", btn.dataset.speed === speed);
       btn.onclick = () => liveControl("speed", { speed: btn.dataset.speed });
     });
+    $("#teach-cmd").onclick = () => liveControl("teach");
+    $("#save-yard").onclick = () => liveControl("save_yard");
+    const loadBtn = $("#load-yard");
+    if (loadBtn) loadBtn.onclick = () => liveControl("load_yard");
     $("#start").onclick = () => liveControl("start");
     $("#pause").onclick = () => liveControl("pause");
     $("#resume").onclick = () => liveControl("resume");
@@ -473,7 +515,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     .catch(() => null)
     .finally(() => {
       if (!location.hash) {
-        location.hash = localStorage.getItem(KEY) ? "#/map" : "#/onboard/unbox";
+        location.hash = needsFirstRun() || !localStorage.getItem(KEY) ? "#/onboard/unbox" : "#/map";
       }
       render();
     });

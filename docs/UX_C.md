@@ -79,7 +79,7 @@ map/cut %, `session_summary`, and fog / observed URLs.
 
 `POST /command` `start` after ESTOP is the operator clear. On `--live`
 it forwards to `LiveSession.control` (`start` / `pause` / `estop` /
-`start_mow` / `inject` / `pair`).
+`start_mow` / `inject` / `pair` / `teach` / `save_yard` / `load_yard`).
 
 ## Thin app shell
 
@@ -127,14 +127,41 @@ jims-mower-app --backend memory --yard configs/yards/example_profile.json --port
 port **8766**, speed 5×). Full `acre_yard` stays available
 (`--config acre_yard`). `--fast` is `mission_tiny` for CI.
 
-Open `http://127.0.0.1:8766/`. Pair the BT stub, Start job, watch fog,
-MAP READY → Start mow, Pause / ESTOP. Inject stuck vs dead-motor SOS
-from the job or SOS tab.
+## First-run vs demo confirm fence
+
+Jamie's command:
+
+```bash
+jims-mower-owner --live
+# or jump the onboarding hash: jims-mower-owner --live --first-run
+# open http://127.0.0.1:8766/
+```
+
+**First-run (real setup):** Unbox → Pair BT stub → **Teach boundary**
+(drive the perimeter in sim, or tap/edit keep-in vertices) → **Save
+yard**. That writes `live_out/profile.json` (`jims_mower.yard.v1`) — the
+same UX-A `YardProfile` as `jims-mower-teach`. Idle then shows that yard
+selected. **Start job** uses the taught keep-in / home as the geofence
+and **skips** authored `calibrate_confirm_m`. Explore fog → MAP READY →
+mow is unchanged.
+
+**Demo confirm fence (no teach):** Start on `acre_yard_demo` still
+confirms the authored keep-in after ~28 m of trail, then explores. That
+is documented demo pacing, not how an owner teaches a yard.
+
+Reload a saved document with **Load saved yard** or
+`jims-mower-owner --live --yard live_out/profile.json`. Physics stays on
+the acre-scale (or `--fast` tiny) world; the profile is fence + home,
+not a second mesh.
+
+Open `http://127.0.0.1:8766/`. Pair the BT stub, teach (or skip to the
+demo fence), Start job, watch fog, MAP READY → Start mow, Pause / ESTOP.
+Inject stuck vs dead-motor SOS from the job or SOS tab.
 
 ## Tests
 
 ```bash
-pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_live.py
+pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_first_run.py tests/test_live.py
 jims-mower-app --live --help
-jims-mower-owner --help
+jims-mower-owner --live --first-run --help
 ```

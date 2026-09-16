@@ -71,17 +71,34 @@ profile**, not a smaller world:
   READY → MOW can happen in minutes, not an hour.
 * `--phase-budget 0.4` scales the phase caps on any yard the same way.
 
+## First-run teach vs demo confirm fence
+
+| Path | Fence | After Start |
+| --- | --- | --- |
+| **First-run** (`--live`, Teach → Save) | Owner-taught `YardProfile` (`jims_mower.yard.v1`) | Skip authored calibrate. Explore fog → MAP READY → mow. |
+| **Demo** (`acre_yard_demo`, Start only) | Authored keep-in, `calibrate_confirm_m: 28` | Short confirm lap, then the same explore → MAP READY → mow. |
+| **Full acre** (`--config acre_yard`) | Authored ~226 m fence, full lap | Same phases; long. Not CI. |
+
 Jamie **phone** command (owns the live job):
 
 ```bash
 jims-mower-owner --live
+# Teach boundary → Save yard → Start job
+jims-mower-owner --live --first-run
 # open http://127.0.0.1:8766/
 ```
 
 Same session: `jims-mower-app --live --config acre_yard_demo --port 8766`.
-Pair the BT stub, then Start / Pause / ESTOP / speed / MAP READY →
-Start mow. Fog + observed preview is in the phone chrome; deep-link
-`/viewer` is the desktop World Viewer on the same process.
+Pair the BT stub, teach (or skip), then Start / Pause / ESTOP / speed /
+MAP READY → Start mow. Fog + observed preview (taught fence overlay) is
+in the phone chrome; deep-link `/viewer` is the desktop World Viewer on
+the same process.
+
+`acre_yard` vs `acre_yard_demo`: same ~1-acre physics world (70×58 m,
+pond, sheds, paths). Use **`acre_yard_demo`** for the live phone / laptop
+loop (short confirm or a taught profile). Use **`acre_yard`** when you
+want a full fence lap and the stricter map-ready gate. Neither is a
+coverage benchmark. CI uses `--fast` (`mission_tiny`) — no full-acre mow.
 
 Jamie **desktop** command (viewer chrome only):
 

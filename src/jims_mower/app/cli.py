@@ -46,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fast", action="store_true", help="live: mission_tiny + short budgets (CI)")
     p.add_argument("--steps", type=int, default=None, help="live episode budget")
     p.add_argument("--out", type=Path, default=Path("live_out"), help="live bundle directory")
+    p.add_argument(
+        "--first-run",
+        action="store_true",
+        help="first-run setup: pair → teach keep-in → save YardProfile → Start uses that fence",
+    )
     return p
 
 
@@ -74,10 +79,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         speed=args.speed,
         steps=args.steps,
         out_dir=args.out,
+        first_run=args.first_run,
     )
     print(f"jims-mower-app http://{args.host}:{port}/  backend={kind}  config={config}")
     if live:
-        print("Phone owns the live job. Pair BT stub → Start / Pause / ESTOP / MAP READY.")
+        if args.first_run:
+            print("First-run: Pair BT stub → Teach boundary → Save yard → Start job.")
+        else:
+            print("Phone owns the live job. Pair BT stub → Teach (optional) → Start / Pause / ESTOP.")
+        print("Taught YardProfile is the job geofence. Demo confirm-fence is acre_yard_demo without teach.")
         print("Desktop viewer still: jims-mower-live --config acre_yard_demo --speed 5")
     serve_app(backend, host=args.host, port=port)
 

@@ -752,6 +752,7 @@ def make_backend(
     out_dir: Optional[Union[str, Path]] = None,
     session: Any = None,
     reset: bool = True,
+    first_run: bool = False,
 ) -> AppBackend:
     profile: Optional[YardProfile] = None
     persist = Path(yard_path) if yard_path else None
@@ -781,6 +782,7 @@ def make_backend(
             yard_path=persist,
             out_dir=out_dir or "live_out",
             reset=reset,
+            first_run=first_run,
         )
     if kind not in {"sim", "demo"}:
         raise YardProfileError(f"unknown backend {kind!r}")

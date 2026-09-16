@@ -413,18 +413,29 @@ def write_yard_profile(path: Union[str, Path], profile: YardProfile) -> Path:
     return dest
 
 
-def apply_profile_to_scenario(scenario: Any, profile: YardProfile) -> Any:
-    """Mutate a Scenario's geofence / keep-out / name from a taught profile."""
+def apply_profile_to_scenario(
+    scenario: Any,
+    profile: YardProfile,
+    *,
+    resize_world: bool = True,
+) -> Any:
+    """Mutate a Scenario's geofence / keep-out / name from a taught profile.
+
+    Live first-run keeps the acre-scale physics world and only overlays the
+    taught keep-in / keep-out (``resize_world=False``). Demo ``--profile``
+    still resizes the gym to the document.
+    """
     scenario.geofence = list(profile.keep_in)
     scenario.keepout = [list(p) for p in profile.keep_out]
     if not scenario.name:
         scenario.name = profile.name
-    if profile.width_m > 0.0:
-        scenario.config.world.width_m = float(profile.width_m)
-    if profile.height_m > 0.0:
-        scenario.config.world.height_m = float(profile.height_m)
-    if profile.resolution_m > 0.0:
-        scenario.config.world.resolution_m = float(profile.resolution_m)
+    if resize_world:
+        if profile.width_m > 0.0:
+            scenario.config.world.width_m = float(profile.width_m)
+        if profile.height_m > 0.0:
+            scenario.config.world.height_m = float(profile.height_m)
+        if profile.resolution_m > 0.0:
+            scenario.config.world.resolution_m = float(profile.resolution_m)
     return scenario
 
 

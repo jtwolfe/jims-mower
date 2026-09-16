@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from jims_mower.owner import export_owner_overlay
-from jims_mower.owner_cli import build_parser, main as owner_main
+from jims_mower.owner_cli import build_parser, main as owner_main, resolve_owner_live_config
 
 
 def test_owner_overlay_html(tmp_path: Path) -> None:
@@ -29,3 +29,7 @@ def test_owner_cli(tmp_path: Path) -> None:
     help_text = build_parser().format_help()
     assert "--live" in help_text
     assert "acre_yard_demo" in help_text
+    assert "--first-run" in help_text
+    assert resolve_owner_live_config(None, fast=False) == "acre_yard_demo"
+    assert resolve_owner_live_config(None, fast=True) == "mission_tiny"
+    assert resolve_owner_live_config("acre_yard", fast=True) == "acre_yard"

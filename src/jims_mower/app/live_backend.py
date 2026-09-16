@@ -53,8 +53,10 @@ class LiveBackend:
         yard_path: Optional[Path] = None,
         out_dir: Union[str, Path] = "live_out",
         reset: bool = True,
+        first_run: bool = False,
     ) -> None:
         self._lock = threading.Lock()
+        persist = Path(yard_path) if yard_path else Path(out_dir) / "profile.json"
         self.session = session or LiveSession(
             config=config,
             fast=fast,
@@ -63,8 +65,20 @@ class LiveBackend:
             seed=seed,
             cameras=cameras,
             out_dir=out_dir,
+            yard_profile=yard,
+            yard_path=persist,
+            first_run=first_run,
         )
-        self.yard_path = Path(yard_path) if yard_path else None
+        if session is not None:
+            if yard is not None:
+                self.session.yard_profile = yard
+                if len(yard.keep_in) >= 3:
+                    self.session.owner_taught = True
+            if yard_path is not None:
+                self.session.yard_path = persist
+            self.session.first_run = bool(first_run or self.session.first_run)
+        self.yard_path = persist
+        self.session.yard_path = persist
         self.yard = yard or default_yard_profile(name=str(self.session.config_name))
         self.paired = bool(getattr(self.session, "paired", False))
         if reset and not self.session.started:
@@ -72,6 +86,9 @@ class LiveBackend:
         self._sync_yard_from_session()
 
     def _sync_yard_from_session(self) -> None:
+        if self.session.yard_profile is not None and len(self.session.yard_profile.keep_in) >= 3:
+            self.yard = self.session.yard_profile
+            return
         policy = self.session.policy
         env = self.session.env
         if policy is not None and policy.profile is not None:
@@ -103,6 +120,8 @@ class LiveBackend:
         if key == "start":
             self.paired = True
             self.session.paired = True
+        if key in {"save_yard", "load_yard", "teach"}:
+            self._sync_yard_from_session()
         self._sync_yard_from_session()
         return result
 
@@ -124,6 +143,8 @@ class LiveBackend:
             mission = "returning"
         if snap.get("can_start_mow"):
             mission = "review"
+        if job_state == "teach" or snap.get("phase") == "teach":
+            mission = "teach"
         radio = _overlay_radio_sim(_radio_status(self.yard.radio), _radio_sim_from_info(info))
         radio["path"] = snap.get("radio_path") or {}
         robot = robot_status_for(
@@ -174,6 +195,13 @@ class LiveBackend:
             "done": bool(snap.get("done")),
             "fog_url": snap.get("fog_url"),
             "observed_url": snap.get("observed_url"),
+            "keep_in": snap.get("keep_in") or [list(p) for p in self.yard.keep_in],
+            "keep_out": snap.get("keep_out") or [[list(p) for p in hole] for hole in self.yard.keep_out],
+            "taught": bool(snap.get("taught") or self.session.owner_taught),
+            "first_run": bool(snap.get("first_run") or self.session.first_run),
+            "needs_teach": bool(snap.get("needs_teach") or (self.session.first_run and not self.session.owner_taught)),
+            "yard_path": snap.get("yard_path") or (str(self.yard_path) if self.yard_path else ""),
+            "yard_saved": bool(snap.get("yard_saved") or (self.yard_path is not None and self.yard_path.is_file())),
             "viewer": "/viewer",
             "not_a_benchmark": True,
         }
@@ -189,13 +217,16 @@ class LiveBackend:
     def put_yard(self, profile: YardProfile) -> dict[str, Any]:
         with self._lock:
             self.yard = profile
-            if self.yard_path is not None:
-                save_yard_profile(profile, self.yard_path)
+            self.session.yard_profile = profile
+            dest = self.yard_path or (Path(self.session.out_dir) / "profile.json")
+            save_yard_profile(profile, dest)
+            self.yard_path = dest
+            self.session.yard_path = dest
             return profile.as_dict()
 
     def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
-        mapped = {"stop": "pause", "return": "hold", "teach": "pair"}.get(key, key)
+        mapped = {"stop": "pause", "return": "hold"}.get(key, key)
         if mapped == "pair":
             with self._lock:
                 self.paired = True

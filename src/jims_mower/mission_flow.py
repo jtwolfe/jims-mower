@@ -221,7 +221,33 @@ class MissionPolicy:
         self._owner_hold = False
         self.safe.clear_if_not_estop()
 
-    def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> None:
+    def accept_taught_profile(self, profile: YardProfile) -> None:
+        """Owner-taught keep-in: skip authored calibrate and start exploring."""
+        if profile is None or len(profile.keep_in) < 3:
+            return
+        self.profile = profile
+        self._geofence = profile.geofence_spec()
+        self._home = profile.home_pose()
+        if self.observed is not None:
+            self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
+        self.teach.spec = self._geofence
+        self._emit(
+            "boundary_taught",
+            {
+                "keep_in_vertices": len(profile.keep_in),
+                "source": "owner",
+                "name": profile.name,
+            },
+        )
+        self._transition(MissionPhase.EXPLORE)
+
+    def reset(
+        self,
+        obs: dict[str, Any],
+        info: Optional[dict[str, Any]] = None,
+        *,
+        profile: Optional[YardProfile] = None,
+    ) -> None:
         info = info or {}
         pose = _pose_from_obs(obs, info)
         self.fusion.reset(pose.x, pose.y, pose.theta, pose.z, pose.pitch, pose.roll)
@@ -275,7 +301,33 @@ class MissionPolicy:
         if obs.get("structure") is not None:
             self._authored_structure = np.asarray(obs["structure"]).copy()
         self._stamp(obs, info, pose, explored=True)
-        self._enter(MissionPhase.CALIBRATE_BOUNDARY, "phase_enter", {"guided": True})
+        taught = profile if profile is not None and len(profile.keep_in) >= 3 else None
+        if taught is not None:
+            self.profile = taught
+            self._geofence = taught.geofence_spec()
+            self._home = taught.home_pose()
+            if self.observed is not None:
+                self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
+            self.teach.spec = self._geofence
+            self._enter(
+                MissionPhase.EXPLORE,
+                "phase_enter",
+                {
+                    "guided": False,
+                    "taught": True,
+                    "keep_in_vertices": len(taught.keep_in),
+                },
+            )
+            self._emit(
+                "boundary_taught",
+                {
+                    "keep_in_vertices": len(taught.keep_in),
+                    "source": "owner",
+                    "name": taught.name,
+                },
+            )
+        else:
+            self._enter(MissionPhase.CALIBRATE_BOUNDARY, "phase_enter", {"guided": True})
 
     def act(self, obs: dict[str, Any], info: dict[str, Any]) -> np.ndarray:
         pose_hint = _pose_from_obs(obs, info)

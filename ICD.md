@@ -170,12 +170,12 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 | --- | --- | --- |
 | `GET` | `/status` | `jims_mower.app_status.v1` — `pose`, `battery`, `state` (`mission` + SafeState `machine`), `radio`, `faults` |
 | `GET` / `PUT` | `/yard` | full [`YardProfile`](src/jims_mower/profile.py) (`jims_mower.yard.v1`) |
-| `POST` | `/command` | `{cmd}` ∈ `start` / `stop` / `return` / `estop` / `teach` |
+| `POST` | `/command` | `{cmd}` ∈ `start` / `stop` / `return` / `estop` / `teach` (live also `save_yard` / `load_yard` / `pair`) |
 | `GET` | `/map/mesh` | UX-A `mesh_to_payload` + `ux_a_href: /viewer` |
 | `GET` | `/map/coverage` | downsampled cut / uncut / non-grass |
 | `GET` | `/events` | SSE of `/status` |
 | `GET` | `/api/live` | live SSE when `--live` (`jims_mower.live.v1`) |
-| `POST` | `/api/live/control` | same cmds as `jims-mower-live` (no second mission loop) |
+| `POST` | `/api/live/control` | same cmds as `jims-mower-live` (`start` / `pause` / `teach` / `save_yard` / `load_yard` / …; no second mission loop) |
 
 `--live` `/status` adds `backend`, `robot` (idle / pairing / live /
 fault), `owner_copy`, `radio_path`, map/cut %, `session_summary`.

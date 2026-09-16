@@ -53,12 +53,16 @@ def test_app_live_cli_and_owner_flag() -> None:
     assert args.live is True
     assert args.config == "acre_yard_demo"
     assert args.speed == "5"
+    first = app.parse_args(["--live", "--first-run"])
+    assert first.first_run is True
     help_text = app.format_help()
     assert "--live" in help_text
+    assert "--first-run" in help_text
     assert "acre_yard_demo" in help_text
     owner = owner_parser()
     ohelp = owner.format_help()
     assert "--live" in ohelp
+    assert "--first-run" in ohelp
     assert str(APP_LIVE_PORT) in ohelp or "8766" in ohelp
 
 
@@ -148,6 +152,8 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "/api/live/control" in js
         assert "Start job" in js
         assert "Start mow" in js
+        assert "Teach boundary" in js
+        assert "Save yard" in js
         assert "Inject SOS" in js
 
         conn = HTTPConnection(host, port, timeout=6.0)
