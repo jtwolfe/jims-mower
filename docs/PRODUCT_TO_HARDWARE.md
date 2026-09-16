@@ -117,18 +117,18 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | MAP-3 | Loop closure / revisit | **stub** | `LoopClosureStub` occupancy fingerprint + optional taught-vertex pull. `not_slam: true`. No pose-graph optimizer. | Gym: fence vertices stay inside a stated metre error on a loop (`tests/test_pose_assist.py`, 0.75 m). Field: return to dock after 1 acre explore. | RT-2 GNSS/IMU, MAP-1 |
 | MAP-3b | Sparse multi-view / pose assist | **stub** (gym this PR) | Landmark revisit on taught fence vertices (2-D translation, capped). Not feature tracks across the 4–6 cam rig. Not a dense DEM. | Gym: drifted revisit pulled toward teach vertices. Field: RTK-VIO later. | MAP-3, RT-2 |
 | MAP-3c | Offline docked densify | **missing** | Heavier multi-view pass while idle. True photogrammetry for the owner mesh only. Must not block the live mow loop. | Docked job writes a refined mesh; mow loop FPS / cycle time unchanged (measure later; do not invent). | MAP-2, RT-7 |
-| MAP-4 | Multi-session persistence | **partial** | `jims-mower-mission` saves map + uncut + pose for the **same sim process**. No day-2 load on a cold Orin with GNSS origin. | Power cycle, reload yesterday's yard, resume uncut without reteaching. | MAP-3, MAP-5 |
-| MAP-5 | Geofence on Earth | **partial** | Taught polygon in the gym metre frame. GNSS is a noisy `(x,y,z,valid)` in that frame, not WGS84. | Keep-in vertices + a surveyed origin; robot stops before the tape, not 3 m past. | RT-2 GNSS, UX teach |
+| MAP-4 | Multi-session persistence | **partial** (software this PR) | `save_mission` writes ObservedMap fog + uncut + pose + YardProfile to disk. `MissionPolicy.restore_session` + `load_mission` work in a **new process**. Live pause/close writes `session.npz`. Not a flashed Orin day-2 image. | Gym: save → tear down → load; uncut still planned; fog preserved (`tests/test_mission.py`, `tests/test_pln_regression.py`). Field: power-cycle the Orin on a surveyed peg. | MAP-3, MAP-5 |
+| MAP-5 | Geofence on Earth | **partial** (surveyed-origin model this PR) | `YardProfile.origin` is a local-ENU peg (`e_m/n_m/u_m`, optional lat/lon). Keep-in is metres relative to it. ICD `gps` is ENU + `valid`. **No WGS84 field survey in this repo.** | Gym: GNSS/pose near the fence edge stops short of the tape (`tests/test_survey_origin.py`). Field: RTK the peg, tape the fence, stop before the tape — **not claimed**. | RT-2 GNSS, UX teach |
 
 ### 3. Planning / control
 
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| PLN-1 | Explore | **partial** | Frontier walk on ObservedMap. Needs real maps to be useful. | MAP READY on a real lawn without counting fog islands as unreachable (already true in sim). | MAP-1 |
-| PLN-2 | Coverage | **partial** | Boustrophedon + A* on observer costmap; energy strip order uses stub SOC. | Leftover uncut vs planned cells on a marked 10×10 m patch. | MAP-1, CV-2 |
-| PLN-3 | Tip recovery | **partial** | Reverse → pivot → help; IMU tip-skip continues paint in sim. Thresholds (`tip_roll_rad=0.40`) are gym constants. | Tip the chassis to the software trip on a known ramp; wheels stop; recover without drain entry. | RT-2 IMU, HD-mass |
-| PLN-4 | Living-thing interlock | **partial** | Trimmer off inside `safety_radius_m` of a **detection**. With MockDetector this is god-view. With BlindDetector it never fires. | Person steps into the radius on the real rig; trimmer request is refused within one control cycle. | CV-3, CV-4 |
-| PLN-5 | Resume after stop | **partial** | Mission save/load + owner Pause/Resume in live. Schedule duration-stop is new. Field “battery died mid-strip” is untested. | Pause 10 min, resume; uncut cells still planned. | MAP-4, SCH-1 |
+| PLN-1 | Explore | **partial** (gym regression this PR) | Frontier walk on ObservedMap. `tests/test_pln_regression.py` runs explore → MAP READY on `mission_tiny` with a taught profile. Needs real maps in the field. | MAP READY on a real lawn without counting fog islands as unreachable (already true in sim). | MAP-1 |
+| PLN-2 | Coverage | **partial** (gym regression this PR) | Boustrophedon + A* on observer costmap; energy strip order uses stub SOC. Regression freezes the observed map then mows. | Leftover uncut vs planned cells on a marked 10×10 m patch. | MAP-1, CV-2 |
+| PLN-3 | Tip recovery | **partial** (gym regression this PR) | Reverse → pivot → help; IMU tip-skip continues paint in sim. Thresholds (`tip_roll_rad=0.40`) are gym constants — **not retuned**. | Tip the chassis to the software trip on a known ramp; wheels stop; recover without drain entry. | RT-2 IMU, HD-mass |
+| PLN-4 | Living-thing interlock | **partial** | Trimmer off inside `safety_radius_m` of a **detection**. With MockDetector this is god-view (and the gym interlock still reads the obstacle list). With BlindDetector detections are `[]` — a dets-only interlock never fires. | Person steps into the radius on the real rig; trimmer request is refused within one control cycle. | CV-3, CV-4 |
+| PLN-5 | Resume after stop | **partial** (this PR) | Mission save/load + owner Pause/Resume in live + cold `restore_session`. Schedule duration-stop unchanged. Field “battery died mid-strip” is untested. | Pause 10 min, resume; uncut cells still planned. Gym: `tests/test_pln_regression.py`. | MAP-4, SCH-1 |
 
 ### 4. Scheduling
 
@@ -138,7 +138,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | SCH-2 | Timezone | **partial** | `local` or IANA. Orin must set a real zone (e.g. `Australia/Sydney`). | Job starts at 09:00 in that zone, not UTC-by-accident. | SCH-1 |
 | SCH-3 | Rain skip | **partial** | Uses env `weather.wet` or `status.weather.rain`. No BOM/radar. | Set rain flag; window is consumed as skip; next week can still run. | SCH-1 |
 | SCH-4 | SOC gate | **partial** | Compares `battery.soc` to `schedule.min_soc` (default 0.25). Gym SOC is the OrinBudget **stub**. | Real fuel gauge below min_soc skips. | RT-5 pack telemetry |
-| SCH-5 | Notifications | **missing** | No SMS / push when a run skips or finishes. | Owner gets a skip reason without opening the LAN page. | SCH-1, UX-2 |
+| SCH-5 | Notifications | **partial** (in-app this PR) | `NotificationLog` + `/notifications`. Skip/finish reasons on the LAN list. Webhook is a **stub** (`delivered: false`). No SMS / vendor push. | Owner sees a skip reason on `/notifications` without a second SSE tab. Field SMS still missing. | SCH-1, UX-2 |
 
 ### 5. Runtime (Orin)
 
@@ -156,10 +156,10 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| SAF-1 | Self-test | **partial** | `jims-mower-selftest`: unloaded spin, IMU still, cam entropy — against **gym** streams. | Same checks on the wired robot before first mow. | RT-1, RT-2 |
-| SAF-2 | Immobilised vs stuck | **partial** | FaultBus semantics are right in sim. Real motor open-circuit must raise `FAULT_IMMOBILISED`. | Kill one drive encoder; both wheels + trimmer hold; SOS retrieve. | RT-2, HD-drive |
-| SAF-3 | Incident logs | **partial** | Record / incident scrubber / telemetry JSON exist for **episodes**. No always-on black box on Orin. | After a tip, pull IMU + advice + wheel cmds from onboard storage. | RT-7 |
-| SAF-4 | OTA | **missing** | UX-C mentions optional Wi-Fi for OTA. No updater, no signed image. | Documented no-op or a real A/B slot — do not pretend. | UX-2 Wi-Fi |
+| SAF-1 | Self-test | **partial** | `jims-mower-selftest`: unloaded spin, IMU still, cam entropy — against **gym** streams. Unchanged. | Same checks on the wired robot before first mow. | RT-1, RT-2 |
+| SAF-2 | Immobilised vs stuck | **partial** | FaultBus semantics are right in sim. `BlackBox.retrieve_sos()` pulls IMU+cmds after immobilised. Real motor open-circuit must raise `FAULT_IMMOBILISED`. | Kill one drive encoder; both wheels + trimmer hold; SOS retrieve. | RT-2, HD-drive |
+| SAF-3 | Incident logs | **partial** (gym/bench black box this PR) | Rotating JSONL (`BlackBox`) when `reset(options={"blackbox": path})`. After a tip, IMU + wheel cmds are on disk. Not an Orin always-on daemon. | After a tip, pull IMU + advice + wheel cmds from onboard storage. Gym: `tests/test_session_ops.py`. | RT-7 |
+| SAF-4 | OTA | **stub** | `jims_mower.ota.ota_status()` / `ota_apply()` are a documented no-op. No updater, no signed image, no A/B slot. `/ota` says `available: false`. | Documented no-op or a real A/B slot — do not pretend. | UX-2 Wi-Fi |
 | SAF-5 | SIL / cert | **missing** | Software ESTOP is explicitly **not** a SIL rating. | Do not claim one. | legal / field |
 
 ### 7. Owner UX
@@ -167,8 +167,8 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
 | UX-1 | Schedule UI | **partial** (this PR) | Health toggle + next run + skip reason. Days/time still JSON. | Toggle On, FrozenClock in window → Start without Map. | SCH-1 |
-| UX-2 | Notifications | **missing** | LAN SSE only. | See SCH-5. | SCH-5 |
-| UX-3 | Multi-yard | **stub** | Sequence CLI (`paddock` then `suburban`) is a sim farm tool. One YardProfile per app process. | Switch yards on the phone; home/geofence/schedule swap; no fence bleed. | MAP-4 |
+| UX-2 | Notifications | **partial** (in-app this PR) | `/notifications` list + webhook stub. Not SMS. Not a vendor push. | See SCH-5. | SCH-5 |
+| UX-3 | Multi-yard | **partial** (this PR) | `YardStore` + `/yards` + `POST /yards/select`. Switching replaces keep-in/home; no fence bleed. Sequence CLI remains a sim farm tool. | Switch yards on the phone; home/geofence/schedule swap; no fence bleed. Gym: `tests/test_session_ops.py`. | MAP-4 |
 | UX-4 | Radio | **stub** | Wi-Fi → BT → LoRa **sim**. No RF. | Field: BT pair required, LoRa command at the far fence — measure or don't claim range. | hardware radios |
 | UX-5 | Pairing | **stub** | Phone “Pair Bluetooth” sets a bool. | Real BT pairing before first Start. | UX-4 |
 
@@ -298,16 +298,27 @@ Stop when only **fab + field test** remain.
     *Test:* `pytest tests/test_pose_assist.py tests/test_wave4_mapping.py`.  
     *Honesty:* not SLAM. Stated gym band 0.75 m.
 
-14. **Geofence in a surveyed frame (MAP-5)** + multi-session load (MAP-4).
+14. **Geofence in a surveyed frame (MAP-5)** + multi-session load
+    (MAP-4) (this PR). Surveyed-origin *model*: peg + metre keep-in.
+    Cold file load of ObservedMap + uncut + yard. No WGS84 survey here.  
+    *Test:* `pytest tests/test_survey_origin.py tests/test_mission.py tests/test_pln_regression.py`.  
+    *Honesty:* tape-stop on a real RTK peg still required.  
+    *Revise:* field survey + Orin power-cycle.
 
-15. **Re-test explore + coverage + tip recovery + resume (PLN-1…5)** on
-    the real maps. Retune gym constants; do not “fix” physics.
+15. **Re-test explore + coverage + tip recovery + resume (PLN-1…5)**
+    (gym regression this PR) on observed maps (`mission_tiny`). Gym
+    constants were **not** retuned. Do not “fix” physics.  
+    *Test:* `pytest tests/test_pln_regression.py tests/test_mission_flow.py`.  
+    *Honesty:* BlindDetector detections stay `[]`. Field maps still later.
 
 16. **Self-test on hardware, incident black box, immobilised vs stuck
-    (SAF-1…3).** OTA stays missing or an honest stub (SAF-4).
+    (SAF-1…3)** (gym/bench black box this PR). Self-test still gym
+    streams. OTA is an honest no-op stub (SAF-4).  
+    *Test:* `pytest tests/test_session_ops.py tests/test_selftest.py tests/test_incident.py`.
 
-17. **Owner notifications + multi-yard (UX-2, UX-3)** after the robot
-    can finish a job without a laptop SSE tab.
+17. **Owner notifications + multi-yard (UX-2, UX-3)** (in-app this PR).
+    `/notifications` + `/yards` switch; webhook stub; no SMS.  
+    *Test:* `pytest tests/test_session_ops.py tests/test_app_api.py`.
 
 18. **Measure thermal / pack (RT-5, HD-batt).** Replace the 50 Wh stub
     with a measured Wh and charge time. **No claimed acre runtime** until
@@ -327,18 +338,21 @@ not another WAVE of gym stubs.
 
 ## What this PR ships
 
-- Build-order **§11** (CV-2, gym): `ClassAwareGrassObserver` uses
-  terrain-seg classes when available, colour heuristic otherwise.
-  Painted-strip fixture reports coverage error in tests. Owner cut %
-  default is still `coverage_source: gym_grid`. Opt-in `observer`.
-  **Not** a field grass net. No IoU / mAP.
-- Build-order **§12** (MAP-2 gym fuse): `fuse_elev_stereo_tof_imu`
-  unifies gym ideal stereo + ToF corners + local IMU. Locked cells
-  do not flop. MAP-2b `MonoDepthPrior` cannot override valid stereo.
-  **Not** a field stereo matcher.
-- Build-order **§13** (focused): `LoopClosureStub` landmark revisit
-  on taught fence vertices. `not_slam: true`. Stated gym error band
-  0.75 m. Not a pose-graph SLAM stack.
-- Honest leftover: field grass strips, real stereo matcher, real
-  kerb tape. Do not start §14+ (surveyed geofence Earth frame,
-  owner notifications, fab).
+- Build-order **§14** (MAP-5 / MAP-4): surveyed-origin *model* on
+  `YardProfile.origin` + keep-in metres relative to the peg. ICD
+  `gps` is ENU + `valid`. `save_mission` / `restore_session` persist
+  ObservedMap fog + uncut + pose + yard across **process restart**.
+  Procedure: [`SURVEY_ORIGIN.md`](SURVEY_ORIGIN.md). **No WGS84 field
+  survey.** Tape-stop on a real RTK peg is still required.
+- Build-order **§15** (PLN-1…5 gym regression): explore → MAP READY →
+  mow → tip reverse → pause/resume on `mission_tiny` **observed** maps.
+  Gym tip thresholds were not retuned. MockDetector living interlock
+  still fires; BlindDetector gap is documented.
+- Build-order **§16** (focused): rotating `BlackBox` JSONL when a path
+  is passed; SOS retrieve of IMU + cmds. Self-test unchanged (gym
+  streams). SAF-4 OTA = documented no-op stub (`/ota`).
+- Build-order **§17** (focused): in-app `/notifications` + webhook
+  stub (not SMS). `/yards` + `POST /yards/select` with no fence bleed.
+- Honest leftover: real RTK/survey, field stereo matcher, field grass
+  strips, measured pack Wh. Do not start §18–§20 (claimed runtime,
+  fab, field scorecard).

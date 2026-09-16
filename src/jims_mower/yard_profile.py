@@ -19,7 +19,9 @@ from jims_mower.profile import (
     YardProfile,
     YardProfileError,
     load_yard_profile,
+    parse_survey_origin,
     parse_yard_profile,
+    shift_polygon,
     write_yard_profile,
 )
 
@@ -63,7 +65,9 @@ def yard_profile_from_geofence(
     resolution_m: float = 0.20,
     home: Optional[dict[str, float]] = None,
 ) -> YardProfile:
-    keep_in = list(spec.keep_in)
+    origin = parse_survey_origin(getattr(spec, "origin", None))
+    keep_in = shift_polygon(spec.keep_in, origin, to_world=False)
+    keep_out = [shift_polygon(p, origin, to_world=False) for p in spec.keep_out]
     if home is None and keep_in:
         home = {"x": float(keep_in[0][0]), "y": float(keep_in[0][1]), "theta": 0.0}
     return YardProfile(
@@ -73,8 +77,9 @@ def yard_profile_from_geofence(
         resolution_m=float(resolution_m),
         home=home or {"x": 1.0, "y": 1.0, "theta": 0.0},
         keep_in=keep_in,
-        keep_out=[list(p) for p in spec.keep_out],
+        keep_out=keep_out,
         mesh="yard.glb",
+        origin=origin,
     )
 
 

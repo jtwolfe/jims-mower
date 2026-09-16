@@ -33,7 +33,12 @@ from jims_mower.kinematics import (
     unicycle_from_wheels,
     wheel_clearances,
 )
-from jims_mower.geofence import GeofenceSpec, geofence_advice
+from jims_mower.geofence import (
+    GeofenceSpec,
+    geofence_advice_from_gnss,
+    gps_enu_from_world,
+    gps_world_from_enu,
+)
 from jims_mower.maps import GrassCoverageMap, occupancy_from_detections
 from jims_mower.mapping import LoopClosureStub, PersistentOccupancy, fuse_height_rgb_tof
 from jims_mower.mission import apply_mission, load_mission, save_mission
@@ -320,6 +325,10 @@ class MowerEnv(gym.Env):
         self._observer_coverage: Optional[np.ndarray] = None
         self._last_semantic: Optional[np.ndarray] = None
         self._yard_profile = None
+        self._observed_map = None
+        self._mission_phase = ""
+        self._observed_loaded = False
+        self._blackbox = None
 
     def reset(
         self, *, seed: Optional[int] = None, options: Optional[dict[str, Any]] = None
@@ -336,6 +345,9 @@ class MowerEnv(gym.Env):
         mission_load = options.get("load_mission")
         self._mission_save_path = str(mission_save) if mission_save else None
         self._mission_loaded = False
+        self._observed_loaded = False
+        self._observed_map = None
+        self._mission_phase = ""
         self._episode_seed = seed
         self._yard_profile = None
         raw_profile = options.get("yard_profile") or options.get("profile")
@@ -449,6 +461,23 @@ class MowerEnv(gym.Env):
             mission_pose = apply_mission(self._coverage, state)
             loaded = True
             self._mission_loaded = True
+            self._mission_phase = str(state.phase or "")
+            if state.observed is not None:
+                self._observed_map = state.observed
+                self._observed_loaded = True
+            if state.profile is not None:
+                self._yard_profile = state.profile
+                if self.scenario is None:
+                    from jims_mower.scenarios import empty_scenario
+
+                    self.scenario = empty_scenario(self.cfg)
+                from jims_mower.profile import apply_profile_to_scenario
+
+                apply_profile_to_scenario(
+                    self.scenario,
+                    state.profile,
+                    resize_world=bool(options.get("resize_world", False)),
+                )
         elif load_path and Path(load_path).is_file():
             self._coverage.load_state(load_path)
             for obst in self._yard.static():
@@ -516,6 +545,13 @@ class MowerEnv(gym.Env):
         if callable(reset_obs):
             reset_obs()
         self._tracklets.reset()
+        bb = options.get("blackbox")
+        if bb:
+            from jims_mower.blackbox import BlackBox
+
+            self._blackbox = BlackBox(bb)
+        else:
+            self._blackbox = None
         obs, info = self._observe()
         return obs, info
 
@@ -683,6 +719,22 @@ class MowerEnv(gym.Env):
         if terminated or truncated:
             self._persist_grass()
             self._persist_mission()
+        if self._blackbox is not None:
+            event = ""
+            if terrain_ev.tipover:
+                event = "tip"
+            fault = info.get("fault") if isinstance(info.get("fault"), dict) else {}
+            if fault.get("retrieve") or str(fault.get("code") or "") == "FAULT_IMMOBILISED":
+                event = event or "immobilised"
+            self._blackbox.record(
+                step=self._steps,
+                imu=self._last_imu,
+                cmd=action,
+                pose={"x": self._pose.x, "y": self._pose.y, "theta": self._pose.theta},
+                advice=str(info.get("terrain_advice") or "ok"),
+                event=event,
+                fault=fault if isinstance(fault, dict) else {},
+            )
         return obs, float(breakdown.total), terminated, truncated, info
 
     def inject_fault(
@@ -716,9 +768,31 @@ class MowerEnv(gym.Env):
         super().close()
 
     def geofence_spec(self) -> GeofenceSpec:
+        if self._yard_profile is not None:
+            spec = self._yard_profile.geofence_spec()
+            return GeofenceSpec(
+                keep_in=list(spec.keep_in),
+                keep_out=[list(p) for p in spec.keep_out],
+                inflate_m=float(self.cfg.planner.geofence_inflate_m),
+                origin=spec.origin,
+            )
         if self.scenario is None:
             return GeofenceSpec()
-        return self.scenario.geofence_spec(self.cfg.planner.geofence_inflate_m)
+        spec = self.scenario.geofence_spec(self.cfg.planner.geofence_inflate_m)
+        origin = self._origin_info()
+        if origin:
+            return GeofenceSpec(
+                keep_in=list(spec.keep_in),
+                keep_out=[list(p) for p in spec.keep_out],
+                inflate_m=spec.inflate_m,
+                origin=origin,
+            )
+        return spec
+
+    def _origin_info(self) -> dict:
+        if self._yard_profile is not None:
+            return self._yard_profile.origin.as_dict()
+        return {"e_m": 0.0, "n_m": 0.0, "u_m": 0.0, "frame": "local_enu", "surveyed": False}
 
     def _persist_grass(self) -> None:
         if self._grass_save_path:
@@ -734,6 +808,10 @@ class MowerEnv(gym.Env):
             scenario=self.scenario.name if self.scenario else "",
             seed=self._episode_seed,
             steps=self._steps,
+            observed=self._observed_map,
+            profile=self._yard_profile,
+            phase=self._mission_phase,
+            home=self._yard_profile.home if self._yard_profile is not None else None,
         )
 
     def render(self) -> Optional[np.ndarray]:
@@ -919,7 +997,9 @@ class MowerEnv(gym.Env):
             include_altitude=self.cfg.sensors.gps.include_altitude,
             enabled=self.cfg.sensors.gps.enabled,
         )
-        gps = self.fault_bus.apply_gps(gps_sample.as_array())
+        gps_world = self.fault_bus.apply_gps(gps_sample.as_array())
+        origin_info = self._origin_info()
+        gps = gps_enu_from_world(gps_world, origin_info)
         tof = simulate_tof(
             wheel_clearances(
                 self._pose,
@@ -1041,9 +1121,14 @@ class MowerEnv(gym.Env):
             steep_slope_rad=self.cfg.robot.steep_slope_rad,
         )
         spec = self.geofence_spec()
-        fence_advice = geofence_advice(
+        origin_info = self._origin_info()
+        gps_world = gps_world_from_enu(gps, origin_info)
+        gnss_valid = float(gps[3]) >= 0.5
+        fence_advice = geofence_advice_from_gnss(
             self._pose,
             spec,
+            gnss_xy=(float(gps_world[0]), float(gps_world[1])) if gnss_valid else None,
+            gnss_valid=gnss_valid,
             slow_m=self.cfg.planner.geofence_slow_m,
             stop_m=self.cfg.planner.geofence_stop_m,
         )
@@ -1136,6 +1221,12 @@ class MowerEnv(gym.Env):
             "geofence": [list(p) for p in spec.keep_in],
             "geofence_spec": spec.as_info(),
             "geofence_advice": fence_advice,
+            "survey_origin": origin_info,
+            "gnss_enu": gps.tolist(),
+            "gnss_world": gps_world.tolist(),
+            "gnss_valid": bool(gnss_valid),
+            "observed_loaded": self._observed_loaded,
+            "yard_loaded": self._yard_profile is not None and self._mission_loaded,
             "structure": structure.copy(),
             "structure_names": STRUCTURE_NAMES,
             "living_advice": living.advice,

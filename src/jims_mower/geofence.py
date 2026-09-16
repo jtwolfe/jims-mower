@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 import numpy as np
 
@@ -33,21 +33,30 @@ def point_in_polygon(x: float, y: float, polygon: list[tuple[float, float]]) -> 
 
 @dataclass(frozen=True)
 class GeofenceSpec:
-    """Keep-in is the allowed work area. Keep-out polygons are holes / no-go."""
+    """Keep-in is the allowed work area. Keep-out polygons are holes / no-go.
+
+    ``keep_in`` / ``keep_out`` are **gym world metres**. When a surveyed
+    origin is set, those vertices are origin + local ENU (see YardProfile).
+    ``origin`` is the MAP-5 peg (lat/lon optional; ENU default 0,0,0).
+    """
 
     keep_in: list[tuple[float, float]] = field(default_factory=list)
     keep_out: list[list[tuple[float, float]]] = field(default_factory=list)
     inflate_m: float = 0.30
+    origin: Optional[dict[str, Any]] = None
 
     def has_polygons(self) -> bool:
         return len(self.keep_in) >= 3 or any(len(p) >= 3 for p in self.keep_out)
 
     def as_info(self) -> dict:
-        return {
+        blob: dict[str, Any] = {
             "keep_in": [list(p) for p in self.keep_in],
             "keep_out": [[list(p) for p in poly] for poly in self.keep_out],
             "inflate_m": self.inflate_m,
         }
+        if self.origin:
+            blob["origin"] = dict(self.origin)
+        return blob
 
 
 def polygon_edge_distance(x: float, y: float, polygon: list[tuple[float, float]]) -> float:
@@ -107,6 +116,47 @@ def geofence_clearance(
     return float(best)
 
 
+def origin_enu_m(origin: Optional[dict[str, Any]]) -> tuple[float, float, float]:
+    """Gym-world location of the surveyed peg. Default is the SW corner."""
+    if not origin:
+        return 0.0, 0.0, 0.0
+    return (
+        float(origin.get("e_m") or 0.0),
+        float(origin.get("n_m") or 0.0),
+        float(origin.get("u_m") or 0.0),
+    )
+
+
+def gps_enu_from_world(
+    gps_world: np.ndarray,
+    origin: Optional[dict[str, Any]] = None,
+) -> np.ndarray:
+    """World-metre GNSS → local ENU relative to the surveyed peg + valid bit."""
+    arr = np.asarray(gps_world, dtype=np.float32).reshape(-1)
+    if arr.size < 4:
+        return np.zeros(4, dtype=np.float32)
+    oe, on, ou = origin_enu_m(origin)
+    return np.array(
+        [float(arr[0]) - oe, float(arr[1]) - on, float(arr[2]) - ou, float(arr[3])],
+        dtype=np.float32,
+    )
+
+
+def gps_world_from_enu(
+    gps_enu: np.ndarray,
+    origin: Optional[dict[str, Any]] = None,
+) -> np.ndarray:
+    """Local-ENU GNSS → gym world metres. ``valid=0`` stays invalid."""
+    arr = np.asarray(gps_enu, dtype=np.float32).reshape(-1)
+    if arr.size < 4:
+        return np.zeros(4, dtype=np.float32)
+    oe, on, ou = origin_enu_m(origin)
+    return np.array(
+        [float(arr[0]) + oe, float(arr[1]) + on, float(arr[2]) + ou, float(arr[3])],
+        dtype=np.float32,
+    )
+
+
 def geofence_advice(
     pose: Pose,
     spec: Optional[GeofenceSpec],
@@ -135,6 +185,37 @@ def geofence_advice(
     if clearance <= slow_m:
         return "slow"
     return "ok"
+
+
+_ADVICE_RANK = {"ok": 0, "slow": 1, "reroute": 2, "stop": 3}
+
+
+def geofence_advice_from_gnss(
+    pose: Pose,
+    spec: Optional[GeofenceSpec],
+    *,
+    gnss_xy: Optional[tuple[float, float]] = None,
+    gnss_valid: bool = False,
+    slow_m: float = 0.80,
+    stop_m: float = 0.28,
+    look_ahead_m: float = 0.55,
+) -> str:
+    """Worse of chassis pose and a *valid* GNSS fix. Invalid GNSS falls back to pose.
+
+    ``gnss_xy`` must already be gym **world** metres (convert ENU first).
+    """
+    pose_advice = geofence_advice(
+        pose, spec, slow_m=slow_m, stop_m=stop_m, look_ahead_m=look_ahead_m
+    )
+    if not gnss_valid or gnss_xy is None:
+        return pose_advice
+    gnss_pose = Pose(float(gnss_xy[0]), float(gnss_xy[1]), pose.theta, pose.z, pose.pitch, pose.roll)
+    gnss_advice = geofence_advice(
+        gnss_pose, spec, slow_m=slow_m, stop_m=stop_m, look_ahead_m=look_ahead_m
+    )
+    if _ADVICE_RANK.get(gnss_advice, 0) >= _ADVICE_RANK.get(pose_advice, 0):
+        return gnss_advice
+    return pose_advice
 
 
 def rasterize_geofence(

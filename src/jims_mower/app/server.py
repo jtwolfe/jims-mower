@@ -125,6 +125,29 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                 if path == "/yard":
                     self._send_json(200, backend.get_yard())
                     return
+                if path == "/yards":
+                    listing = getattr(backend, "list_yards", None)
+                    if listing is None:
+                        self._send_json(200, {"yards": [backend.get_yard()], "active": backend.get_yard().get("name")})
+                        return
+                    self._send_json(200, listing())
+                    return
+                if path == "/notifications":
+                    notes = getattr(backend, "notifications", None)
+                    if notes is None:
+                        self._send_json(200, {"items": [], "sms": False, "channel": "in_app"})
+                        return
+                    self._send_json(200, notes())
+                    return
+                if path == "/ota":
+                    ota = getattr(backend, "ota", None)
+                    if ota is None:
+                        from jims_mower.ota import ota_status
+
+                        self._send_json(200, ota_status())
+                        return
+                    self._send_json(200, ota())
+                    return
                 if path == "/map/mesh":
                     self._send_json(200, backend.mesh())
                     return
@@ -174,6 +197,16 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                     return
                 if path in {"/api/live/control", "/api/live/control/"}:
                     self._live_control()
+                    return
+                if path in {"/yards/select", "/yards/select/"}:
+                    body = self._read_json()
+                    if not isinstance(body, dict):
+                        raise YardProfileError("select body must be a mapping")
+                    name = str(body.get("name") or body.get("yard") or "")
+                    select = getattr(backend, "select_yard", None)
+                    if select is None:
+                        raise YardProfileError("this backend does not switch yards")
+                    self._send_json(200, select(name))
                     return
                 if path != "/command":
                     self._send_json(404, {"error": "not found"})

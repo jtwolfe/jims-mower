@@ -426,11 +426,14 @@ class LiveSession:
         if self.env is not None:
             self.env.close()
         self.env = MowerEnv(config=cfg, scenario=scenario, render_mode="rgb_array")
-        reset_opts: dict[str, Any] = {}
+        reset_opts: dict[str, Any] = {
+            "blackbox": str(self.out_dir / "blackbox.jsonl"),
+            "save_mission": str(self.out_dir / "session.npz"),
+        }
         if taught is not None:
             reset_opts["yard_profile"] = taught
             reset_opts["resize_world"] = False
-        self.obs, self.info = self.env.reset(seed=self.seed, options=reset_opts or None)
+        self.obs, self.info = self.env.reset(seed=self.seed, options=reset_opts)
         self.policy = MissionPolicy(self.env.cfg, fast=self.fast)
         self.policy.reset(self.obs, self.info, profile=taught)
         self.teach_policy = None
@@ -653,6 +656,7 @@ class LiveSession:
                 self.job_state = "paused"
                 if self.policy is not None:
                     self.policy.request_hold("owner pause")
+                self.persist_session()
         elif key == "resume":
             if self.job_state in {"paused", "hold"} or self.done:
                 self.estop = False
@@ -1162,8 +1166,26 @@ class LiveSession:
             thread.join(timeout=2.0)
         self._flush_incremental(final=True)
 
+    def persist_session(self) -> Optional[Path]:
+        """Write ObservedMap + uncut + pose + yard for a cold day-2 load."""
+        if self.env is None or self.policy is None:
+            return None
+        self.policy.attach_to_env(self.env)
+        dest = self.out_dir / "session.npz"
+        return self.policy.save_session(
+            dest,
+            self.env._coverage,
+            self.env._pose,
+            scenario=self.env.scenario.name if self.env.scenario else "",
+            seed=getattr(self.env, "_episode_seed", None),
+        )
+
     def close(self) -> None:
         self.stop()
+        try:
+            self.persist_session()
+        except Exception:
+            pass
         if self.env is not None:
             self.env.close()
             self.env = None

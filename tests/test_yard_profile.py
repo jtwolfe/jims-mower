@@ -40,6 +40,8 @@ def test_default_roundtrip(tmp_path: Path) -> None:
     assert loaded.schedule["skip_rain"] is True
     assert "stub" not in loaded.schedule["note"]
     assert loaded.geofence_spec().has_polygons()
+    assert loaded.origin.frame == "local_enu"
+    assert loaded.origin.surveyed is False
 
 
 def test_validate_rejects_bad_schema() -> None:

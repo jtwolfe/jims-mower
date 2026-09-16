@@ -2,6 +2,17 @@
   "schema": "jims_mower.yard.v1",
   "name": "example_yard",
   "description": "Default suburban-scale keep-in for the owner app.",
+  "origin": {
+    "lat_deg": null,
+    "lon_deg": null,
+    "alt_m": null,
+    "e_m": 0.0,
+    "n_m": 0.0,
+    "u_m": 0.0,
+    "frame": "local_enu",
+    "surveyed": false,
+    "note": "not a WGS84 field survey — tape/RTK still required for tape-stop acceptance"
+  },
   "width_m": 16.0,
   "height_m": 12.0,
   "resolution_m": 0.2,

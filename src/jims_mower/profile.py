@@ -10,13 +10,156 @@ from typing import Any, Iterable, Optional, Union
 
 import re
 
-from jims_mower.constants import RADIO_LINKS, SCHEDULE_DAYS, SURVEY_SCHEMA, YARD_PROFILE_SCHEMA
+from jims_mower.constants import (
+    RADIO_LINKS,
+    SCHEDULE_DAYS,
+    SURVEY_ORIGIN_FRAME,
+    SURVEY_SCHEMA,
+    YARD_PROFILE_SCHEMA,
+)
 from jims_mower.geofence import GeofenceSpec
 from jims_mower.schedule import DEFAULT_NOTE, ScheduleSpec, resolve_timezone
 from jims_mower.types import Pose
 
+ORIGIN_NOTE = (
+    "not a WGS84 field survey — tape/RTK still required for tape-stop acceptance"
+)
+
 # Older name — same document, now a real weekly window.
 ScheduleStub = ScheduleSpec
+
+
+@dataclass(frozen=True)
+class SurveyOrigin:
+    """Surveyed / local-ENU anchor for keep-in metres (MAP-5).
+
+    Gym default is the world SW corner ``(e_m, n_m, u_m) = (0, 0, 0)``.
+    ``lat_deg`` / ``lon_deg`` / ``alt_m`` are optional WGS84 labels for the
+    rig peg. This repo has **no** field survey — ``surveyed`` stays false
+    until a human tapes/RTKs the peg and commits real numbers.
+    """
+
+    lat_deg: Optional[float] = None
+    lon_deg: Optional[float] = None
+    alt_m: Optional[float] = None
+    e_m: float = 0.0
+    n_m: float = 0.0
+    u_m: float = 0.0
+    frame: str = SURVEY_ORIGIN_FRAME
+    surveyed: bool = False
+    note: str = ORIGIN_NOTE
+
+    def has_wgs84(self) -> bool:
+        return self.lat_deg is not None and self.lon_deg is not None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "lat_deg": None if self.lat_deg is None else float(self.lat_deg),
+            "lon_deg": None if self.lon_deg is None else float(self.lon_deg),
+            "alt_m": None if self.alt_m is None else float(self.alt_m),
+            "e_m": float(self.e_m),
+            "n_m": float(self.n_m),
+            "u_m": float(self.u_m),
+            "frame": str(self.frame or SURVEY_ORIGIN_FRAME),
+            "surveyed": bool(self.surveyed),
+            "note": str(self.note or ORIGIN_NOTE),
+        }
+
+
+def parse_survey_origin(raw: Any) -> SurveyOrigin:
+    if raw is None:
+        return SurveyOrigin()
+    if isinstance(raw, SurveyOrigin):
+        return raw
+    if not isinstance(raw, dict):
+        raise ProfileError("origin must be a mapping")
+    frame = str(raw.get("frame") or SURVEY_ORIGIN_FRAME).strip() or SURVEY_ORIGIN_FRAME
+    if frame not in {SURVEY_ORIGIN_FRAME, "enu", "local"}:
+        raise ProfileError(f"origin.frame must be {SURVEY_ORIGIN_FRAME!r} (or enu/local)")
+    if frame in {"enu", "local"}:
+        frame = SURVEY_ORIGIN_FRAME
+
+    def _opt_float(key: str) -> Optional[float]:
+        val = raw.get(key)
+        if val is None or val == "":
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError) as exc:
+            raise ProfileError(f"origin.{key} must be a number or null") from exc
+
+    def _req_float(key: str, default: float = 0.0) -> float:
+        val = raw.get(key, default)
+        if val is None or val == "":
+            return float(default)
+        try:
+            return float(val)
+        except (TypeError, ValueError) as exc:
+            raise ProfileError(f"origin.{key} must be a number") from exc
+
+    lat = _opt_float("lat_deg") if "lat_deg" in raw else _opt_float("lat")
+    lon = _opt_float("lon_deg") if "lon_deg" in raw else _opt_float("lon")
+    alt = _opt_float("alt_m") if "alt_m" in raw else _opt_float("alt")
+    note = str(raw.get("note") or ORIGIN_NOTE).strip() or ORIGIN_NOTE
+    surveyed = bool(raw.get("surveyed", False))
+    if surveyed and (lat is None or lon is None):
+        raise ProfileError("origin.surveyed requires lat_deg and lon_deg")
+    if "e_m" in raw:
+        e_m = _req_float("e_m")
+    elif "east_m" in raw:
+        e_m = _req_float("east_m")
+    else:
+        e_m = 0.0
+    if "n_m" in raw:
+        n_m = _req_float("n_m")
+    elif "north_m" in raw:
+        n_m = _req_float("north_m")
+    else:
+        n_m = 0.0
+    if "u_m" in raw:
+        u_m = _req_float("u_m")
+    elif "up_m" in raw:
+        u_m = _req_float("up_m")
+    else:
+        u_m = 0.0
+    return SurveyOrigin(
+        lat_deg=lat,
+        lon_deg=lon,
+        alt_m=alt,
+        e_m=e_m,
+        n_m=n_m,
+        u_m=u_m,
+        frame=frame,
+        surveyed=surveyed,
+        note=note,
+    )
+
+
+def world_xy_from_enu(e_m: float, n_m: float, origin: Optional[SurveyOrigin] = None) -> tuple[float, float]:
+    """Local ENU metres → gym world XY. Identity when origin is the SW corner."""
+    peg = origin or SurveyOrigin()
+    return float(peg.e_m) + float(e_m), float(peg.n_m) + float(n_m)
+
+
+def enu_from_world_xy(x: float, y: float, origin: Optional[SurveyOrigin] = None) -> tuple[float, float]:
+    peg = origin or SurveyOrigin()
+    return float(x) - float(peg.e_m), float(y) - float(peg.n_m)
+
+
+def shift_polygon(
+    poly: Iterable[tuple[float, float]],
+    origin: Optional[SurveyOrigin],
+    *,
+    to_world: bool = True,
+) -> list[tuple[float, float]]:
+    out: list[tuple[float, float]] = []
+    for item in poly:
+        e, n = float(item[0]), float(item[1])
+        if to_world:
+            out.append(world_xy_from_enu(e, n, origin))
+        else:
+            out.append(enu_from_world_xy(e, n, origin))
+    return out
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -446,28 +589,42 @@ class YardProfile:
     schedule: dict[str, Any] = field(default_factory=lambda: ScheduleStub().as_dict())
     description: str = ""
     not_a_benchmark: bool = True
+    origin: SurveyOrigin = field(default_factory=SurveyOrigin)
+
+    def keep_in_world(self) -> list[tuple[float, float]]:
+        """Keep-in vertices in gym world metres (origin + local ENU)."""
+        return shift_polygon(self.keep_in, self.origin, to_world=True)
+
+    def keep_out_world(self) -> list[list[tuple[float, float]]]:
+        return [shift_polygon(poly, self.origin, to_world=True) for poly in self.keep_out]
 
     def to_geofence_spec(self, inflate_m: Optional[float] = None) -> GeofenceSpec:
-        return self.geofence_spec() if inflate_m is None else GeofenceSpec(
-            keep_in=list(self.keep_in),
-            keep_out=[list(p) for p in self.keep_out],
+        spec = self.geofence_spec()
+        if inflate_m is None:
+            return spec
+        return GeofenceSpec(
+            keep_in=list(spec.keep_in),
+            keep_out=[list(p) for p in spec.keep_out],
             inflate_m=float(inflate_m),
+            origin=spec.origin,
         )
 
     def geofence_spec(self) -> GeofenceSpec:
         return GeofenceSpec(
-            keep_in=list(self.keep_in),
-            keep_out=[list(p) for p in self.keep_out],
+            keep_in=self.keep_in_world(),
+            keep_out=self.keep_out_world(),
             inflate_m=float(self.inflate_m),
+            origin=self.origin.as_dict(),
         )
 
     def home_pose(self) -> Pose:
         h = self.home or {}
-        return Pose(
+        x, y = world_xy_from_enu(
             float(h.get("x", 1.0)),
             float(h.get("y", 1.0)),
-            float(h.get("theta", 0.0)),
+            self.origin,
         )
+        return Pose(x, y, float(h.get("theta", 0.0)))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -490,6 +647,7 @@ class YardProfile:
             "radio": dict(self.radio or RadioPrefs().as_dict()),
             "schedule": dict(self.schedule or ScheduleStub().as_dict()),
             "description": self.description,
+            "origin": (self.origin if isinstance(self.origin, SurveyOrigin) else parse_survey_origin(self.origin)).as_dict(),
             "not_a_benchmark": True,
         }
 
@@ -549,6 +707,7 @@ def parse_yard_profile(data: dict[str, Any]) -> YardProfile:
         schedule=_parse_schedule(data.get("schedule")),
         description=str(data.get("description") or ""),
         not_a_benchmark=True,
+        origin=parse_survey_origin(data.get("origin")),
     )
 
 
@@ -581,8 +740,8 @@ def apply_profile_to_scenario(
     taught keep-in / keep-out (``resize_world=False``). Demo ``--profile``
     still resizes the gym to the document.
     """
-    scenario.geofence = list(profile.keep_in)
-    scenario.keepout = [list(p) for p in profile.keep_out]
+    scenario.geofence = list(profile.keep_in_world())
+    scenario.keepout = [list(p) for p in profile.keep_out_world()]
     if not scenario.name:
         scenario.name = profile.name
     if resize_world:
@@ -604,9 +763,10 @@ def profile_to_scenario(profile: YardProfile, *, base: str = "default") -> Any:
         "description": "Taught yard profile (WAVE UX-A)",
         "base": base,
         "geofence": {
-            "keep_in": [list(p) for p in profile.keep_in],
-            "keep_out": [[list(p) for p in poly] for poly in profile.keep_out],
+            "keep_in": [list(p) for p in profile.keep_in_world()],
+            "keep_out": [[list(p) for p in poly] for poly in profile.keep_out_world()],
         },
+        "origin": profile.origin.as_dict() if isinstance(profile.origin, SurveyOrigin) else parse_survey_origin(profile.origin).as_dict(),
         "world": {
             "width_m": float(profile.width_m),
             "height_m": float(profile.height_m),
