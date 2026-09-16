@@ -322,9 +322,13 @@ class ObservedMap:
         grows from — sheds lift a little, ponds sit slightly low.
         """
         z = np.full((self.rows, self.cols), np.nan, dtype=np.float32)
-        if not np.any(self.observed):
+        mask = np.asarray(self.observed, dtype=bool)
+        elev = np.asarray(self.elevation, dtype=np.float32)
+        if mask.shape != z.shape or elev.shape != z.shape:
             return z
-        z[self.observed] = self.elevation[self.observed]
+        if not np.any(mask):
+            return z
+        z[mask] = elev[mask]
         sheds = self.observed & (self.structure == STRUCTURE_BUILDING)
         ponds = self.observed & (self.structure == STRUCTURE_POND)
         if np.any(sheds):

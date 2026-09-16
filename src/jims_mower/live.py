@@ -315,6 +315,7 @@ class LiveSession:
         self.yard_path = Path(yard_path) if yard_path else None
         self.first_run = bool(first_run)
         self.owner_taught = bool(yard_profile is not None and len(yard_profile.keep_in) >= 3)
+        self._taught_env_dirty = False
         self.teach_policy: Optional[TeachPolicy] = None
         self.max_steps = int(steps if steps is not None else (FAST_STEPS if fast else DEFAULT_STEPS))
         self.env: Optional[MowerEnv] = None
@@ -389,6 +390,7 @@ class LiveSession:
         self.policy = MissionPolicy(self.env.cfg, fast=self.fast)
         self.policy.reset(self.obs, self.info, profile=taught)
         self.teach_policy = None
+        self._taught_env_dirty = False
         self.camera_names = list(self.obs.get("cameras") or {})
         self.poses = []
         self.done = False
@@ -579,7 +581,7 @@ class LiveSession:
             if kwargs.get("speed") is not None:
                 self.speed = parse_speed(kwargs.get("speed"))
             self.estop = False
-            if self.job_state not in {"paused", "hold", "estop"} and self.owner_taught:
+            if self._needs_taught_job_reset():
                 self._reset_for_taught_job()
             if self.policy is not None:
                 self.policy.clear_owner_hold()
@@ -595,11 +597,15 @@ class LiveSession:
                 if self.policy is not None:
                     self.policy.request_hold("owner pause")
         elif key == "resume":
-            if self.job_state in {"paused", "hold"}:
+            if self.job_state in {"paused", "hold"} or self.done:
                 self.estop = False
+                if self._needs_taught_job_reset():
+                    self._reset_for_taught_job()
                 if self.policy is not None:
                     self.policy.clear_owner_hold()
                 self.job_state = "running"
+                self._stop.clear()
+                self.start_thread()
         elif key == "speed":
             self.speed = parse_speed(kwargs.get("speed", self.speed))
         elif key == "start_mow":
@@ -695,13 +701,35 @@ class LiveSession:
             self.job_state = "running"
             self._t0_wall = time.perf_counter()
 
+    def _needs_taught_job_reset(self) -> bool:
+        """True when Start must rebuild so a saved fence skips authored calibrate.
+
+        Teach completion sets ``job_state='paused'``. Treating that like a
+        mid-mow pause used to resume the idle calibrate session on a dirty
+        env — UI stuck on “Calibrating…” / IDLE after 1–2 steps.
+        """
+        if not self.owner_taught or self.yard_profile is None:
+            return False
+        if len(self.yard_profile.keep_in) < 3:
+            return False
+        if self.done or self._taught_env_dirty or self.job_state == "teach":
+            return True
+        if self.policy is None:
+            return True
+        if self.policy.phase.value in {"calibrate_boundary", "complete", "fault", "safe"}:
+            return True
+        if self.policy.profile is None or len(self.policy.profile.keep_in) < 3:
+            return True
+        env = self.env
+        if env is not None and int(getattr(env, "_steps", 0)) >= max(1, int(env.cfg.max_steps) - 2):
+            return True
+        return False
+
     def _reset_for_taught_job(self) -> None:
         """Rebuild the env/policy so Start uses the saved YardProfile as fence."""
         if not self.owner_taught or self.yard_profile is None:
             return
-        if self.policy is not None and self.policy.phase.value != "calibrate_boundary":
-            if self.policy.profile is not None and len(self.policy.profile.keep_in) >= 3:
-                return
+        self._snap_home_inside_keep_in(self.yard_profile)
         paired = self.paired
         taught = self.owner_taught
         profile = self.yard_profile
@@ -714,6 +742,25 @@ class LiveSession:
         self.yard_path = dest
         self.reset()
         self.paired = paired
+        self.done = False
+
+    def _snap_home_inside_keep_in(self, profile: YardProfile) -> None:
+        """Keep spawn inside the taught fence so Start does not OOB/drain-drop."""
+        from jims_mower.geofence import inside_keep_in
+
+        keep = list(profile.keep_in)
+        if len(keep) < 3:
+            return
+        home = profile.home_pose()
+        if inside_keep_in(home.x, home.y, keep):
+            return
+        cx = sum(p[0] for p in keep) / float(len(keep))
+        cy = sum(p[1] for p in keep) / float(len(keep))
+        if not inside_keep_in(cx, cy, keep) and keep:
+            vx, vy = keep[0]
+            cx = vx + 0.35 * (cx - vx)
+            cy = vy + 0.35 * (cy - vy)
+        profile.home = {"x": float(cx), "y": float(cy), "theta": float(home.theta)}
 
     def _begin_teach(self, **kwargs: Any) -> dict[str, Any]:
         if not self.started:
@@ -723,6 +770,7 @@ class LiveSession:
         self.estop = False
         self.done = False
         self.teach_policy = None
+        self._taught_env_dirty = True
         if self.policy is not None:
             self.policy.clear_owner_hold()
         self.job_state = "teach"
@@ -830,11 +878,12 @@ class LiveSession:
         if len(profile.keep_in) < 3:
             return {"ok": False, "error": "keep_in needs at least 3 vertices", **self.snapshot()}
         dest = kwargs.get("path")
+        self._snap_home_inside_keep_in(profile)
         path = self._persist_yard(profile, dest)
         self.yard_profile = profile
         self.owner_taught = True
-        if self.job_state == "teach":
-            self.job_state = "idle"
+        self.done = False
+        self.job_state = "idle"
         self.stop()
         return {"ok": True, "cmd": "save_yard", "path": str(path), **self.snapshot()}
 
@@ -848,8 +897,9 @@ class LiveSession:
         self.yard_profile = profile
         self.owner_taught = True
         self.yard_path = dest
-        if self.job_state == "teach":
-            self.job_state = "idle"
+        self._snap_home_inside_keep_in(profile)
+        self.done = False
+        self.job_state = "idle"
         return {"ok": True, "cmd": "load_yard", "path": str(dest), **self.snapshot()}
 
     def _step_teach(self) -> dict[str, Any]:
