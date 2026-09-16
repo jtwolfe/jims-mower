@@ -243,6 +243,11 @@ def test_owner_copy_reads_like_a_product() -> None:
     assert owner_copy_for("running", "calibrate_boundary") == "Calibrating boundary…"
     assert owner_copy_for("running", "explore") == "Exploring unknown yard…"
     assert owner_copy_for("running", "review") == "Map ready — start mow?"
+    assert owner_copy_for("hold", "review") == "Map ready — start mow?"
+    assert owner_copy_for("running", "review", fence_unusable=True) == (
+        "Fence too small — re-teach the keep-in."
+    )
+    assert owner_copy_for("running", "safe") == "Hold — safe."
     assert owner_copy_for("running", "mow") == "Mowing…"
     assert owner_copy_for("estop", "mow") == "E-STOP — hold."
     assert owner_copy_for("running", "mow", {"code": "FAULT_IMMOBILISED", "retrieve": True}) == (

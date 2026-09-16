@@ -75,7 +75,7 @@ profile**, not a smaller world:
 
 | Path | Fence | After Start |
 | --- | --- | --- |
-| **First-run** (`--live`, Teach → Save) | Owner-taught `YardProfile` (`jims_mower.yard.v1`) | Skip authored calibrate. Explore fog → MAP READY → mow. |
+| **First-run** (`--live`, Teach → Save) | Owner-taught `YardProfile` (`jims_mower.yard.v1`) — scribble / short-trail fences are repaired to the authored yard-scale ring | Skip authored calibrate. Explore fog → MAP READY → mow. |
 | **Demo** (`acre_yard_demo`, Start only) | Authored keep-in, `calibrate_confirm_m: 28` | Short confirm lap, then the same explore → MAP READY → mow. |
 | **Full acre** (`--config acre_yard`) | Authored ~226 m fence, full lap | Same phases; long. Not CI. |
 
@@ -116,8 +116,10 @@ Owner bar: Start / Pause / Resume, speed `1× 2× 5× max`, **Start mow**
 / Wi-Fi map / LoRa sparse, simulated) and stuck vs dead-motor SOS
 injection. Copy reads like a product (“Calibrating boundary…”,
 “Exploring unknown yard…”, “Map ready — start mow?”, “Mowing…”).
-Home / done writes `session_summary.json` (map %, planned/reachable,
-cut %, skips, duration).
+MAP READY is not “Hold — safe” (that is SafeState / ESTOP). A review
+with 0 mowable cells stays on “Fence too small — re-teach the keep-in.”
+`session_summary.json` tracks the live phase (not a leftover calibrate
+card from Teach → Save).
 
 ## Unknown-space semantics
 

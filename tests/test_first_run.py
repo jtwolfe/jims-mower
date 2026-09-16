@@ -11,12 +11,37 @@ from jims_mower.app.live_backend import LiveBackend
 from jims_mower.app.server import make_server
 from jims_mower.constants import LIVE_SCHEMA
 from jims_mower.live import LiveSession, owner_copy_for, robot_status_for
-from jims_mower.profile import YardProfile, apply_profile_to_scenario, load_yard_profile
+from jims_mower.profile import (
+    YardProfile,
+    apply_profile_to_scenario,
+    keep_in_usable,
+    load_yard_profile,
+)
 from jims_mower.scenarios import load_source
 
 
 def _tiny_keep_in() -> list[list[float]]:
     return [[0.8, 0.8], [4.8, 0.8], [4.8, 3.8], [0.8, 3.8]]
+
+
+def _scribble_keep_in() -> list[list[float]]:
+    return [[35.0 + 0.04 * i, 29.0 + 0.03 * ((-1) ** i)] for i in range(97)]
+
+
+def _acre_session(tmp_path: Path, *, first_run: bool = True) -> LiveSession:
+    return LiveSession(
+        config="acre_yard_demo",
+        fast=False,
+        speed="max",
+        steps=80,
+        seed=3,
+        cameras=4,
+        out_dir=tmp_path / "first-run-acre",
+        cam_stride=80,
+        map_stride=8,
+        first_run=first_run,
+        yard_path=tmp_path / "profile.json",
+    )
 
 
 def _session(tmp_path: Path, *, first_run: bool = True) -> LiveSession:
@@ -287,3 +312,80 @@ def test_app_first_run_http_contract(tmp_path: Path) -> None:
         httpd.shutdown()
         httpd.server_close()
         backend.close()
+
+
+def test_scribble_keep_in_is_repaired_on_acre(tmp_path: Path) -> None:
+    session = _acre_session(tmp_path)
+    session.reset()
+    saved = session.control("save_yard", keep_in=_scribble_keep_in())
+    assert saved["ok"] is True
+    assert saved.get("keep_in_repaired") is True
+    keep = session.yard_profile.keep_in
+    assert keep_in_usable(keep, 70.0, 58.0)
+    xs = [p[0] for p in keep]
+    ys = [p[1] for p in keep]
+    assert max(xs) - min(xs) > 20.0
+    assert max(ys) - min(ys) > 20.0
+    loaded = load_yard_profile(tmp_path / "profile.json")
+    assert keep_in_usable(loaded.keep_in, loaded.width_m, loaded.height_m)
+    session.close()
+
+
+def test_short_teach_drive_save_start_explores_acre(tmp_path: Path) -> None:
+    """Teach a few metres, Save, Start — must explore, not instant MAP READY."""
+    session = _acre_session(tmp_path)
+    session.reset()
+    session.job_state = "teach"
+    session._taught_env_dirty = True
+    for _ in range(8):
+        session.step_once()
+    saved = session.control("save_yard")
+    assert saved["ok"] is True
+    assert keep_in_usable(session.yard_profile.keep_in, 70.0, 58.0)
+
+    started = session.control("start")
+    try:
+        assert started["ok"] is True
+        assert started["phase"] == "explore"
+        assert started["taught"] is True
+        assert "hold — safe" not in (started.get("owner_copy") or "").lower()
+        session.control("pause")
+        if session.policy is not None:
+            session.policy.clear_owner_hold()
+        maps = [float(started.get("map_pct") or 0.0)]
+        last = started
+        explore_steps = 0
+        for _ in range(24):
+            last = session.step_once()
+            maps.append(float(last.get("map_pct") or 0.0))
+            assert last["phase"] != "calibrate_boundary"
+            copy = (last.get("owner_copy") or "").lower()
+            assert "hold — safe" not in copy
+            if last["phase"] == "explore":
+                explore_steps += 1
+                assert last.get("fence_unusable") is not True
+            if last["phase"] == "review":
+                assert last.get("needs_reteach") is not True or last.get("can_start_mow") is False
+                assert "re-teach" in copy or "map ready" in copy
+                break
+        assert explore_steps >= 8 or max(maps) > maps[0] + 0.01
+        assert last["phase"] in {"explore", "review", "mow"}
+        if last["phase"] == "review":
+            assert int(last.get("n_waypoints") or 0) > 0 or last.get("needs_reteach") is True
+            assert last["phase"] != "safe"
+        summary = (tmp_path / "first-run-acre" / "session_summary.json")
+        if summary.is_file():
+            card = json.loads(summary.read_text(encoding="utf-8"))
+            assert card.get("phase") in {"explore", "review", "mow", "return_home", "complete"}
+    finally:
+        session.control("pause")
+        session.close()
+
+
+def test_empty_mow_plan_is_reteach_not_hold_safe() -> None:
+    copy = owner_copy_for("running", "review", fence_unusable=True)
+    assert "re-teach" in copy.lower()
+    assert "hold — safe" not in copy.lower()
+    assert owner_copy_for("running", "review") == "Map ready — start mow?"
+    assert owner_copy_for("running", "safe") == "Hold — safe."
+    assert owner_copy_for("estop", "review") == "E-STOP — hold."

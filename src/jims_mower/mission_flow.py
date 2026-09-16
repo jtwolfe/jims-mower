@@ -168,6 +168,7 @@ class MissionPolicy:
         self._replan_cool = 0
         self._calibrate_stall = 0
         self._authored_structure: Optional[np.ndarray] = None
+        self.fence_unusable = False
 
     @property
     def waypoints(self) -> list[tuple[float, float]]:
@@ -190,6 +191,17 @@ class MissionPolicy:
     def request_start_mow(self) -> bool:
         """Owner override: leave MAP READY without waiting out the review beat."""
         if self.phase != MissionPhase.REVIEW:
+            return False
+        if self.fence_unusable:
+            self._emit("owner_start_mow_blocked", {"reason": "fence_too_small"})
+            return False
+        plan = self.global_plan
+        if plan is not None and (
+            int(getattr(plan, "planned_mowable_cells", 0) or 0) <= 0
+            or len(getattr(plan, "waypoints", []) or []) < 2
+        ):
+            self.fence_unusable = True
+            self._emit("owner_start_mow_blocked", {"reason": "empty_mow_plan"})
             return False
         self._mow_requested = True
         self._emit("owner_start_mow", {"phase_step": self.phase_step})
@@ -295,6 +307,7 @@ class MissionPolicy:
         self._frontier_xy = []
         self._replan_cool = 0
         self._calibrate_stall = 0
+        self.fence_unusable = False
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self._wet = bool((info.get("weather") or {}).get("wet", False))
@@ -418,6 +431,7 @@ class MissionPolicy:
             "replans": self.replans,
             "skipped_global": len(self._skipped_global),
             "closed": bool(self.snapshot.closed) if self.snapshot else False,
+            "fence_unusable": bool(self.fence_unusable),
             "not_a_benchmark": True,
         }
 
@@ -577,8 +591,13 @@ class MissionPolicy:
                 tx, ty = self.observed.cell_to_world(*self.explore_plan.target)
                 self._emit("frontier_target", {"x": tx, "y": ty, "n_frontiers": len(thin)})
         if self.explore_plan is None or not self.explore_plan.waypoints:
-            # No reachable frontier: sweep known space once, then review.
-            if completion >= float(self.settings.explore_no_frontier) or self.phase_step > 8:
+            # No reachable frontier: keep trying until a min explore beat,
+            # then review. Instant give-up at step 0 made a scribble fence
+            # look like MAP READY.
+            give_up = max(8, int(getattr(self.settings, "min_explore_steps", 8) or 8))
+            if self.phase_step >= give_up and (
+                completion >= float(self.settings.explore_no_frontier) or self.phase_step > give_up + 8
+            ):
                 self._transition(MissionPhase.REVIEW)
             return self._hold()
         return self._track_list(
@@ -590,9 +609,18 @@ class MissionPolicy:
         )
 
     def _explore_ready(self, completion: float, has_frontier: bool) -> bool:
+        # Never declare the map done on the first explore tick — a tiny
+        # keep-in is already "33% observed / no frontiers" at spawn.
+        if self.phase_step < 1:
+            return False
         if completion >= float(self.settings.explore_complete):
             return True
-        if not has_frontier and completion >= float(self.settings.explore_no_frontier):
+        min_steps = max(4, int(getattr(self.settings, "min_explore_steps", 8) or 8))
+        if (
+            not has_frontier
+            and completion >= float(self.settings.explore_no_frontier)
+            and self.phase_step >= min_steps
+        ):
             return True
         return False
 
@@ -604,6 +632,12 @@ class MissionPolicy:
             self.index = 0
             self._review_hold = True
             metrics = self.global_plan.as_metrics() if self.global_plan else {}
+            planned = int(metrics.get("planned_mowable_cells") or 0)
+            n_wp = len(self.global_plan.waypoints) if self.global_plan is not None else 0
+            if planned <= 0 or n_wp < 2:
+                self.fence_unusable = True
+                if self.snapshot is not None:
+                    self.snapshot.notes.append("fence too small — 0 mowable cells")
             self._emit(
                 "map_ready",
                 {
@@ -612,18 +646,21 @@ class MissionPolicy:
                     "mean_confidence": self.snapshot.mean_confidence,
                     "n_components": self.snapshot.n_components,
                     "notes": list(self.snapshot.notes),
+                    "fence_unusable": self.fence_unusable,
                     **metrics,
                 },
             )
+            return self._hold()
+        if self.fence_unusable:
             return self._hold()
         hold_steps = max(1, int(self.settings.review_hold_steps))
         ready = self._mow_requested or self.phase_step >= hold_steps
         if not ready:
             return self._hold()
         if self.global_plan is None or len(self.global_plan.waypoints) < 2:
-            self._transition(MissionPhase.RETURN_HOME)
-        else:
-            self._transition(MissionPhase.MOW)
+            self.fence_unusable = True
+            return self._hold()
+        self._transition(MissionPhase.MOW)
         return self._hold()
 
     def _tick_mow(
@@ -1038,12 +1075,18 @@ class MissionPolicy:
             self._transition(MissionPhase.SAFE)
         elif (
             self.safe.mode == "safe"
-            and self.phase in {MissionPhase.CALIBRATE_BOUNDARY, MissionPhase.EXPLORE, MissionPhase.MOW}
+            and self.phase
+            in {
+                MissionPhase.CALIBRATE_BOUNDARY,
+                MissionPhase.EXPLORE,
+                MissionPhase.REVIEW,
+                MissionPhase.MOW,
+            }
             and not self.help_requested
             and not bool(info.get("tipover"))
             and not bool(info.get("drain_drop"))
         ):
-            # Mapping near a fence or tree must not retire the job.
+            # Mapping / MAP READY hold near a fence must not become SAFE.
             self.safe.clear_if_not_estop()
             self.last_safe_mode = self.safe.mode
         elif self.safe.mode == "safe" and self.phase not in {

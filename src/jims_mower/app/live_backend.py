@@ -187,6 +187,8 @@ class LiveBackend:
             "owner_copy": snap.get("owner_copy"),
             "can_start_mow": bool(snap.get("can_start_mow")),
             "can_reexplore": bool(snap.get("can_reexplore")),
+            "needs_reteach": bool(snap.get("needs_reteach")),
+            "fence_unusable": bool(snap.get("fence_unusable")),
             "session_summary": snap.get("session_summary") or {},
             "speed": snap.get("speed"),
             "speed_label": snap.get("speed_label"),

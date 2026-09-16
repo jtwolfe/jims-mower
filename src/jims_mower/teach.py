@@ -16,7 +16,9 @@ from jims_mower.planning.controller import tracking_action
 from jims_mower.profile import (
     YardProfile,
     circle_polygon,
+    keep_in_usable,
     perimeter_waypoints,
+    repair_keep_in,
     trail_to_polygon,
     write_yard_profile,
 )
@@ -131,9 +133,22 @@ class TeachPolicy:
         mesh: str = "yard.glb",
         home: Optional[dict[str, float]] = None,
     ) -> YardProfile:
-        ring = trail_to_polygon(self.trail, fallback=self.planned_ring())
-        if len(ring) < 3:
-            ring = self.planned_ring()
+        planned = self.planned_ring()
+        ring = trail_to_polygon(
+            self.trail,
+            fallback=planned,
+            width_m=float(self.cfg.world.width_m),
+            height_m=float(self.cfg.world.height_m),
+        )
+        if len(ring) < 3 or not keep_in_usable(
+            ring, float(self.cfg.world.width_m), float(self.cfg.world.height_m)
+        ):
+            ring, _source = repair_keep_in(
+                ring,
+                width_m=float(self.cfg.world.width_m),
+                height_m=float(self.cfg.world.height_m),
+                fallback=planned,
+            )
         if home is None:
             if self.trail:
                 home = {"x": float(self.trail[0][0]), "y": float(self.trail[0][1]), "theta": 0.0}
