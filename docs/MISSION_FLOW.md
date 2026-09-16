@@ -65,12 +65,24 @@ profile**, not a smaller world:
   physics lie.
 * Faster calibrate cruise / stride. Live also downsamples acre cameras
   to 48×36 so `--speed 5` can keep up.
+* **Demo map-ready** at `explore_complete: 0.42` (or no remaining
+  frontier at `0.28`) and `max_explore_steps: 1400`. `acre_yard` stays
+  at `0.72` / full fence lap. That is documented demo pacing so MAP
+  READY → MOW can happen in minutes, not an hour.
 * `--phase-budget 0.4` scales the phase caps on any yard the same way.
 
 Jamie command: `jims-mower-live --config acre_yard_demo --speed 5`.
-Expect **EXPLORE within a few minutes wall-clock**, with the observed
-mesh growing during explore. Full acre mow to completion is still a
-manual run, not CI.
+Open the viewer: session is **idle** (yard unknown) until **Start**.
+Expect **CALIBRATE → EXPLORE → MAP READY → MOW** in a few minutes
+wall-clock at `--speed 5`. MAP READY holds ~2 s (or **Start mow**).
+Full acre mow to completion is still a manual `acre_yard` run, not CI.
+
+Owner bar (local, no phone backend): Start / Pause / Resume, speed
+`1× 2× 5× max`, **Start mow** / Re-explore at MAP READY, ESTOP.
+Copy reads like a product (“Calibrating boundary…”, “Exploring unknown
+yard…”, “Map ready — start mow?”, “Mowing…”). Home / done writes
+`session_summary.json` (map %, planned/reachable, cut %, skips,
+duration).
 
 ## Unknown-space semantics
 
@@ -100,10 +112,11 @@ A disconnected island the A* connector cannot reach is counted, not
 deleted. Strip heading uses the mowable principal axis, rotated toward
 the contour when a mean grade is present.
 
-IMU tip-stop on a ridge during `mow` now reverses one step, then skips
-the waypoint and local-replans. Twelve skipped ridge segments still
-end the mow (return home). A fuller reverse/replan around long ridges
-is follow-up — this is the live-safe cheap recovery.
+IMU tip-stop on a ridge during `mow` reverses, pivot-reverses, then
+skips a short waypoint cluster and local-replans. Ridge IMU is treated
+as `slow` for the limp machine so the job does not park. Abort-to-home
+needs 48 skips **and** 80 mow steps — leftover: long ridges can still
+chew strips; a contour-following skip is follow-up.
 
 Structures (path / building / bunker / bed / green) stay no-mow or
 blocked exactly as in `docs/TERRAIN_MAPS.md`. Physics and evaluation
@@ -136,12 +149,14 @@ JPEG-throttled (~2.5 Hz). Full acre explore→mow need not finish in CI.
 ### Live (owner session)
 
 `jims-mower-live` starts `MissionPolicy` and the World Viewer together.
-Open `http://127.0.0.1:8765/` immediately. Stdlib HTTP + SSE
-(`GET /api/live`) pushes pose, phase, map %, cut %, frontiers, plan
-(after freeze), and URLs for the latest fog / observed / **observed
-mesh** / camera frames. History is also flushed into `live_out/` so
-you can scrub later. You do not need a finished episode folder to
-watch the robot.
+Open `http://127.0.0.1:8765/` immediately — the job is **idle** until
+Start. Stdlib HTTP + SSE (`GET /api/live`) pushes pose, phase, owner
+copy, map %, cut %, frontiers, plan (after freeze), and URLs for the
+latest fog / observed / **observed mesh** / coverage / camera frames.
+`POST /api/live/control` is the owner bar (start / pause / resume /
+speed / start_mow / reexplore / estop / hold / yard). History is also
+flushed into `live_out/` so you can scrub later. You do not need a
+finished episode folder to watch the robot.
 
 ### Scrub (finished episode)
 

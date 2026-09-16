@@ -125,10 +125,11 @@ move, not so the job finishes. Mesh export should use `--stride 3` or
 `4` (default stride 2 is still loadable, just heavier).
 
 `acre_yard_demo` is a **live demo profile**: same 70×58 m physics and
-authored pond/sheds, slightly tighter keep-in, `calibrate_confirm_m: 28`
-so the owner loop can leave CALIBRATE without a 226 m fence lap. The
-live viewer shows a growing **observed** elevation mesh (unknown stays
-fog). Physics still uses the true field.
+authored pond/sheds, slightly tighter keep-in, `calibrate_confirm_m: 28`,
+and `explore_complete: 0.42` so `--speed 5` can reach **MAP READY then
+MOW** in minutes. `acre_yard` stays at `0.72` and a full fence lap.
+The live viewer shows a growing **observed** elevation mesh (unknown
+stays fog). Physics still uses the true field.
 
 ### DEM hook (optional, not used in CI)
 

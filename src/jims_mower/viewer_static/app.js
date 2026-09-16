@@ -643,8 +643,97 @@ function replaceFrontiers(pts) {
   setOverlayVis();
 }
 
+async function postControl(cmd, extra) {
+  const body = Object.assign({ cmd }, extra || {});
+  const res = await fetch("/api/live/control", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (json && json.live !== false) applyLiveFrame(json);
+  return json;
+}
+
+function setOwnerBar(frame) {
+  const bar = $("owner-bar");
+  if (!bar) return;
+  bar.hidden = false;
+  const copy = $("owner-copy");
+  if (copy) copy.textContent = frame.owner_copy || "Yard unknown — start a job when ready.";
+  const yard = $("owner-yard");
+  if (yard && frame.yard) yard.value = frame.yard;
+  document.querySelectorAll(".speed-btn").forEach((btn) => {
+    const want = frame.speed_label != null ? String(frame.speed_label) : "1";
+    btn.classList.toggle("active", btn.dataset.speed === want);
+  });
+  const idle = frame.job_state === "idle";
+  const start = $("btn-job-start");
+  if (start) start.disabled = frame.job_state === "running";
+  const pause = $("btn-job-pause");
+  if (pause) pause.disabled = frame.job_state !== "running";
+  const resume = $("btn-job-resume");
+  if (resume) resume.disabled = frame.job_state !== "paused" && frame.job_state !== "hold";
+  const startMow = $("btn-start-mow");
+  if (startMow) startMow.hidden = !frame.can_start_mow;
+  const reexplore = $("btn-reexplore");
+  if (reexplore) reexplore.hidden = !frame.can_reexplore;
+  setPhaseBar(idle ? "" : (frame.phase || ""));
+  const chip = $("phase-chip");
+  if (chip) chip.textContent = idle ? "IDLE" : `LIVE ${frame.phase_label || frame.phase || "—"}`;
+  const summary = $("session-summary");
+  if (summary && frame.session_summary && (frame.done || frame.phase === "complete" || frame.phase === "return_home")) {
+    const s = frame.session_summary;
+    const reach = s.reachable || 0;
+    const unreach = s.unreachable || 0;
+    const denom = reach + unreach;
+    const reachPct = denom ? (100 * reach) / denom : 0;
+    summary.hidden = false;
+    summary.textContent =
+      `session  map ${(100 * (s.map_pct || 0)).toFixed(1)}%\n` +
+      `planned ${(100 * (s.planned_pct || 0)).toFixed(1)}%  reachable ${reachPct.toFixed(1)}%\n` +
+      `cut ${(100 * (s.cut_pct || 0)).toFixed(1)}%  skips ${s.skips || 0}\n` +
+      `duration ${(s.duration_s || 0).toFixed(1)}s sim` +
+      (s.wall_s ? ` · ${s.wall_s.toFixed(1)}s wall` : "");
+  }
+}
+
+function bindOwnerBar() {
+  const start = $("btn-job-start");
+  if (start) {
+    start.addEventListener("click", () => {
+      const yard = $("owner-yard") && $("owner-yard").value;
+      postControl("start", { yard }).catch((err) => {
+        $("save-status").textContent = String(err);
+      });
+    });
+  }
+  const pause = $("btn-job-pause");
+  if (pause) pause.addEventListener("click", () => postControl("pause").catch(() => {}));
+  const resume = $("btn-job-resume");
+  if (resume) resume.addEventListener("click", () => postControl("resume").catch(() => {}));
+  document.querySelectorAll(".speed-btn").forEach((btn) => {
+    btn.addEventListener("click", () => postControl("speed", { speed: btn.dataset.speed }).catch(() => {}));
+  });
+  const startMow = $("btn-start-mow");
+  if (startMow) startMow.addEventListener("click", () => postControl("start_mow").catch(() => {}));
+  const reexplore = $("btn-reexplore");
+  if (reexplore) reexplore.addEventListener("click", () => postControl("reexplore").catch(() => {}));
+  const estop = $("btn-estop");
+  if (estop) estop.addEventListener("click", () => postControl("estop").catch(() => {}));
+  const yard = $("owner-yard");
+  if (yard) {
+    yard.addEventListener("change", () => {
+      postControl("yard", { yard: yard.value }).catch((err) => {
+        $("save-status").textContent = String(err);
+      });
+    });
+  }
+}
+
 function applyLiveFrame(frame) {
   if (!frame || frame.live === false) return;
+  setOwnerBar(frame);
   if (frame.step != null && frame.step !== state.lastStep && frame.pose) {
     const row = Object.assign({}, frame.pose, {
       phase: frame.phase,
@@ -660,10 +749,11 @@ function applyLiveFrame(frame) {
   if (state.followLive && frame.pose && state.poseMarker) {
     state.poseMarker.position.copy(worldToScene(frame.pose.x, frame.pose.y, frame.pose.z || 0));
     state.poseMarker.rotation.y = -(frame.pose.theta || 0);
-    const phase = frame.phase || "";
+    const idle = frame.job_state === "idle";
+    const phase = idle ? "" : (frame.phase || "");
+    const phaseLabel = idle ? "idle" : (frame.phase_label || phase);
     $("scrub").value = String(Math.max(0, state.poses.length - 1));
-    $("scrub-label").textContent = `LIVE step ${frame.step || 0} · ${frame.phase_label || phase}`;
-    setPhaseBar(phase);
+    $("scrub-label").textContent = `LIVE step ${frame.step || 0} · ${phaseLabel}`;
     const el = $("mission-metrics");
     if (el) {
       const reach = frame.reachable || 0;
@@ -674,10 +764,9 @@ function applyLiveFrame(frame) {
       el.textContent =
         `map ${(100 * (frame.map_pct || 0)).toFixed(1)}%\n` +
         `reachable mowable ${reachPct.toFixed(1)}%  unreachable ${unreachPct.toFixed(1)}%\n` +
-        `planned ${(100 * (frame.planned_pct || 0)).toFixed(1)}%  cut ${(100 * (frame.cut_pct || 0)).toFixed(1)}%`;
+        `planned ${(100 * (frame.planned_pct || 0)).toFixed(1)}%  cut ${(100 * (frame.cut_pct || 0)).toFixed(1)}%\n` +
+        `skips ${frame.skips || 0}`;
     }
-    const chip = $("phase-chip");
-    if (chip) chip.textContent = `LIVE ${frame.phase_label || frame.phase || "—"}`;
     const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
     if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
     if (phase === "mow" && $("tog-coverage")) $("tog-coverage").checked = true;
@@ -692,6 +781,7 @@ function applyLiveFrame(frame) {
   if (frame.map_seq != null && frame.map_seq !== state.lastMapSeq) {
     loadOverlayUrl("observed", frame.observed_url, 0.28);
     loadOverlayUrl("fog", frame.fog_url, 1.0);
+    if (frame.coverage_url) loadOverlayUrl("coverage", frame.coverage_url, 0.55);
     state.lastMapSeq = frame.map_seq;
     replaceFrontiers(frame.frontiers || []);
     replaceLine("exploreLine", (frame.explore || []).map((p) => [p.x, p.y]), 0xf0a030);
@@ -729,6 +819,7 @@ function startLive() {
   if ($("tog-observed")) $("tog-observed").checked = false;
   if ($("tog-error")) $("tog-error").checked = false;
   if ($("btn-play")) $("btn-play").textContent = "Follow";
+  bindOwnerBar();
   setOverlayVis();
   if (typeof EventSource === "undefined") {
     $("save-status").textContent = "EventSource missing — poll /api/live/snapshot";

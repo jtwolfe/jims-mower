@@ -425,6 +425,9 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         if path == "/api/live/fog.png":
             self._send_live_bytes(self._live_fog(), "image/png")
             return
+        if path == "/api/live/coverage.png":
+            self._send_live_bytes(self._live_coverage(), "image/png")
+            return
         if path == "/api/live/observed_mesh.json":
             self._send_live_bytes(self._live_observed_mesh(), "application/json")
             return
@@ -474,6 +477,16 @@ class ViewerHandler(SimpleHTTPRequestHandler):
             path = self.data_dir / "maps" / "fog.png"
             return path.read_bytes() if path.is_file() else b""
         return session.fog_png_bytes()
+
+    def _live_coverage(self) -> bytes:
+        session = self.session
+        if session is None:
+            path = self.data_dir / "maps" / "coverage.png"
+            return path.read_bytes() if path.is_file() else b""
+        if hasattr(session, "coverage_png_bytes"):
+            return session.coverage_png_bytes()
+        path = self.data_dir / "maps" / "coverage.png"
+        return path.read_bytes() if path.is_file() else b""
 
     def _live_observed_mesh(self) -> bytes:
         session = self.session
@@ -529,6 +542,9 @@ class ViewerHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path in {"/api/live/control", "/api/live/control/"}:
+            self._live_control()
+            return
         if parsed.path != "/api/profile":
             self.send_error(404, "not found")
             return
@@ -542,6 +558,30 @@ class ViewerHandler(SimpleHTTPRequestHandler):
         dest = self.data_dir / "profile.json"
         dest.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         body = json.dumps({"ok": True, "path": "profile.json"}).encode("utf-8")
+        self._send_bytes(body, "application/json")
+
+    def _live_control(self) -> None:
+        session = self.session
+        if session is None or not hasattr(session, "control"):
+            self.send_error(404, "no live session")
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            payload = json.loads(raw.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self.send_error(400, "invalid json")
+            return
+        if not isinstance(payload, dict):
+            self.send_error(400, "invalid json")
+            return
+        cmd = str(payload.get("cmd") or payload.get("command") or "")
+        extra = {k: v for k, v in payload.items() if k not in {"cmd", "command"}}
+        try:
+            result = session.control(cmd, **extra)
+        except Exception as exc:  # noqa: BLE001 — owner bar must not 500 the viewer
+            result = {"ok": False, "error": str(exc)}
+        body = json.dumps(result).encode("utf-8")
         self._send_bytes(body, "application/json")
 
 

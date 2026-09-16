@@ -14,6 +14,7 @@ from jims_mower.live import (
     LiveSession,
     build_parser,
     coarsen2d,
+    owner_copy_for,
     parse_speed,
     resolve_live_config,
 )
@@ -73,6 +74,8 @@ def test_live_session_grows_observed_and_streams_phase(tmp_path: Path) -> None:
     assert start["schema"] == LIVE_SCHEMA
     assert start["live"] is True
     assert start["phase"] == "calibrate_boundary"
+    assert start["job_state"] == "idle"
+    assert "unknown" in start["owner_copy"].lower()
     assert start["owner_mode"] == "observed_terrain"
     assert start["map_pct"] < 1.0
     start_obs = int(start["n_observed"])
@@ -196,6 +199,9 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         page = html.decode("utf-8")
         assert "World Viewer" in page
         assert "tog-fog" in page
+        assert "owner-bar" in page
+        assert "btn-job-start" in page
+        assert "btn-estop" in page
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -226,3 +232,98 @@ def test_live_cli_prepare_only(tmp_path: Path) -> None:
     assert (out / "maps" / "fog.png").is_file()
     assert (out / "maps" / "observed.png").is_file()
     assert (out / "maps" / "observed_mesh.json").is_file()
+
+
+def test_owner_copy_reads_like_a_product() -> None:
+    assert owner_copy_for("idle", "calibrate_boundary") == "Yard unknown — start a job when ready."
+    assert owner_copy_for("running", "calibrate_boundary") == "Calibrating boundary…"
+    assert owner_copy_for("running", "explore") == "Exploring unknown yard…"
+    assert owner_copy_for("running", "review") == "Map ready — start mow?"
+    assert owner_copy_for("running", "mow") == "Mowing…"
+    assert owner_copy_for("estop", "mow") == "E-STOP — hold."
+
+
+def _post(host: str, port: int, path: str, payload: dict, timeout: float = 6.0):
+    raw = json.dumps(payload).encode("utf-8")
+    conn = HTTPConnection(host, port, timeout=timeout)
+    conn.request("POST", path, body=raw, headers={"Content-Type": "application/json"})
+    resp = conn.getresponse()
+    body = resp.read()
+    status = resp.status
+    conn.close()
+    return status, body
+
+
+def test_live_control_http_contract(tmp_path: Path) -> None:
+    session = LiveSession(
+        config="mission_tiny",
+        fast=True,
+        speed="max",
+        steps=40,
+        seed=2,
+        cameras=4,
+        out_dir=tmp_path / "ctrl",
+        cam_stride=80,
+        map_stride=4,
+    )
+    session.reset()
+    assert session.snapshot()["job_state"] == "idle"
+    httpd = serve_viewer(session.out_dir, host="127.0.0.1", port=0, session=session)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    host, port = httpd.server_address[:2]
+    try:
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "start", "speed": "5"})
+        assert code == 200
+        body = json.loads(raw.decode("utf-8"))
+        assert body["ok"] is True
+        assert body["job_state"] == "running"
+        assert body["speed"] == 5.0
+
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "pause"})
+        assert code == 200
+        assert json.loads(raw.decode("utf-8"))["job_state"] == "paused"
+
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "resume"})
+        assert json.loads(raw.decode("utf-8"))["job_state"] == "running"
+
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "speed", "speed": "max"})
+        assert json.loads(raw.decode("utf-8"))["speed"] == 0.0
+
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "estop"})
+        estop = json.loads(raw.decode("utf-8"))
+        assert estop["ok"] is True
+        assert estop["job_state"] == "estop"
+        assert estop["estop"] is True
+
+        code, raw = _post(host, int(port), "/api/live/control", {"cmd": "nope"})
+        assert json.loads(raw.decode("utf-8"))["ok"] is False
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        session.close()
+
+
+def test_live_tiny_reaches_map_ready(tmp_path: Path) -> None:
+    session = LiveSession(
+        config="mission_tiny",
+        fast=True,
+        speed="max",
+        steps=380,
+        seed=3,
+        cameras=4,
+        out_dir=tmp_path / "ready",
+        cam_stride=80,
+        map_stride=8,
+    )
+    last = session.run_n(380)
+    phases = {row.get("phase") for row in session.poses}
+    assert "explore" in phases
+    assert "review" in phases or last["phase"] in {"review", "mow", "return_home", "complete"}
+    assert last["session_summary"]["schema"].startswith("jims_mower.session")
+    assert "map_pct" in last["session_summary"]
+    assert "cut_pct" in last["session_summary"]
+    assert "skips" in last["session_summary"]
+    session.close()
+    if last["done"] or last["phase"] in {"return_home", "complete"}:
+        assert (tmp_path / "ready" / "session_summary.json").is_file()
