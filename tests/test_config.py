@@ -149,6 +149,8 @@ def test_default_has_terrain_and_imu() -> None:
     assert cfg.sensors.imu.enabled is True
     assert cfg.sensors.gps.enabled is True
     assert cfg.perception.terrain_mode == "heuristic"
+    assert cfg.perception.onnx_path == ""
+    assert cfg.perception.detector_backend == "mock"
     assert cfg.world.terrain.base_gradient.effective_slope_rad() > 0.0
     assert cfg.world.terrain.base_gradient.undulation_m > 0.0
 

@@ -98,12 +98,12 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 
 | ID | Item | Status | Why it matters | Acceptance test | Depends on |
 | --- | --- | --- | --- | --- | --- |
-| CV-1 | Terrain segmentation (drain / lip / bank / grass) | **stub** | Heuristic RGB + `LearnedTerrainObserver` numpy MLP trained on *sim oracle* rasters. Palette will not survive daylight grass. Wrong lip → wheel in channel. Geometry (stereo) will not name sand / pond / path. | Held-out **real** frames; report IoU per class only after a locked test set. Fail if you only have sim loss. No invented IoU. Sim path already: exporter → numpy stub (`tests/test_learn.py`). | CV-8 dataset, RT-1 capture, HD-cam extrinsics |
+| CV-1 | Terrain segmentation (drain / lip / bank / grass) | **partial** (software path this PR) | Trainable gym path: `jims_mower.dataset.v1` → numpy (or optional torch) MLP → optional ONNX. `OnnxTerrainObserver` loads via onnxruntime when present. Heuristic remains the **live default**. Sim weights are `sim_only` / not field-ready. Palette heuristic will not survive daylight grass. | Held-out **real** frames; report IoU per class only after a locked test set. Fail if you only have sim loss. **No invented IoU.** `iou_claim` stays null. Software tests: `tests/test_onnx.py`. | CV-8 dataset, RT-1 capture, HD-cam extrinsics |
 | CV-2 | Grass coverage observer | **stub** | `ColorGrassObserver` matches synthetic green; `FeatureGrassObserver` is a 6-stat mix. Cut % on the phone today is the *gym grass grid*, not this net. | On-box coverage drift vs painted/measured strips on one lawn, same day. | CV-1, MAP-1 |
-| CV-3 | Person / animal / obstacle detect | **stub** | `MockDetector` **projects** `context.obstacles` (sim-only). Appearance refine is crop-palette stats. `BlindDetector` returns `[]`. | Precision/recall on a recorded real walk-through with a person + dog + chair. Publish the set size. No fake mAP. | CV-8, RT-1 |
-| CV-4 | Tracking / tracklets | **stub** | Temporal association on projected blobs (`info["tracklets"]`). Not MOT. | ID-switch count on a 30 s real clip with one crossing. | CV-3 |
+| CV-3 | Person / animal / obstacle detect | **stub** | `MockDetector` **projects** `context.obstacles` (sim-only) and stays the gym default. `AppearanceDetector` (`detector_backend: appearance\|onnx`) ignores that list and returns `[]` until a real ONNX box head exists. `BlindDetector` returns `[]`. | Precision/recall on a recorded real walk-through with a person + dog + chair. Publish the set size. No fake mAP. | CV-8, RT-1 |
+| CV-4 | Tracking / tracklets | **stub** | Temporal association on whatever `detections` the detector emitted (`info["tracklets"]`). Not MOT. Still consumes the ICD `detections` key for living interlock. | ID-switch count on a 30 s real clip with one crossing. | CV-3 |
 | CV-5 | Hand signals | **stub** | Oracle person labels or crop brightness / red-bias classifier. | Confusion matrix on real stop/go/back clips, or **drop the feature** until CV-3 works. | CV-3 |
-| CV-6 | Train → ONNX → TensorRT | **stub** | `jims-mower-export-trt --dry-run` prints a `trtexec` line. `TrtDetector` / `TrtTerrainObserver` load an engine **if you provide one**, else mock/heuristic. No ONNX in-repo. | `trtexec` builds your engine on the Orin; `fps_claim` stays null until you measure. | CV-1 or CV-3 weights |
+| CV-6 | Train → ONNX → TensorRT | **partial** (software path this PR) | `jims-mower-train-terrain --onnx` writes a sim_only Gemm graph when the `onnx` extra is installed. `jims-mower-export-trt --dry-run` still prints `trtexec`. `TrtTerrainObserver` / `TrtDetector` load an engine **if you provide one**, else heuristic / mock. No production ONNX in git. | `trtexec` builds your engine on the Orin; `fps_claim` stays null until you measure. Software pipeline ≠ field head. | CV-1 or CV-3 weights |
 | CV-7 | Domain gap (wet / dawn / night) | **partial** | Renderer tints only. Not HDR, IR, or wet-lens. | Same route at noon vs dusk vs wet; hazard stamps must not invert drain vs grass. | CV-1, RT-1 |
 | CV-8 | Dataset (real) | **partial** (harness this PR) | Exporter writes `jims_mower.dataset.v1` (oracle PNG + COCO-like index) from renderer **or** FakeCsi/Gst (`--adapter`). Train/val is last-frac (`meta.split` / `split.json`). Label protocol: [`DATASET.md`](DATASET.md). Fake CSI is OK in CI — not real photos. No field bag yet. No published mAP. | N frames from the rig, labeled, versioned, train/val documented. CI: FakeCsi → v1 + split. | RT-1, HD-cam |
 
@@ -146,7 +146,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | --- | --- | --- | --- | --- | --- |
 | RT-1 | CSI / GStreamer capture | **partial** (software path this PR) | `FakeGstAdapter` / `FakeCsiDriver` fill named `obs["cameras"]` at the ICD contract size with fresh stamps. Downsample is `runtime.capture.downsample_rgb`. `GstNvmmAdapter` still raises without Gst. **Not** physical CSI — JetPack + real cameras still required. No FPS. | Named cameras (prefer `stereo_left` / `stereo_right` + mono) fill `obs["cameras"]` at `sensors.width` × `sensors.height`; `SensorWatchdog` stays happy on fresh stamps; freeze stamps → wheels zero. Field: plug CSI on the Orin (needs JetPack). | HD-cam, JetPack |
 | RT-2 | IMU / GNSS / ToF drivers | **partial** (gym stubs this PR) | Fake I2C/UART publishers still copy gym vectors onto in-process queues. Level-rest IMU, GNSS `valid` toggle, and ToF board-under-wheel fixture are writable. Addresses in `drivers.py` remain documentation. | Gym: rest IMU ≈ `(0,0,9.81,0,0,0)`; `valid` bit toggles; ToF corner shortens when a board is slid under a wheel. Field: same ICD keys from real BMI/ICM + GNSS + VL53-class parts. | HD-place |
-| RT-3 | TensorRT load | **stub** | See CV-6. | Engine deserializes; fallback still mock if path missing (keep that). | CV-6 |
+| RT-3 | TensorRT load | **stub** | See CV-6. Software ONNX export exists; deserialize still needs an Orin engine you build. Fallback stays heuristic / mock if the path is missing (keep that). | Engine deserializes; fallback still mock if path missing (keep that). | CV-6 |
 | RT-4 | Watchdog | **partial** (bench config + gym stamp stall this PR) | Zeros wheels if IMU/vision **stamps** freeze (`runtime.watchdog.enabled`). Off in default gym tests. Bench overlay: [`configs/orin/bench.yaml`](../configs/orin/bench.yaml). Fake adapters — not real CSI/IMU. | Gym: freeze IMU or camera stamps → wheels zero within `vision_stall_s` / configured stall (`tests/test_hardware_estop.py`, `tests/test_wave4_ops.py`). Field: unplug a camera on the wired rig (needs RT-1). | RT-1, RT-2 |
 | RT-5 | Battery / thermal telemetry | **stub** | `OrinBudget` 50 Wh class-scale RC. Not a BMS. | SOC and board °C from hardware; limp/stop match measured limits. | HD-batt |
 | RT-6 | Hardware ESTOP | **partial** (sim + doc this PR) | Gym `HardwareEstop` drops traction + trimmer **rails** underneath policy / `SafeStateMachine`. Wiring + reset: [`ESTOP.md`](ESTOP.md), [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §10. No physical paddle. | Gym: dummy load commanding wheels+trimmer; paddle latch zeros outputs; software clear does **not** restore; only `hw_reset` does (`tests/test_hardware_estop.py`). Field: hit a real paddle while a dummy load spins — **not claimed**. | HD-wire |
@@ -257,13 +257,27 @@ Stop when only **fab + field test** remain.
    *Honesty:* Fake CSI in CI; real CSI + human labels after JetPack.
    Do not publish mAP.
 
-9. **Terrain seg train → ONNX → TRT (CV-1, CV-6).** Replace heuristic /
-   numpy stub.  
-   *Test:* held-out **real** IoU. If you cannot measure it, do not ship
-   the head.
+9. **Terrain seg train → ONNX → TRT (CV-1, CV-6).** Software path
+   (this PR). Exporter / FakeCsi → numpy (or optional torch) train →
+   optional ONNX under `artifacts/` or `models/`. Config can select
+   `terrain_mode: onnx|trt|learned|heuristic` without breaking default
+   gym demos (heuristic stays live). `OnnxTerrainObserver` uses
+   onnxruntime when present, else numpy / heuristic. `trtexec` dry-run
+   and load-if-present stay. Sim weights are `sim_only` / not
+   field-ready.  
+   *Test (software):* `pytest tests/test_onnx.py tests/test_learn.py tests/test_bridge.py`.  
+   *Test (field):* held-out **real** IoU. If you cannot measure it, do
+   **not** ship the head. `iou_claim` / `map_claim` / `fps_claim` stay
+   null. Real labels: [`DATASET.md`](DATASET.md).
 
-10. **Detector + tracker (CV-3, CV-4).** Replace `MockDetector`.  
-    *Test:* recorded walk-through; living interlock (PLN-4) on those dets.
+10. **Detector + tracker (CV-3, CV-4).** Scaffolding (this PR, focused).
+    `AppearanceDetector` can load ONNX later and does **not** read
+    `context.obstacles`. `MockDetector` remains the gym default.
+    Tracklets stay a stub. Living interlock still consumes `detections`.  
+    *Test (software):* empty dets when appearance/onnx; mock default
+    unchanged (`tests/test_onnx.py`).  
+    *Test (field):* recorded walk-through; living interlock (PLN-4) on
+    those dets. No fake mAP.
 
 11. **Grass coverage observer (CV-2)** once terrain classes exist.
 
@@ -305,21 +319,17 @@ not another WAVE of gym stubs.
 
 ## What this PR ships
 
-- Build-order **§7** (S2R-2 / S2R-3): stereo calibration **procedure +
-  gym acceptance**. [`CALIBRATION.md`](CALIBRATION.md),
-  `jims-mower-calibrate`, `perception/calibration.py`. EXAMPLE
-  [`extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
-  stays `calibration.measured: false`. MEASURED template:
-  [`extrinsics_stereo_measured.template.yaml`](../configs/orin/extrinsics_stereo_measured.template.yaml).
-  Gym lip / checkerboard fixture stamps ObservedMap cells; ideal
-  disparity matches tape in the 0.8–4 m band. **Not** a taped
-  baseline. No FPS / mAP.
-- Build-order **§8** (CV-8, focused): label protocol
-  [`DATASET.md`](DATASET.md); FakeCsi/Gst frames export to
-  `jims_mower.dataset.v1` with a documented train/val split
-  (`meta.split` / `split.json`). Train stub may still run. **Not** a
-  field bag. Do not publish mAP.
-- Honest leftover: a human on the rig still measures and commits
-  `extrinsics_stereo_measured.yaml`. JetPack + real CSI still required
-  for the physical acceptance lines. Do not start §9 (ONNX/TRT heads)
-  from this PR.
+- Build-order **§9** (CV-1 / CV-6): train → ONNX → TRT **software
+  pipeline**. `jims-mower-train-terrain --onnx` writes a sim_only
+  Gemm graph when `pip install -e ".[onnx]"` is available.
+  `OnnxTerrainObserver` / `terrain_mode: onnx|trt|learned|heuristic`.
+  Heuristic remains the live mow default. `trtexec` dry-run unchanged.
+  **Not** a field-ready head. No held-out real IoU. `iou_claim` /
+  `map_claim` / `fps_claim` stay null.
+- Build-order **§10** (CV-3 / CV-4, focused scaffolding):
+  `AppearanceDetector` ignores `context.obstacles` and can load ONNX
+  later. `MockDetector` stays the gym default. Tracklets remain a stub.
+  Living interlock still reads the `detections` ICD key. No fake mAP.
+- Honest leftover: collect real labels per [`DATASET.md`](DATASET.md)
+  before any IoU claim. Do not start §11 (grass coverage field net) or
+  §12 (field stereo matcher) from this PR.

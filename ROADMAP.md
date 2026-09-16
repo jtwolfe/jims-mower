@@ -181,7 +181,7 @@ See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
 
 ## Perception
 
-- [x] Replace `classify_terrain_rgb` with a learned drain / lip / bank / grass head (train on exporter labels) — WAVE 2B **numpy stub**, no claimed accuracy ([`docs/WAVE2B.md`](docs/WAVE2B.md))
+- [x] Replace `classify_terrain_rgb` with a learned drain / lip / bank / grass head (train on exporter labels) — WAVE 2B **numpy stub** + §9 train→ONNX software path, no claimed IoU ([`docs/WAVE2B.md`](docs/WAVE2B.md), [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md))
 - [x] Temporal consistency on hazard stamps (hysteresis / decay) — WAVE 2B
 - [x] Multi-camera BEV fuse for hazard stamps + person/dog tracklets stub — WAVE 2B (not published MOT / NMS scores)
 - [x] Person / animal / toy categories beyond `MockDetector` blobs — WAVE 4 appearance model (not mAP)

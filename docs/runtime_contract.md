@@ -77,7 +77,7 @@ Gym: padded `obs["detections"]` plus `info["detections"]` dicts.
 | `version` | string | `"1"` |
 | `elevation` / `slope` / `hazard` / `confidence` | string | raster names in the npz (same `H×W` as coverage) |
 | `resolution_m`, `width_m`, `height_m` | number | |
-| `source` | string | `oracle` / `heuristic` / `blind` |
+| `source` | string | `oracle` / `heuristic` / `blind` / `learned` / `onnx` |
 | `stamp_s` | number | |
 
 Hazard labels: `0` free, `1` steep, `2` drain lip, `3` channel.

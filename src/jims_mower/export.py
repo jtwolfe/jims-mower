@@ -27,7 +27,7 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image
 
-from jims_mower.constants import DATASET_SCHEMA, LABEL_TO_ID
+from jims_mower.constants import DATASET_SCHEMA, LABEL_TO_ID, TERRAIN_MODE_CLI
 from jims_mower.dataset import assign_frame_split, validate_dataset_meta
 from jims_mower.env import MowerEnv
 from jims_mower.runtime.capture import adapter_kind
@@ -103,11 +103,9 @@ def export_dataset(
         cfg.sensors.camera_count = cameras
         cfg.sensors.cameras = []
     if terrain_observer:
-        key = terrain_observer.strip().lower()
-        if key not in {"oracle", "heuristic", "blind", "learned"}:
-            raise ValueError(
-                f"terrain_observer must be oracle|heuristic|blind|learned; got {key!r}"
-            )
+        from jims_mower.perception.terrain import normalize_terrain_mode
+
+        key = normalize_terrain_mode(terrain_observer)
         cfg.perception.terrain_mode = key
     if domain_rand:
         cfg.domain_randomization.enabled = True
@@ -309,7 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-tof", action="store_true", help="Omit ToF from sidecars")
     p.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind", "learned"),
+        choices=TERRAIN_MODE_CLI,
         default=None,
         help="Observer used for env obs (labels stay oracle)",
     )

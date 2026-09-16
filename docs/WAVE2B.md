@@ -16,6 +16,11 @@ python -m jims_mower.perception.train --dataset dataset_out --out terrain_mlp.np
 # Same thing via the scripts/ wrapper (exports if --dataset is omitted):
 python scripts/train_terrain_seg.py --steps 6 --out terrain_mlp.npz --export-out dataset_out
 
+# Optional ONNX (sim_only; not field-ready; requires pip install -e ".[onnx]"):
+jims-mower-train-terrain --dataset dataset_out --out artifacts/terrain_mlp.npz \
+  --onnx artifacts/terrain_seg.onnx
+jims-mower-export-trt --onnx artifacts/terrain_seg.onnx --dry-run
+
 # Optional torch extra (never used in CI):
 #   pip install -e ".[torch]"
 #   python scripts/train_terrain_seg.py --dataset dataset_out --backend torch --out terrain_mlp.npz
@@ -31,6 +36,7 @@ env = MowerEnv(
     terrain_observer=LearnedTerrainObserver("terrain_mlp.npz"),
 )
 # or: perception.terrain_mode: learned  and  perception.weights_path: terrain_mlp.npz
+# or: perception.terrain_mode: onnx     and  perception.onnx_path: artifacts/terrain_seg.onnx
 ```
 
 `LearnedTerrainObserver` follows the same `estimate(...)` contract as

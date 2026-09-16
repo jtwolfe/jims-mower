@@ -62,6 +62,8 @@ def test_train_from_export_and_learned_observer(tmp_path: Path) -> None:
     assert Path(stats["weights"]).is_file()
     assert stats["backend"] == "numpy"
     assert stats["n_samples"] >= 8 or stats.get("n_pixels", 0) >= 8
+    assert stats["iou_claim"] is None
+    assert stats["field_ready"] is False
     x, y, info = samples_from_export(dataset, stride=3, max_per_class=80, seed=1)
     assert x.shape[1] == 7
     assert y.size == x.shape[0]

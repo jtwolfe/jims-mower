@@ -112,6 +112,15 @@ HAZARD_NONE = 0
 HAZARD_STEEP = 1
 HAZARD_DRAIN_EDGE = 2
 HAZARD_DRAIN = 3
+TERRAIN_CLASS_NAMES = ("grass", "bank", "lip", "drain")
+
+# perception.terrain_mode / --terrain-observer. heuristic stays the live default.
+TERRAIN_MODES = frozenset({"oracle", "blind", "heuristic", "learned", "onnx", "trt"})
+TERRAIN_MODE_CLI = ("heuristic", "oracle", "blind", "learned", "onnx", "trt")
+
+# perception.detector_backend. mock stays the gym default (god-view projector).
+DETECTOR_BACKENDS = frozenset({"mock", "trt", "tensorrt", "onnx", "appearance", "blind"})
+DETECTOR_BACKEND_CLI = ("mock", "trt", "onnx", "appearance", "blind")
 
 GRAVITY_MPS2 = 9.80665
 

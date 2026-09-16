@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from jims_mower.constants import TERRAIN_MODE_CLI
 from jims_mower.episode import record_episode
 from jims_mower.latency import LatencyDelays
 
@@ -25,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--policy", choices=("terrain", "scripted", "random"), default="terrain")
     p.add_argument(
         "--terrain-observer",
-        choices=("heuristic", "oracle", "blind"),
+        choices=TERRAIN_MODE_CLI,
         default=None,
     )
     p.add_argument("--camera-delay-ms", type=float, default=0.0)

@@ -1,8 +1,10 @@
 """TensorRT *load-weights* placeholders behind Detector / TerrainObserver.
 
 No engine is shipped. CI never imports TensorRT. When ``engine_path`` is
-missing the wrappers delegate to the numpy / mock heads already in-tree.
-``fps_claim`` is always ``None``.
+missing the wrappers delegate to the numpy / mock / heuristic heads
+already in-tree. The gym can export a sim-only ONNX (see
+``perception.onnx_io``); that is **not** a field-ready TRT head.
+``fps_claim`` / ``map_claim`` stay ``None``.
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ class TrtDetector:
         self.backend = "trt" if (_engine_ready(engine_path) and tensorrt_available()) else "mock"
         self.fps_claim = None
         self.map_claim = None
+        self.iou_claim = None
 
     def detect(
         self,
@@ -81,6 +84,7 @@ class TrtTerrainObserver:
         self.backend = "trt" if (_engine_ready(engine_path) and tensorrt_available()) else "numpy"
         self.fps_claim = None
         self.map_claim = None
+        self.iou_claim = None
 
     def reset(self) -> None:
         reset = getattr(self.inner, "reset", None)

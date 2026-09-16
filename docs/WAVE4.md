@@ -59,7 +59,11 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
   (`runtime.capture.downsample_rgb`). Prefer `stereo_left` /
   `stereo_right` + mono. GStreamer is **not** a dependency. No FPS.
 - `TrtDetector` / `TrtTerrainObserver` load-weights placeholders
-  (`perception.detector_backend: trt`). No engine shipped; `fps_claim: null`.
+  (`perception.detector_backend: trt`, `perception.terrain_mode: trt`).
+  Software train→ONNX exists (`jims-mower-train-terrain --onnx`); no
+  field-ready engine shipped; `fps_claim` / `iou_claim`: null.
+- `AppearanceDetector` (`detector_backend: appearance|onnx`) ignores
+  `context.obstacles`. MockDetector stays the gym default. No fake mAP.
 
 ## Ops / learning
 

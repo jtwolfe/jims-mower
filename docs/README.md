@@ -17,9 +17,9 @@ Wave notes and the on-box message contract live here.
 | [`UX_B.md`](UX_B.md) | FaultBus, dead-motor SOS, radio sim, `jims-mower-selftest` |
 | [`UX_C.md`](UX_C.md) | Thin owner app, YardProfile API, buy→mow (BT / optional Wi-Fi / LoRa) |
 | [`SCHEDULE.md`](SCHEDULE.md) | Weekly window actually arms / skips / stops jobs |
-| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order (§7 calibration bench, §8 dataset harness) |
+| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order (§9 train→ONNX software path; field IoU not shipped) |
 | [`CALIBRATION.md`](CALIBRATION.md) | Stereo / extrinsics bench: EXAMPLE vs MEASURED, tape procedure, gym lip / disparity checks |
-| [`DATASET.md`](DATASET.md) | CV-8 record + label protocol; FakeCsi → `jims_mower.dataset.v1` + train/val (no mAP) |
+| [`DATASET.md`](DATASET.md) | CV-8 record + label protocol; FakeCsi → `jims_mower.dataset.v1` + train/val; real labels required before any IoU |
 | [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) | Construction math, BOM classes, forward stereo + ESTOP sketch (no claimed runtime) |
 | [`ESTOP.md`](ESTOP.md) | Hardware paddle → FET/contactor, fuse map, reset; gym `HardwareEstop` |
 | [`SIM_TO_REAL.md`](SIM_TO_REAL.md) | Same ICD keys on-box; no gym renderer |

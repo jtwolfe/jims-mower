@@ -59,13 +59,18 @@ jims-mower-export-trt --dry-run --out /tmp/trt.json
 python scripts/export_tensorrt.py --dry-run
 ```
 
-No ONNX is in this repository. Point `--onnx` at **your** drain / lip /
-bank / grass head. The script prints a `trtexec` line and sets
-`fps_claim: null` / `map_claim: null`. Do not paste invented FPS.
+The gym can write a **sim_only** ONNX (`jims-mower-train-terrain --onnx`)
+when the optional `onnx` extra is installed. That file is a dev artifact,
+not a field head — do not commit large weights; do not quote IoU / FPS.
+Point `--onnx` at that export or **your** drain / lip / bank / grass
+head. The script prints a `trtexec` line and sets `fps_claim: null` /
+`map_claim: null` / `iou_claim: null`. Do not paste invented FPS.
 
-`TrtDetector` / `TrtTerrainObserver` (`perception.detector_backend: trt`)
-are the same contract: they load an engine **if you provide one**, otherwise
-they delegate to the mock / numpy heads. `SensorWatchdog` zeros wheels when
+`TrtDetector` / `TrtTerrainObserver` (`perception.terrain_mode: trt` or
+`perception.detector_backend: trt`) are the same contract: they load an
+engine **if you provide one**, otherwise they delegate to the mock /
+numpy / heuristic heads. Heuristic stays the live default.
+`SensorWatchdog` zeros wheels when
 IMU or camera **stamps** freeze (`runtime.watchdog.enabled`). Default gym
 tests leave it off. For the bench loop:
 

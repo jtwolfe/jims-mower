@@ -37,8 +37,9 @@ from jims_mower.geofence import GeofenceSpec, geofence_advice
 from jims_mower.maps import GrassCoverageMap, occupancy_from_detections
 from jims_mower.mapping import LoopClosureStub, PersistentOccupancy, fuse_height_rgb_tof
 from jims_mower.mission import apply_mission, load_mission, save_mission
-from jims_mower.perception import HandSignalCurriculum, MockDetector
+from jims_mower.perception import HandSignalCurriculum
 from jims_mower.perception.base import Detector, GrassObserver
+from jims_mower.perception.detect import detector_from_mode
 from jims_mower.perception.grass import grass_observer_from_mode
 from jims_mower.perception.semantic import semantic_raster
 from jims_mower.perception.temporal import DetectionTracklets
@@ -144,9 +145,16 @@ class MowerEnv(gym.Env):
         self.cameras: list[CameraSpec] = self.cfg.resolved_cameras()
         self.camera_index = {c.name: i for i, c in enumerate(self.cameras)}
         self._camera_adapter = None
-        inner_det: Detector = detector or MockDetector()
         backend = str(self.cfg.perception.detector_backend or "mock").strip().lower()
-        if backend in {"trt", "tensorrt"}:
+        if detector is not None:
+            inner_det: Detector = detector
+        else:
+            inner_det = detector_from_mode(
+                backend,
+                onnx_path=self.cfg.perception.onnx_path or None,
+                engine_path=self.cfg.perception.engine_path or None,
+            )
+        if backend in {"trt", "tensorrt"} and not isinstance(inner_det, TrtDetector):
             self.detector = TrtDetector(self.cfg.perception.engine_path or None, inner_det)
         else:
             self.detector = inner_det
@@ -157,9 +165,11 @@ class MowerEnv(gym.Env):
         inner_terrain = terrain_observer or terrain_observer_from_mode(
             self.cfg.perception.terrain_mode,
             weights_path=self.cfg.perception.weights_path or None,
+            onnx_path=self.cfg.perception.onnx_path or None,
+            engine_path=self.cfg.perception.engine_path or None,
             temporal=self.cfg.perception.temporal or None,
         )
-        if backend in {"trt", "tensorrt"} or self.cfg.perception.engine_path:
+        if self.cfg.perception.engine_path and not isinstance(inner_terrain, TrtTerrainObserver):
             self.terrain_observer = TrtTerrainObserver(
                 self.cfg.perception.engine_path or None,
                 inner=inner_terrain,

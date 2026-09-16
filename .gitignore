@@ -41,6 +41,10 @@ configs/orin/extrinsics_stereo_measured.yaml
 
 # Demo / local artifacts (keep the package configs/)
 /artifacts/
+/models/*.onnx
+/models/*.npz
+/models/*.engine
+/models/*.json
 /demo_out/
 /dataset_out/
 /farm_out/

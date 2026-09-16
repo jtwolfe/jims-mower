@@ -5,11 +5,17 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Protocol, Union, runtime_checkable
+from typing import Any, Optional, Protocol, Union, runtime_checkable
 
 import numpy as np
 
-from jims_mower.constants import GRAVITY_MPS2, HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_STEEP
+from jims_mower.constants import (
+    GRAVITY_MPS2,
+    HAZARD_DRAIN,
+    HAZARD_DRAIN_EDGE,
+    HAZARD_STEEP,
+    TERRAIN_MODES,
+)
 from jims_mower.perception.cv_terrain import (
     classify_structure_rgb,
     classify_terrain_rgb,
@@ -372,14 +378,17 @@ class LearnedTerrainObserver:
         max_range_m: float = 9.0,
         temporal: bool = True,
         stride: int = 1,
+        source: str = "learned",
+        model: Optional[Any] = None,
     ) -> None:
         self.weights_path = Path(weights_path) if weights_path else None
         self.radius_m = radius_m
         self.steep_rad = steep_rad
         self.max_range_m = max_range_m
         self.stride = max(1, int(stride))
-        self._model: Optional[TerrainMLP] = None
-        if self.weights_path is not None:
+        self.source_name = str(source)
+        self._model: Optional[Any] = model
+        if self._model is None and self.weights_path is not None:
             self._model = load_weights(self.weights_path)
         self._filter = HazardHysteresis() if temporal else None
         self._elevation: Optional[np.ndarray] = None
@@ -500,7 +509,7 @@ class LearnedTerrainObserver:
             self._elevation.copy(),
             self._slope.copy(),
             self._hazard.copy(),
-            source="learned",
+            source=self.source_name,
             confidence=self._confidence.copy(),
             elevation_prior=None if self._prior is None else self._prior.copy(),
         )
@@ -568,24 +577,145 @@ def _tof_from_context(context: PerceptionContext) -> Optional[np.ndarray]:
     return arr
 
 
-TERRAIN_MODES = frozenset({"oracle", "blind", "heuristic", "learned"})
-
-
 def default_weights_path() -> Path:
     return Path(__file__).resolve().parents[1] / "data" / "terrain_mlp.npz"
+
+
+def default_onnx_path() -> Optional[Path]:
+    from jims_mower.perception.onnx_io import resolve_onnx_path
+
+    return resolve_onnx_path()
+
+
+class OnnxTerrainObserver:
+    """Load a sim-only terrain ONNX when onnxruntime is present.
+
+    Falls back to numpy ``.npz`` weights, then the RGB/ToF heuristic.
+    Never claims IoU. Heuristic remains the safe live default unless a
+    measured engine / ONNX is actually configured and loadable.
+    """
+
+    def __init__(
+        self,
+        onnx_path: Optional[Union[str, Path]] = None,
+        *,
+        weights_path: Optional[Union[str, Path]] = None,
+        radius_m: float = 1.2,
+        steep_rad: float = 0.30,
+        max_range_m: float = 9.0,
+        temporal: bool = True,
+        stride: int = 1,
+    ) -> None:
+        from jims_mower.perception.onnx_io import (
+            OnnxMLP,
+            load_onnx_session,
+            onnxruntime_available,
+            resolve_onnx_path,
+        )
+
+        self.onnx_path = str(onnx_path) if onnx_path else ""
+        self.weights_path = str(weights_path) if weights_path else ""
+        self.iou_claim = None
+        self.map_claim = None
+        self.fps_claim = None
+        resolved = resolve_onnx_path(onnx_path)
+        session = None
+        if resolved is not None and onnxruntime_available():
+            session = load_onnx_session(resolved)
+        npz = Path(weights_path) if weights_path else None
+        if npz is not None and not npz.is_file():
+            npz = None
+        if session is not None:
+            self.inner: TerrainObserver = LearnedTerrainObserver(
+                model=OnnxMLP(session),
+                temporal=temporal,
+                stride=stride,
+                radius_m=radius_m,
+                steep_rad=steep_rad,
+                max_range_m=max_range_m,
+                source="onnx",
+            )
+            self.backend = "onnx"
+            self.source_name = "onnx"
+        elif npz is not None:
+            self.inner = LearnedTerrainObserver(
+                npz,
+                temporal=temporal,
+                stride=stride,
+                radius_m=radius_m,
+                steep_rad=steep_rad,
+                max_range_m=max_range_m,
+                source="learned",
+            )
+            self.backend = "numpy"
+            self.source_name = "learned"
+        else:
+            self.inner = HeuristicTerrainObserver(
+                radius_m=radius_m,
+                steep_rad=steep_rad,
+                max_range_m=max_range_m,
+                temporal=bool(temporal),
+            )
+            self.backend = "heuristic"
+            self.source_name = "heuristic"
+
+    def reset(self) -> None:
+        reset = getattr(self.inner, "reset", None)
+        if callable(reset):
+            reset()
+
+    def estimate(
+        self,
+        images: dict[str, np.ndarray],
+        imu: np.ndarray,
+        gps: np.ndarray,
+        context: PerceptionContext,
+    ) -> TerrainEstimate:
+        est = self.inner.estimate(images, imu, gps, context)
+        est.source = self.source_name
+        return est
+
+
+def normalize_terrain_mode(raw: Optional[str], *, default: str = "heuristic") -> str:
+    key = (raw or default).strip().lower()
+    if key not in TERRAIN_MODES:
+        allowed = "heuristic|oracle|blind|learned|onnx|trt"
+        raise ValueError(f"terrain_observer must be {allowed}; got {raw!r}")
+    return key
 
 
 def terrain_observer_from_mode(
     mode: str,
     *,
     weights_path: Optional[Union[str, Path]] = None,
+    onnx_path: Optional[Union[str, Path]] = None,
+    engine_path: Optional[Union[str, Path]] = None,
     temporal: Optional[bool] = None,
 ) -> TerrainObserver:
-    key = (mode or "heuristic").strip().lower()
+    key = normalize_terrain_mode(mode)
     if key == "blind":
         return BlindTerrainObserver()
     if key == "oracle":
         return OracleTerrainObserver()
+    if key == "onnx":
+        path = Path(onnx_path) if onnx_path else None
+        if path is None and weights_path and str(weights_path).lower().endswith(".onnx"):
+            path = Path(weights_path)
+            weights_path = None
+        use_temporal = True if temporal is None else bool(temporal)
+        return OnnxTerrainObserver(
+            path,
+            weights_path=weights_path,
+            temporal=use_temporal,
+        )
+    if key == "trt":
+        from jims_mower.perception.trt import TrtTerrainObserver
+
+        use_temporal = True if temporal is None else bool(temporal)
+        inner: Optional[TerrainObserver] = None
+        if weights_path and Path(weights_path).is_file():
+            inner = LearnedTerrainObserver(weights_path, temporal=use_temporal)
+        return TrtTerrainObserver(engine_path, inner=inner, weights_path=weights_path)
     if key == "learned":
         path = Path(weights_path) if weights_path else default_weights_path()
         if not path.is_file():

@@ -99,9 +99,13 @@ curriculum:
 perception:
   # heuristic: RGB + ToF drain/bank maps (demo default). oracle: god-view
   # for training. blind: empty stub. learned: exporter-trained numpy stub.
+  # onnx / trt: load a sim_only graph / engine if present, else fall back.
+  # Not field-ready. iou_claim / map_claim / fps_claim stay null.
   terrain_mode: heuristic
   weights_path: ""
+  onnx_path: ""
   temporal: false
+  detector_backend: mock
 
 planner:
   # Coverage planner + controller. Steep below max_climb is a slow corridor;

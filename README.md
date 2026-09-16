@@ -251,7 +251,9 @@ flowchart LR
    `hazard` (`0` free, `1` steep, `2` drain lip, `3` channel). Demo default
    is the RGB+ToF heuristic (colour/geometry cues from the renderer’s ditch
    shading, multi-camera BEV fuse onto a ground plane). `learned` loads a
-   numpy stub trained on exporter labels. Oracle is training-only.
+   numpy stub trained on exporter labels. `onnx` / `trt` load a sim_only
+   graph or engine when you provide one, else fall back. Oracle is
+   training-only. No published IoU.
    On the robot, replace the classifier + back-project with your
    segmentation / depth head.
 2. **Costmap** — free = 1; steep below `planner.max_climb_slope_rad` = slow
@@ -409,17 +411,26 @@ Sensor noise (`sensors.imu` / `sensors.gps` / `sensors.tof`): white noise
 stds, IMU accel bias (drawn once per episode), GPS dropout probability.
 
 `perception.terrain_mode`: `heuristic` (demo default), `oracle` (training
-god-view), `learned` (numpy stub + `perception.weights_path`), or `blind`
-(empty stub). Override from the CLI with `--terrain-observer`.
+god-view), `learned` (numpy stub + `perception.weights_path`), `onnx`
+(`perception.onnx_path`, onnxruntime if installed), `trt` (engine if
+present), or `blind` (empty stub). Override from the CLI with
+`--terrain-observer`. Heuristic stays the live default. Sim ONNX is
+`sim_only` / not field-ready. `iou_claim` / `map_claim` / `fps_claim`
+stay null.
 
 Train the stub from an export (CPU, no torch):
 
 ```bash
-python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --out dataset_out
-python scripts/train_terrain_seg.py --dataset dataset_out --out terrain_mlp.npz
+python -m jims_mower.export --adapter fake_csi --steps 8 --seed 7 --cameras 4 --out dataset_out
+jims-mower-train-terrain --dataset dataset_out --out artifacts/terrain_mlp.npz \
+  --onnx artifacts/terrain_seg.onnx
+jims-mower-export-trt --onnx artifacts/terrain_seg.onnx --dry-run
 # Domain-rand training dump (lighting / dirt / vignette). See docs/WAVE2B.md.
 python -m jims_mower.export --steps 8 --seed 7 --cameras 4 --domain-rand --out dataset_dr
 ```
+
+ONNX export needs `pip install -e ".[onnx]"`. Without that extra, the
+`.npz` still writes and tests skip the load with a clear mark.
 
 Coverage planner (`planner`):
 
@@ -461,6 +472,7 @@ env = MowerEnv(
 )
 # After scripts/train_terrain_seg.py:
 # env = MowerEnv(terrain_observer=LearnedTerrainObserver("terrain_mlp.npz"))
+# env = MowerEnv(config={"perception": {"terrain_mode": "onnx", "onnx_path": "artifacts/terrain_seg.onnx"}})
 ```
 
 A real onboard detector should implement `detect(images, context) -> list[Detection]`
@@ -525,8 +537,9 @@ See [`docs/JETSON.md`](docs/JETSON.md) and
 [`docker/Dockerfile.aarch64`](docker/Dockerfile.aarch64) for WAVE 3B
 packaging notes. Fake I2C / UART / CSI drivers and a stdlib
 multiprocessing bridge live in `jims_mower.runtime`. Do **not** invent
-onboard FPS. `jims-mower-export-trt --dry-run` is a TensorRT command
-placeholder (`fps_claim: null`).
+onboard FPS. `jims-mower-train-terrain --onnx` plus
+`jims-mower-export-trt --dry-run` is the software train→ONNX→TRT path
+(`iou_claim` / `fps_claim`: null; not a field head).
 
 ## Tests
 
@@ -537,7 +550,7 @@ pytest
 Unit tests cover kinematics (including zero-turn and slope attitude), drain
 and tip-over hazards, IMU/GPS observation shapes, the trimmer interlock,
 maps, camera math, the mock detector, RGB terrain classification and
-back-projection, terrain observers (oracle / heuristic / learned / blind),
+back-projection, terrain observers (oracle / heuristic / learned / onnx / trt / blind),
 BEV fuse, hazard hysteresis, person/dog tracklets, the uncertainty-aware
 costmap and coverage planner (channels forbidden), the controller (slows
 on steep / stops on tip / replans when the vision map grows), the EKF pose
@@ -555,8 +568,8 @@ TensorRT placeholder. GitHub Actions PR CI runs the same suite headless
 on Python 3.10–3.12 plus short terrain-policy, suburban, geofence,
 mission, record/replay, BC collect/train, numpy RL smoke, incident
 viewer, telemetry, owner overlay, bridge-replay, design-study dry-run,
-and TensorRT-placeholder smokes (heuristic default). Torch and SB3 are
-optional extras and are not installed in CI. The full seed×scenario
+TensorRT-placeholder, and terrain-train-stub smokes (heuristic default).
+Torch, ONNX, and SB3 are optional extras and are not installed in CI. The full seed×scenario
 farm is a separate
 [manual / nightly workflow](.github/workflows/farm.yml), not PR CI.
 Design-study **live** sweeps (`jims-mower-study` without `--dry-run`)
@@ -572,7 +585,7 @@ are laptop / overnight jobs.
 | Overnight farm | `python -m jims_mower.farm` (exit 1 if tip/drain gates fail) |
 | BEV debugger | [`src/jims_mower/bev.py`](src/jims_mower/bev.py) → `bev_final.png` |
 | ICD / roadmap | [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md) |
-| WAVE 2B train stub | [`docs/WAVE2B.md`](docs/WAVE2B.md), `scripts/train_terrain_seg.py` |
+| WAVE 2B / §9 train → ONNX | [`docs/WAVE2B.md`](docs/WAVE2B.md), `jims-mower-train-terrain --onnx` |
 
 Exporter labels are **oracle** height-field / grass rasters. The env
 observer can still be heuristic. Dataset folder layout is written to

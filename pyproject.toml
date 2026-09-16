@@ -35,6 +35,10 @@ dev = [
 torch = [
     "torch>=2.1",
 ]
+onnx = [
+    "onnx>=1.15",
+    "onnxruntime>=1.17",
+]
 rl = [
     "stable-baselines3>=2.3",
     "torch>=2.1",
