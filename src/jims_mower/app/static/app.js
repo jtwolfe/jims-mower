@@ -348,6 +348,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const overlay = overlayFrom(st, live);
     const raw = (live && live.mode_banner) || (st && st.mode_banner) || overlay.mode || {};
     const phase = raw.phase || overlay.phase || (live && live.phase) || ((st && st.state) || {}).phase || "idle";
+    const job = raw.job_state || (live && live.job_state) || ((st && st.state) || {}).job_state || "idle";
+    if (job === "idle" && phase !== "complete" && phase !== "teach") {
+      return { label: "Ready", tone: "idle", kind: "idle", hold: null, phase, job_state: job };
+    }
     const fallback = MODE_COPY[phase] || MODE_COPY.idle;
     return {
       label: raw.label || fallback.label,
@@ -355,6 +359,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       kind: raw.kind || fallback.kind,
       hold: raw.hold || null,
       phase,
+      job_state: job,
     };
   }
 

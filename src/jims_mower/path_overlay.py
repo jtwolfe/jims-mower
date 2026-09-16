@@ -127,8 +127,19 @@ def mode_banner_for(phase: str, job_state: str = "running") -> dict[str, Any]:
     underlying phase.
     """
     key = normalize_phase(phase, job_state)
+    state = str(job_state or "").strip().lower()
+    if state == "idle" and key not in {"complete", "teach"}:
+        row = MODE_ROWS["idle"]
+        return {
+            "label": row["label"],
+            "tone": row["tone"],
+            "kind": row["kind"],
+            "hold": None,
+            "phase": key,
+            "job_state": "idle",
+        }
     row = MODE_ROWS.get(key) or MODE_ROWS["idle"]
-    hold = HOLD_LABELS.get(str(job_state or "").strip().lower())
+    hold = HOLD_LABELS.get(state)
     return {
         "label": row["label"],
         "tone": row["tone"],

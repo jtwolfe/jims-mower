@@ -72,6 +72,11 @@ def test_mode_banner_mapping_vs_mowing() -> None:
     assert hold["label"] == "Map ready — review"
     assert hold["hold"] == "Hold"
 
+    idle = mode_banner_for("calibrate_boundary", "idle")
+    assert idle["label"] == "Ready"
+    assert idle["kind"] == "idle"
+    assert mode_banner_for("complete", "idle")["label"] == "Done"
+
 
 def test_progress_kind_swaps_map_vs_cut() -> None:
     assert progress_kind_for("explore") == "mapping"
