@@ -126,9 +126,11 @@ def test_mesh_from_observed_grows_and_leaves_holes() -> None:
         stride=1,
     )
     assert grown.triangle_count < full.triangle_count
-    ys = grown.positions[:, 1]
-    # Observed bump must lift; unknown verts stay at the pad.
+    # Used vertices sit on observed elevation, not a z=0 unknown pad.
+    used = np.unique(grown.indices)
+    ys = grown.positions[used, 1]
     assert float(ys.max()) > 0.25
+    assert float(ys.min()) > -0.05
 
 
 def test_mesh_from_observed_pond_and_shed_relief() -> None:

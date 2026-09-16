@@ -244,11 +244,13 @@ def mesh_from_observed(
     quads: list[int] = []
     for r in range(rr - 1):
         for c in range(cc - 1):
+            # Fully observed quads only — mixed cells would skirt to the
+            # unknown pad and look like painted holes / icicles.
             if not (
                 seen[r, c]
-                or seen[r, c + 1]
-                or seen[r + 1, c]
-                or seen[r + 1, c + 1]
+                and seen[r, c + 1]
+                and seen[r + 1, c]
+                and seen[r + 1, c + 1]
             ):
                 continue
             i00 = r * cc + c

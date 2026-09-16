@@ -250,7 +250,7 @@ def write_viewer_bundle(
         "radio": {"placeholder": True, "label": "radio", "value": None},
         "not_a_benchmark": True,
         "note": (
-            "Live owner session — fog-of-war over unknown cells, no mAP/FPS."
+            "Live owner session — growing observed terrain + fog. True elev is debug. No mAP/FPS."
             if live
             else "World Viewer bundle — mesh + cameras from sim, no mAP/FPS."
         ),
