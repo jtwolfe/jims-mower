@@ -17,6 +17,7 @@ injector for gym + runtime:
 | `imu_freeze` | Hold the last IMU sample |
 | `gnss_dropout` | Force `obs["gps"][3] = 0` (unifies the existing `gps.dropout_prob` bit) |
 | `stuck` | Advisory only — wheels still work |
+| `hw_estop` / `paddle` | Hardware paddle latch (`HardwareEstop`). Not FaultBus. Rails dead until `hw_reset`. |
 
 A **dead drive motor** zeros *both* wheels and the trimmer so a live
 wheel cannot drag the chassis across a drain. That is **not** the WAVE

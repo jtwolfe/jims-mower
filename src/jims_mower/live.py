@@ -98,6 +98,7 @@ OWNER_COPY = {
     "teach": "Teaching the keep-in — drive the perimeter or edit vertices, then save.",
     "paused": "Paused.",
     "estop": "E-STOP — hold.",
+    "hw_estop": "Hardware E-STOP — rails dead. Reset the paddle.",
     "hold": "Hold.",
     "calibrate_boundary": "Calibrating boundary…",
     "explore": "Exploring unknown yard…",
@@ -122,6 +123,10 @@ INJECT_ALIASES = {
     "immobilised": "motor_left",
     "motor": "motor_left",
     "stuck": "stuck",
+    "paddle": "hw_estop",
+    "hw_estop": "hw_estop",
+    "hardware_estop": "hw_estop",
+    "estop_paddle": "hw_estop",
 }
 
 SPEED_ALIASES = {
@@ -170,10 +175,13 @@ def owner_copy_for(
     taught: bool = False,
     fence_unusable: bool = False,
     done: bool = False,
+    hw_estop: bool = False,
 ) -> str:
+    blob = fault if isinstance(fault, dict) else None
+    if hw_estop or (blob and str(blob.get("code") or "") == "HW_ESTOP"):
+        return OWNER_COPY["hw_estop"]
     if job_state == "estop":
         return OWNER_COPY["estop"]
-    blob = fault if isinstance(fault, dict) else None
     if blob:
         code = str(blob.get("code") or "")
         if blob.get("retrieve") or code == "FAULT_IMMOBILISED":
@@ -222,7 +230,7 @@ def robot_status_for(
         if not isinstance(item, dict):
             continue
         code = str(item.get("code") or "")
-        if item.get("retrieve") or code == "FAULT_IMMOBILISED":
+        if item.get("retrieve") or code in {"FAULT_IMMOBILISED", "HW_ESTOP"}:
             return "fault"
     if job_state == "estop":
         return "fault"
@@ -671,6 +679,16 @@ class LiveSession:
             self.job_state = "estop"
             if self.policy is not None:
                 self.policy.request_estop("owner estop")
+        elif key == "hw_estop":
+            if self.env is not None:
+                self.env.hit_hw_estop(str(kwargs.get("reason") or "owner paddle"))
+            self.info = dict(self.info or {})
+            self.info.update(self.env.hw_estop.as_info() if self.env is not None else {})
+        elif key == "hw_reset":
+            if self.env is not None:
+                self.env.reset_hw_estop()
+            self.info = dict(self.info or {})
+            self.info.update(self.env.hw_estop.as_info() if self.env is not None else {})
         elif key == "hold":
             if self.job_state == "running":
                 self.job_state = "hold"
@@ -708,13 +726,33 @@ class LiveSession:
         if self.env is None:
             return
         self.env.inject_fault(resolved, mode=mode)
-        blob = self.env.fault_bus.as_info((self.info or {}).get("pose") if self.info else None)
         self.info = dict(self.info or {})
+        self.info.update(self.env.hw_estop.as_info())
+        blob = self.env.fault_bus.as_info((self.info or {}).get("pose") if self.info else None)
         self.info["fault"] = blob
-        self._fault_overlay = blob
+        hw_fault = self.env.hw_estop.as_fault()
+        self._fault_overlay = hw_fault or blob
+
+    def _hw_estop_latched(self) -> bool:
+        if self.env is not None and bool(getattr(self.env.hw_estop, "latched", False)):
+            return True
+        info = self.info if isinstance(self.info, dict) else {}
+        return bool(info.get("hw_estop") or info.get("hw_estop_latched"))
 
     def _current_fault(self) -> dict[str, Any]:
-        blob = (self.info or {}).get("fault") if isinstance(self.info, dict) else None
+        if self.env is not None:
+            hw = self.env.hw_estop.as_fault()
+            if hw is not None:
+                return hw
+        info = self.info if isinstance(self.info, dict) else {}
+        if info.get("hw_estop"):
+            return {
+                "code": "HW_ESTOP",
+                "detail": str(info.get("hw_estop_reason") or "paddle latched — rails dead"),
+                "retrieve": False,
+                "kind": "hardware",
+            }
+        blob = info.get("fault") if isinstance(info, dict) else None
         if isinstance(blob, dict) and str(blob.get("code") or "ok") not in {"", "ok"}:
             return blob
         if isinstance(self._fault_overlay, dict) and str(self._fault_overlay.get("code") or "ok") not in {"", "ok"}:
@@ -722,18 +760,38 @@ class LiveSession:
         return {}
 
     def _faults_payload(self, fault: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not isinstance(fault, dict):
-            return []
-        code = str(fault.get("code") or "ok")
-        if not code or code == "ok":
-            return []
-        return [
-            {
-                "code": code,
-                "detail": str(fault.get("reason") or fault.get("component") or code),
-                "retrieve": bool(fault.get("retrieve")),
-            }
-        ]
+        items: list[dict[str, Any]] = []
+        if isinstance(fault, dict):
+            code = str(fault.get("code") or "ok")
+            if code and code != "ok":
+                items.append(
+                    {
+                        "code": code,
+                        "detail": str(
+                            fault.get("detail")
+                            or fault.get("reason")
+                            or fault.get("component")
+                            or code
+                        ),
+                        "retrieve": bool(fault.get("retrieve")),
+                        "kind": str(fault.get("kind") or ("hardware" if code == "HW_ESTOP" else "software")),
+                    }
+                )
+        if self._hw_estop_latched() and not any(f.get("code") == "HW_ESTOP" for f in items):
+            reason = None
+            if self.env is not None:
+                reason = self.env.hw_estop.reason
+            if not reason and isinstance(self.info, dict):
+                reason = self.info.get("hw_estop_reason")
+            items.append(
+                {
+                    "code": "HW_ESTOP",
+                    "detail": str(reason or "paddle latched — rails dead"),
+                    "retrieve": False,
+                    "kind": "hardware",
+                }
+            )
+        return items
 
     def _apply_yard(self, yard: str) -> None:
         name = str(yard).strip()
@@ -1248,9 +1306,13 @@ class LiveSession:
                 "phase": "idle",
                 "phase_label": "IDLE",
                 "job_state": self.job_state,
-                "owner_copy": owner_copy_for(self.job_state, "idle", fault),
+                "owner_copy": owner_copy_for(
+                    self.job_state, "idle", fault, hw_estop=self._hw_estop_latched()
+                ),
                 "radio_path": radio_path,
                 "faults": self._faults_payload(fault),
+                "hw_estop": self._hw_estop_latched(),
+                "estop_kind": "hardware" if self._hw_estop_latched() else None,
                 "paired": bool(self.paired),
                 "done": False,
                 "not_a_benchmark": True,
@@ -1313,6 +1375,7 @@ class LiveSession:
                 taught=self.owner_taught,
                 fence_unusable=fence_unusable,
                 done=self.done,
+                hw_estop=self._hw_estop_latched(),
             ),
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
@@ -1353,6 +1416,16 @@ class LiveSession:
             "trimmer_on": bool((self.info or {}).get("trimmer_enabled")),
             "trimmer_allowed": bool(status["trimmer_allowed"]),
             "estop": bool(self.estop or status["phase"] == "safe"),
+            "hw_estop": self._hw_estop_latched(),
+            "estop_kind": (
+                "both"
+                if self._hw_estop_latched() and (self.estop or status["phase"] == "safe")
+                else "hardware"
+                if self._hw_estop_latched()
+                else "software"
+                if (self.estop or status["phase"] == "safe")
+                else None
+            ),
             "safe_mode": getattr(policy.safe, "mode", "run"),
             "observed_url": f"/api/live/observed.png?v={self._map_seq}",
             "fog_url": f"/api/live/fog.png?v={self._map_seq}",

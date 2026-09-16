@@ -24,6 +24,7 @@ def test_run_selftest_passes() -> None:
     assert "imu_still" in names
     assert "cam_frame_entropy" in names
     assert "dead_motor_no_drag" in names
+    assert "hw_estop_rails" in names
 
 
 def test_selftest_cli(tmp_path: Path) -> None:

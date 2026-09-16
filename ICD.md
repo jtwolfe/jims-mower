@@ -161,6 +161,13 @@ This is a **software latch**, not a claimed hardware SIL rating.
 `go` clears limp/safe only. The ICD action is still `Box(3,)`; the machine
 rewrites the command the controller sends.
 
+**Hardware ESTOP** is a separate latch (`HardwareEstop` on `MowerEnv`).
+When the sim paddle is hit, traction + trimmer **rails** go dead
+underneath the policy. `info["hw_estop"]` / live `estop_kind` distinguish
+it from software ESTOP. `clear()` / owner Start do **not** restore
+rails — only `env.reset_hw_estop()` / live `hw_reset`. Not a claimed
+SIL rating and not a physical paddle. See [`docs/ESTOP.md`](docs/ESTOP.md).
+
 Contract message: `SafeState` (`jims_mower.contract`) — `mode`, `scale`,
 `hold`, `trimmer_allowed`, `help_requested`.
 
@@ -212,7 +219,8 @@ Not observation keys. Loaded via [`scenarios.load_source`](src/jims_mower/scenar
   `jims-mower-mission` write map + uncut + pose (`jims_mower.mission.v1`)
 - `sensors.tof.count` — `0` / `2` / `4` downward corners (unused stay 0)
 - `runtime.enabled` — Orin-class battery / thermal limp stub (off by default)
-- `runtime.watchdog.enabled` — stop wheels if IMU / vision frames freeze
+- `runtime.watchdog.enabled` — stop wheels if IMU / vision **stamps** freeze (off by default; bench overlay `configs/orin/bench.yaml`)
+- `info["hw_estop"]` — hardware paddle latch (rails dead; not software ESTOP)
 - `weather.wet` — extra steep-corridor cost (`planner.wet_slope_extra`)
 - `season` — `none` / `long_grass` / `leaf_clutter`
 - dataset export `meta.json` **requires** `schema: jims_mower.dataset.v1`

@@ -158,6 +158,38 @@ def check_cam_entropy(env: MowerEnv, *, min_entropy: float = 1.0) -> dict[str, A
     }
 
 
+def check_hw_estop_rails(env: MowerEnv) -> dict[str, Any]:
+    """Paddle hit drops traction + trimmer rails; software ESTOP clear does not restore."""
+    obs, info = env.reset(seed=7)
+    start = (float(info["pose"]["x"]), float(info["pose"]["y"]))
+    env.hit_hw_estop("selftest paddle")
+    last_info = info
+    for _ in range(5):
+        obs, _rew, _term, _trunc, last_info = env.step(
+            np.array([0.9, 0.9, 1.0], dtype=np.float32)
+        )
+    after = (float(last_info["pose"]["x"]), float(last_info["pose"]["y"]))
+    drift = math.hypot(after[0] - start[0], after[1] - start[1])
+    ok = (
+        bool(last_info.get("hw_estop"))
+        and drift < 1e-4
+        and not bool(last_info.get("trimmer_enabled"))
+        and bool(env.hw_estop.latched)
+    )
+    return {
+        "name": "hw_estop_rails",
+        "ok": ok,
+        "detail": (
+            "paddle latched, rails dead, dummy load did not move"
+            if ok
+            else "hardware ESTOP did not drop rails"
+        ),
+        "drift_m": drift,
+        "hw_estop": bool(last_info.get("hw_estop")),
+        "not_field_paddle": True,
+    }
+
+
 def run_selftest(
     config: Optional[Union[str, Path, dict, EnvConfig]] = None,
     *,
@@ -172,6 +204,7 @@ def run_selftest(
             check_dead_motor_no_drag(env),
             check_imu_still(env),
             check_cam_entropy(env),
+            check_hw_estop_rails(env),
         ]
     finally:
         env.close()

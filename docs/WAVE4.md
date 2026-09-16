@@ -46,8 +46,9 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
 
 ## Orin
 
-- `SensorWatchdog` zeros wheels if IMU / vision frames freeze
-  (`runtime.watchdog.enabled`, off by default).
+- `SensorWatchdog` zeros wheels if IMU / vision **stamps** freeze
+  (`runtime.watchdog.enabled`, off by default). Bench overlay:
+  [`configs/orin/bench.yaml`](../configs/orin/bench.yaml).
 - [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml)
   — same `CameraSpec` as the gym.
 - `GstNvmmAdapter` documented stub; CI uses `FakeGstAdapter`. GStreamer is

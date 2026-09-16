@@ -132,6 +132,8 @@ See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
       near-misses (`jims-mower-telemetry`)
 - [x] ESTOP / limp / safe-state machine used by the controller; ICD
       software e-stop contract
+- [x] Hardware ESTOP **sim + doc** (`HardwareEstop` rail latch; field
+      paddle test still needed) — PRODUCT_TO_HARDWARE §3
 - [x] Owner UX stub — phone-sized HTML overlay of yard + geofence + plan
 - [x] ROADMAP checkboxes for the items above
 

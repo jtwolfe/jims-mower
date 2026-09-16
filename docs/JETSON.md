@@ -62,7 +62,20 @@ bank / grass head. The script prints a `trtexec` line and sets
 `TrtDetector` / `TrtTerrainObserver` (`perception.detector_backend: trt`)
 are the same contract: they load an engine **if you provide one**, otherwise
 they delegate to the mock / numpy heads. `SensorWatchdog` zeros wheels when
-IMU or camera frames freeze (`runtime.watchdog.enabled`).
+IMU or camera **stamps** freeze (`runtime.watchdog.enabled`). Default gym
+tests leave it off. For the bench loop:
+
+```yaml
+runtime:
+  watchdog:
+    enabled: true
+    imu_stall_s: 0.40
+    vision_stall_s: 0.40
+```
+
+or load [`configs/orin/bench.yaml`](../configs/orin/bench.yaml). Fake
+adapters are fine; do not claim real CSI/IMU. Hardware ESTOP is a
+separate rail latch (`HardwareEstop`) — see [`ESTOP.md`](ESTOP.md).
 
 Example body-frame extrinsics: [`configs/orin/extrinsics_6cam.yaml`](../configs/orin/extrinsics_6cam.yaml).
 

@@ -114,6 +114,17 @@ def test_watchdog_stops_frozen_imu() -> None:
     assert float(np.max(np.abs(held))) == 0.0
 
 
+def test_watchdog_stops_frozen_vision_stamp() -> None:
+    wd = SensorWatchdog(enabled=True, imu_stall_s=9.0, vision_stall_s=0.15, dt=0.10)
+    imu = np.array([0.0, 0.0, 9.81, 0.0, 0.1, 0.0], dtype=np.float32)
+    cams = {"front": np.ones((4, 4, 3), dtype=np.uint8)}
+    wd.observe(imu, cams, imu_stamp_s=0.0, vision_stamp_s=1.0)
+    wd.observe(imu * 2, cams, imu_stamp_s=0.1, vision_stamp_s=1.0)
+    wd.observe(imu * 3, cams, imu_stamp_s=0.2, vision_stamp_s=1.0)
+    assert wd.stalled
+    assert wd.reason == "vision_stall"
+
+
 def test_gstreamer_stub_not_required() -> None:
     assert gstreamer_available() is False
     real = GstNvmmAdapter()

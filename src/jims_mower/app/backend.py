@@ -152,6 +152,16 @@ def _ux_b_faults(info: Optional[dict[str, Any]], extra: list[dict[str, Any]]) ->
                     "retrieve": bool(blob.get("retrieve")),
                 }
             )
+    if isinstance(info, dict) and (info.get("hw_estop") or info.get("hw_estop_latched")):
+        if not any(f.get("code") == "HW_ESTOP" for f in faults):
+            faults.append(
+                {
+                    "code": "HW_ESTOP",
+                    "detail": str(info.get("hw_estop_reason") or "paddle latched — rails dead"),
+                    "retrieve": False,
+                    "kind": "hardware",
+                }
+            )
     return faults
 
 

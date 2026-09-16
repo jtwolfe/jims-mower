@@ -498,11 +498,17 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const faults = st.faults || live.faults || [];
     const sos = faults.some((f) => f.retrieve || f.code === "FAULT_IMMOBILISED");
     const stuck = faults.some((f) => f.code === "STUCK");
-    const banner = sos
+    const hwEstop = faults.some((f) => f.code === "HW_ESTOP") || live.hw_estop;
+    const swEstop = !!(st.state && st.state.mission === "estop") || live.estop;
+    const banner = hwEstop
+      ? `<div class="fault-banner"><strong>Hardware E-STOP</strong><span>Paddle latched. Traction and trimmer rails are dead. Software Start does not restore them — reset the paddle.</span></div>`
+      : sos
       ? `<div class="fault-banner"><strong>SOS — immobilised</strong><span>Dead motor. Retrieve the mower. Wheels and trimmer are held.</span></div>`
       : stuck
         ? `<div class="fault-banner"><strong>Stuck</strong><span>Recovery reverse / pivot / help still runs. Not a retrieve.</span></div>`
-        : "";
+        : swEstop
+          ? `<div class="fault-banner"><strong>Software E-STOP</strong><span>Owner latch. Zeros wheel and trimmer commands until you Start again. Not the hardware paddle.</span></div>`
+          : "";
     const list = faults.length
       ? faults.map((f) => `<div class="fault-banner"><strong>${f.code}</strong><span>${f.detail || ""}</span></div>`).join("")
       : `<div class="card"><strong>All clear</strong>No latched owner faults.</div>`;
@@ -512,17 +518,21 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       ${list}
       <p class="owner-copy">${st.owner_copy || live.owner_copy || ""}</p>
       <button class="big-sos" id="estop">ESTOP</button>
-      <p class="sub" style="text-align:center">Software latch · zeros wheels and trimmer until you Start again</p>
+      <p class="sub" style="text-align:center">Software latch · zeros commands until Start. Hardware paddle is a separate rail kill.</p>
       <button class="btn ghost" id="resume">Resume (start)</button>
       ${isLive() ? `<div class="row">
         <button class="btn ghost" id="inj-stuck">Inject stuck</button>
         <button class="btn ghost" id="inj-sos">Inject dead-motor SOS</button>
+        <button class="btn danger" id="inj-paddle">Hit paddle (sim)</button>
+        <button class="btn ghost" id="hw-reset">Reset paddle</button>
       </div>` : ""}`;
     $("#estop").onclick = () => command("estop", "sos");
     $("#resume").onclick = () => command("start");
     if (isLive()) {
       $("#inj-stuck").onclick = () => liveControl("inject", { kind: "stuck" });
       $("#inj-sos").onclick = () => liveControl("inject", { kind: "sos" });
+      $("#inj-paddle").onclick = () => liveControl("hw_estop");
+      $("#hw-reset").onclick = () => liveControl("hw_reset");
     }
   }
 
