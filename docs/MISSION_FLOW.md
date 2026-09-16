@@ -131,15 +131,23 @@ card shows map / planned / cut / skips / duration, then idle with the
 yard still loaded. Full acre mow to completion is still a manual
 `acre_yard` run, not CI.
 
-Owner bar: Start / Pause / Resume, speed `1× 2× 5× max`, **Start mow**
-/ Re-explore at MAP READY, ESTOP. Phone adds radio-path chips (BT teach
-/ Wi-Fi map / LoRa sparse, simulated) and stuck vs dead-motor SOS
-injection. Copy reads like a product (“Calibrating boundary…”,
-“Exploring unknown yard…”, “Map ready — start mow?”, “Mowing…”).
+Owner bar: Start / Pause / Resume, speed `1× 2× 5× max`, first-class
+**Explore / Mow / Return** (manual phase overrides — do not wait for
+auto MAP READY), plus **Full explore** (production map-ready gate; demo
+may still use `explore_complete: 0.30` / 420 steps). ESTOP stays.
+Phone adds radio-path chips (BT teach / Wi-Fi map / LoRa sparse,
+simulated), stuck / dead-motor SOS, and **low-SOC inject** (dock →
+charge → resume leftover plan). Copy reads like a product
+(“Calibrating boundary…”, “Seeking frontier · map 51% of target 80%
+· step 200/420”, “Map ready — start mow?”, “Mowing…”, “Low battery —
+returning to charge”, “Charging…”, “Resuming mow”).
+`explore_reason` is always on the live snapshot while mapping.
 MAP READY is not “Hold — safe” (that is SafeState / ESTOP). A review
 with 0 mowable cells stays on “Fence too small — re-teach the keep-in.”
 `session_summary.json` tracks the live phase (not a leftover calibrate
-card from Teach → Save).
+card from Teach → Save). After MAP READY the phone draws **area types**
+(grass / path / sand / building / water / drain / beds / keep-out) plus
+the automatic **mowable mask** and coverage-plan polyline.
 
 ## Unknown-space semantics
 
@@ -236,7 +244,9 @@ copy, map %, cut %, frontiers, plan (after freeze), a compact
 banner), and URLs for the latest fog / observed / **observed mesh** /
 coverage / camera frames.
 `POST /api/live/control` is the owner bar (start / pause / resume /
-speed / start_mow / reexplore / estop / hold / yard / pair / inject).
+speed / explore / mow / return / full_explore / start_mow / reexplore /
+estop / hold / yard / pair / inject). `inject kind=low_soc` drops gym
+SOC so the mid-job dock-and-resume path can be tested.
 The phone app (`jims-mower-app --live`) proxies the same endpoints —
 do not fork `MissionPolicy`. History is also flushed into `live_out/`
 so you can scrub later. You do not need a finished episode folder to

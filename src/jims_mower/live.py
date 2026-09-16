@@ -107,7 +107,11 @@ OWNER_COPY = {
     "review": "Map ready — start mow?",
     "reteach": "Fence too small — re-teach the keep-in.",
     "mow": "Mowing…",
+    "resuming_mow": "Resuming mow",
+    "resuming_explore": "Resuming explore",
     "return_home": "Heading home…",
+    "low_battery": "Low battery — returning to charge",
+    "charging": "Charging…",
     "complete": "Done.",
     "fault": "Fault — retrieve.",
     "safe": "Hold — safe.",
@@ -137,6 +141,10 @@ INJECT_ALIASES = {
     "lost": "radio_lost",
     "radio-lost": "radio_lost",
     "bt_lost": "bt_lost",
+    "low_soc": "low_soc",
+    "soc": "low_soc",
+    "battery": "low_soc",
+    "soc_low": "low_soc",
 }
 
 SPEED_ALIASES = {
@@ -188,6 +196,9 @@ def owner_copy_for(
     hw_estop: bool = False,
     pairing_state: Optional[str] = None,
     require_pair: bool = False,
+    explore_reason: Optional[dict[str, Any]] = None,
+    charge_state: str = "",
+    return_kind: str = "",
 ) -> str:
     blob = fault if isinstance(fault, dict) else None
     if hw_estop or (blob and str(blob.get("code") or "") == "HW_ESTOP"):
@@ -215,9 +226,17 @@ def owner_copy_for(
         return OWNER_COPY["teach"]
     if fence_unusable:
         return OWNER_COPY["reteach"]
+    if phase == "charging" or charge_state == "charging":
+        return OWNER_COPY["charging"]
+    if phase == "return_home" and (return_kind == "battery" or charge_state == "returning"):
+        return OWNER_COPY["low_battery"]
+    if charge_state == "resuming":
+        return OWNER_COPY["resuming_explore"] if phase == "explore" else OWNER_COPY["resuming_mow"]
     # MAP READY is a review beat, not SafeState / ESTOP.
     if phase == "review":
         return OWNER_COPY["review"]
+    if phase == "explore" and isinstance(explore_reason, dict) and explore_reason.get("label"):
+        return str(explore_reason["label"])
     if phase == "safe":
         return OWNER_COPY["safe"]
     if job_state in OWNER_COPY and job_state in {"idle", "paused", "hold"}:
@@ -410,6 +429,7 @@ class LiveSession:
         self.fog_png = b""
         self.observed_mesh_json = b""
         self.coverage_png = b""
+        self.areas_png = b""
         self.cam_jpeg: dict[str, bytes] = {}
         self.done = False
         self.started = False
@@ -489,6 +509,7 @@ class LiveSession:
         self.obs, self.info = self.env.reset(seed=self.seed, options=reset_opts)
         self.policy = MissionPolicy(self.env.cfg, fast=self.fast)
         self.policy.reset(self.obs, self.info, profile=taught)
+        self.policy.attach_to_env(self.env)
         self.teach_policy = None
         self._taught_env_dirty = False
         self.camera_names = list(self.obs.get("cameras") or {})
@@ -577,6 +598,10 @@ class LiveSession:
     def coverage_png_bytes(self) -> bytes:
         with self.lock:
             return self.coverage_png
+
+    def areas_png_bytes(self) -> bytes:
+        with self.lock:
+            return self.areas_png
 
     def camera_bytes(self, name: str) -> bytes:
         with self.lock:
@@ -687,7 +712,7 @@ class LiveSession:
             return {"ok": False, "error": f"unknown command {cmd}", **self.snapshot()}
         if not self.started:
             self.reset()
-        if key in {"start", "resume", "start_mow"}:
+        if key in {"start", "resume", "start_mow", "explore", "mow", "return"}:
             refused = self.pairing.refuse_start()
             if refused:
                 return {
@@ -735,15 +760,37 @@ class LiveSession:
                 self.start_thread()
         elif key == "speed":
             self.speed = parse_speed(kwargs.get("speed", self.speed))
-        elif key == "start_mow":
+        elif key == "start_mow" or key == "mow":
             if self.policy is not None:
                 self.policy.request_start_mow()
             if self.job_state == "idle":
                 self.job_state = "running"
                 self._t0_wall = time.perf_counter()
-        elif key == "reexplore":
+                self._stop.clear()
+                self.start_thread()
+        elif key == "reexplore" or key == "explore":
+            full = bool(kwargs.get("full") or kwargs.get("full_explore"))
             if self.policy is not None:
-                self.policy.request_reexplore()
+                self.policy.request_explore(full=full)
+            if self.job_state == "idle":
+                self.job_state = "running"
+                self._t0_wall = self._t0_wall or time.perf_counter()
+                self._stop.clear()
+                self.start_thread()
+        elif key == "return":
+            if self.policy is not None:
+                self.policy.request_return_home(reason=str(kwargs.get("reason") or "owner"))
+            if self.job_state == "idle":
+                self.job_state = "running"
+                self._t0_wall = self._t0_wall or time.perf_counter()
+                self._stop.clear()
+                self.start_thread()
+        elif key == "full_explore":
+            enabled = kwargs.get("enabled", True)
+            if isinstance(enabled, str):
+                enabled = enabled.strip().lower() not in {"0", "false", "off", "no"}
+            if self.policy is not None:
+                self.policy.apply_full_explore_mode(bool(enabled))
         elif key == "estop":
             self.estop = True
             self.job_state = "estop"
@@ -793,9 +840,12 @@ class LiveSession:
         elif key == "load_yard":
             return self._load_yard(**kwargs)
         elif key == "inject":
+            soc_raw = kwargs.get("soc")
+            soc = None if soc_raw is None else float(soc_raw)
             self._inject_fault(
                 str(kwargs.get("kind") or kwargs.get("fault") or "stuck"),
                 mode=str(kwargs.get("mode") or "open_circuit"),
+                soc=soc,
             )
         return {"ok": True, "cmd": key, **self.snapshot()}
 
@@ -808,7 +858,7 @@ class LiveSession:
             return None
         if not getattr(radio, "any_lost", False) and not radio.enabled:
             return None
-        if key not in {"start", "pause", "resume", "estop", "hold", "hw_estop", "start_mow"}:
+        if key not in {"start", "pause", "resume", "estop", "hold", "hw_estop", "start_mow", "explore", "mow", "return"}:
             return None
         if not getattr(radio, "any_lost", False) and not radio.enabled:
             return None
@@ -839,9 +889,16 @@ class LiveSession:
             if self.yard_path is not None:
                 write_yard_profile(self.yard_path, self.yard_profile)
 
-    def _inject_fault(self, kind: str, *, mode: str = "open_circuit") -> None:
+    def _inject_fault(self, kind: str, *, mode: str = "open_circuit", soc: Optional[float] = None) -> None:
         raw = str(kind or "stuck").strip().lower()
         resolved = INJECT_ALIASES.get(raw, raw)
+        if resolved == "low_soc":
+            target = 0.12 if soc is None else float(soc)
+            if self.env is not None:
+                self.env.budget.set_soc(target)
+                self.info = dict(self.info or {})
+                self.info.update(self.env.budget.as_info())
+            return
         if resolved == "radio_lost":
             self.pairing.lose(reason="radio_lost")
             if self.env is not None:
@@ -1397,8 +1454,14 @@ class LiveSession:
         ]
         rgb = coarsen2d(omap.as_rgb(frontiers=frontier_cells), int(budget["map_side"]))
         fog = coarsen2d(fog_rgba(omap.observed), int(budget["map_side"]))
+        keep = self.policy.keep_in_mask
+        mowable = None
+        if self.policy.global_plan is not None or self.policy.phase.value in {"review", "mow", "return_home", "charging", "complete"}:
+            mowable = omap.mowable_mask(keep)
+        areas = coarsen2d(omap.areas_rgb(keep, mowable=mowable), int(budget["map_side"]))
         observed_png = _png_bytes(rgb)
         fog_png = _png_bytes(fog)
+        areas_png = _png_bytes(areas)
         coverage_png = b""
         phase = self.policy.phase.value
         want_coverage = (
@@ -1424,6 +1487,7 @@ class LiveSession:
         with self.lock:
             self.observed_png = observed_png
             self.fog_png = fog_png
+            self.areas_png = areas_png
             if coverage_png:
                 self.coverage_png = coverage_png
             self._map_seq += 1
@@ -1564,6 +1628,9 @@ class LiveSession:
                 hw_estop=self._hw_estop_latched(),
                 pairing_state=self.pairing.state,
                 require_pair=self.require_pair,
+                explore_reason=status.get("explore_reason") if isinstance(status.get("explore_reason"), dict) else None,
+                charge_state=str(status.get("charge_state") or ""),
+                return_kind=str(status.get("return_kind") or ""),
             ),
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
@@ -1579,8 +1646,16 @@ class LiveSession:
             "yard": str(self.config_name),
             "width_m": float(self.env.cfg.world.width_m) if self.env is not None else 16.0,
             "height_m": float(self.env.cfg.world.height_m) if self.env is not None else 12.0,
-            "can_start_mow": status["phase"] == "review" and not fence_unusable,
-            "can_reexplore": status["phase"] == "review",
+            "can_start_mow": (status["phase"] in {"review", "explore", "complete", "charging"} or bool(status.get("planned_mowable_cells"))) and not fence_unusable,
+            "can_reexplore": status["phase"] in {"review", "mow", "return_home", "complete", "charging"},
+            "can_explore": True,
+            "can_mow": not fence_unusable,
+            "can_return": self.job_state in {"running", "paused", "hold"} or status["phase"] not in {"idle", "complete", ""},
+            "explore_reason": status.get("explore_reason") or {},
+            "full_explore": bool(status.get("full_explore")),
+            "charge_state": status.get("charge_state") or "",
+            "return_kind": status.get("return_kind") or "",
+            "area_legend": status.get("area_legend") or [],
             "needs_reteach": fence_unusable,
             "fence_unusable": fence_unusable,
             "pose": pose,
@@ -1626,6 +1701,7 @@ class LiveSession:
             "fog_url": f"/api/live/fog.png?v={self._map_seq}",
             "observed_mesh_url": f"/api/live/observed_mesh.json?v={self._mesh_seq}",
             "coverage_url": f"/api/live/coverage.png?v={self._map_seq}",
+            "areas_url": f"/api/live/areas.png?v={self._map_seq}",
             "cam_url": f"/api/live/cam/{cam_name}?v={self._cam_seq}",
             "cameras": list(self.camera_names),
             "done": bool(self.done),

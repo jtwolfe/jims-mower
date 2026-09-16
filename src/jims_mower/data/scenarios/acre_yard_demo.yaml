@@ -4,7 +4,9 @@
 # confirmation drive on the authored keep-in (~28 m), then EXPLORE.
 # Demo explore finishes around 0.30 map or ~420 steps even with leftover
 # frontiers so a live --speed 5 / max window can reach MAP READY → MOW.
-# A full 226 m fence lap / 0.72 map-ready is acre_yard, not this file.
+# Owner Full explore / POST full_explore raises that gate (production
+# 0.80 / 4000) without changing physics. A full 226 m fence lap / 0.72
+# map-ready is acre_yard, or acre_yard_demo with full_explore on.
 kind: scenario
 name: acre_yard_demo
 description: >

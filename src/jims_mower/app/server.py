@@ -245,6 +245,10 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
                 payload = session.coverage_png_bytes() if hasattr(session, "coverage_png_bytes") else b""
                 self._send_live_bytes(payload, "image/png")
                 return True
+            if path == "/api/live/areas.png":
+                payload = session.areas_png_bytes() if hasattr(session, "areas_png_bytes") else b""
+                self._send_live_bytes(payload, "image/png")
+                return True
             if path == "/api/live/observed_mesh.json":
                 payload = session.observed_mesh_bytes() if hasattr(session, "observed_mesh_bytes") else b""
                 self._send_live_bytes(payload, "application/json")

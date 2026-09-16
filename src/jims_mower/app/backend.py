@@ -573,6 +573,14 @@ class MemoryBackend:
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot return while ESTOP is latched")
                 self.mission = "returning"
+            elif key == "explore":
+                if self.safe.mode == "estop":
+                    raise YardProfileError("cannot explore while ESTOP is latched")
+                self.mission = "explore"
+            elif key == "mow":
+                if self.safe.mode == "estop":
+                    raise YardProfileError("cannot mow while ESTOP is latched")
+                self.mission = "mowing"
             elif key == "teach":
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot teach while ESTOP is latched")
@@ -810,6 +818,14 @@ class SimBackend:
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot return while ESTOP is latched")
                 self.mission = "returning"
+            elif key == "explore":
+                if self.safe.mode == "estop":
+                    raise YardProfileError("cannot explore while ESTOP is latched")
+                self.mission = "explore"
+            elif key == "mow":
+                if self.safe.mode == "estop":
+                    raise YardProfileError("cannot mow while ESTOP is latched")
+                self.mission = "mowing"
             elif key == "teach":
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot teach while ESTOP is latched")
@@ -1054,6 +1070,14 @@ class EpisodeBackend:
                 self.mission = "returning"
                 self.index = max(len(self._records()) - 1, 0)
                 self.mission = "idle"
+            elif key == "explore":
+                if self.safe.mode == "estop":
+                    raise YardProfileError("cannot explore while ESTOP is latched")
+                self.mission = "explore"
+            elif key == "mow":
+                if self.safe.mode == "estop":
+                    raise YardProfileError("cannot mow while ESTOP is latched")
+                self.mission = "mowing"
             elif key == "teach":
                 if self.safe.mode == "estop":
                     raise YardProfileError("cannot teach while ESTOP is latched")

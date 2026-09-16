@@ -152,6 +152,10 @@ body {
 }
 .live-preview.kind-mowing img.cut,
 .live-preview.kind-done img.cut { opacity: 0.62; }
+.live-preview img.areas { opacity: 0; }
+.live-preview.kind-mapping img.areas,
+.live-preview.kind-mowing img.areas,
+.live-preview.kind-done img.areas { opacity: 0.42; }
 .live-preview .path-overlay,
 .live-preview .fence-overlay {
   position: absolute;
@@ -182,6 +186,12 @@ body {
 .map-legend .swatch.trail { background: #aa88ff; }
 .map-legend .swatch.plan { background: #2ad4e6; }
 .map-legend .swatch.cut { background: #d2be50; }
+.map-legend .swatch.area { height: 8px; width: 10px; border-radius: 2px; }
+
+.phase-row { margin-top: 8px; }
+.phase-row .btn { margin-top: 0; }
+.btn.on { box-shadow: inset 0 0 0 2px var(--green); }
+.explore-reason { margin-top: -6px; }
 
 .speed-row {
   display: grid;

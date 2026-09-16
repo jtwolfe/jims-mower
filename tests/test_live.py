@@ -226,6 +226,8 @@ def test_live_http_sse_and_assets(tmp_path: Path) -> None:
         assert "tog-fog" in page
         assert "owner-bar" in page
         assert "btn-job-start" in page
+        assert "btn-explore" in page
+        assert "btn-return" in page
         assert "btn-estop" in page
     finally:
         httpd.shutdown()
@@ -265,6 +267,16 @@ def test_owner_copy_reads_like_a_product() -> None:
     assert "Teaching" in owner_copy_for("teach", "teach")
     assert owner_copy_for("running", "calibrate_boundary") == "Calibrating boundary…"
     assert owner_copy_for("running", "explore") == "Exploring unknown yard…"
+    assert "Seeking frontier" in owner_copy_for(
+        "running",
+        "explore",
+        explore_reason={"label": "Seeking frontier · map 51% of target 80% · step 200/420"},
+    )
+    assert owner_copy_for("running", "return_home", return_kind="battery") == (
+        "Low battery — returning to charge"
+    )
+    assert owner_copy_for("running", "charging") == "Charging…"
+    assert owner_copy_for("running", "mow", charge_state="resuming") == "Resuming mow"
     assert owner_copy_for("running", "review") == "Map ready — start mow?"
     assert owner_copy_for("hold", "review") == "Map ready — start mow?"
     assert owner_copy_for("running", "review", fence_unusable=True) == (

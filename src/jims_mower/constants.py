@@ -147,6 +147,7 @@ MISSION_PHASES = (
     "review",
     "mow",
     "return_home",
+    "charging",
     "complete",
     "fault",
     "safe",
@@ -167,6 +168,10 @@ LIVE_CONTROL_CMDS = (
     "speed",
     "start_mow",
     "reexplore",
+    "explore",
+    "mow",
+    "return",
+    "full_explore",
     "estop",
     "hw_estop",
     "hw_reset",
@@ -191,8 +196,8 @@ SESSION_BUNDLE_SCHEMA = "jims_mower.session_bundle.v1"
 MESH_SCHEMA = "jims_mower.mesh.v1"
 APP_STATUS_SCHEMA = "jims_mower.app_status.v1"
 COVERAGE_MAP_SCHEMA = "jims_mower.coverage.v1"
-APP_COMMANDS = ("start", "stop", "return", "estop", "teach", "pair", "unpair")
-APP_MISSIONS = ("idle", "mowing", "returning", "teach", "estop", "explore", "review")
+APP_COMMANDS = ("start", "stop", "return", "estop", "teach", "pair", "unpair", "explore", "mow")
+APP_MISSIONS = ("idle", "mowing", "returning", "teach", "estop", "explore", "review", "charging")
 RADIO_LINKS = ("bluetooth", "wifi", "lora")
 SCHEDULE_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 SCHEDULE_SCHEMA = "jims_mower.schedule.v1"

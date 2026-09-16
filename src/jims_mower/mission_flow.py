@@ -14,7 +14,7 @@ mowable. This module is the first-principles replacement:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -74,6 +74,7 @@ PHASE_LABELS = {
     "review": "MAP READY",
     "mow": "MOW",
     "return_home": "RETURN",
+    "charging": "CHARGING",
     "complete": "DONE",
     "fault": "FAULT",
     "safe": "SAFE",
@@ -95,6 +96,7 @@ class MissionPhase(str, Enum):
     REVIEW = "review"
     MOW = "mow"
     RETURN_HOME = "return_home"
+    CHARGING = "charging"
     COMPLETE = "complete"
     FAULT = "fault"
     SAFE = "safe"
@@ -189,6 +191,20 @@ class MissionPolicy:
         self._calibrate_stall = 0
         self._authored_structure: Optional[np.ndarray] = None
         self.fence_unusable = False
+        self._env: Any = None
+        self._last_info: dict[str, Any] = {}
+        self._last_pose: Optional[Pose] = None
+        self.explore_reason: dict[str, Any] = {}
+        self._explore_blocked = 0
+        self._explore_spin = 0
+        self._return_kind = ""
+        self._resume_phase: Optional[MissionPhase] = None
+        self._resume_index = 0
+        self._resume_copy_steps = 0
+        self._demo_explore_complete: Optional[float] = None
+        self._demo_max_explore: Optional[int] = None
+        self._demo_mow_frac: Optional[float] = None
+        self._demo_max_mow: Optional[int] = None
 
     @property
     def waypoints(self) -> list[tuple[float, float]]:
@@ -209,9 +225,24 @@ class MissionPolicy:
         return self.phase in {MissionPhase.COMPLETE, MissionPhase.FAULT}
 
     def request_start_mow(self) -> bool:
-        """Owner override: leave MAP READY without waiting out the review beat."""
-        if self.phase != MissionPhase.REVIEW:
-            return False
+        """Owner override: mow now — review, explore, or a frozen plan."""
+        if self.phase == MissionPhase.MOW:
+            self._mow_requested = True
+            return True
+        if self.phase == MissionPhase.CHARGING:
+            self._resume_phase = MissionPhase.MOW
+            return True
+        if self.phase == MissionPhase.CALIBRATE_BOUNDARY:
+            self._close_calibrate_now()
+        if self.phase == MissionPhase.EXPLORE or self.snapshot is None or self.global_plan is None:
+            pose = self._last_pose or self._home
+            info = self._last_info or {}
+            if self.observed is not None:
+                self.snapshot = self._freeze(info)
+                self.global_plan = self._plan_global_mow(pose)
+                self.plan = self.global_plan
+                self.index = 0
+                self._review_hold = True
         if self._keep_in_too_small():
             self.fence_unusable = True
             self._emit("owner_start_mow_blocked", {"reason": "fence_too_small"})
@@ -222,21 +253,79 @@ class MissionPolicy:
             return False
         self.fence_unusable = False
         self._mow_requested = True
-        self._emit("owner_start_mow", {"phase_step": self.phase_step})
+        self._return_kind = ""
+        self._emit("owner_start_mow", {"phase_step": self.phase_step, "from": self.phase.value})
+        if self.phase != MissionPhase.REVIEW:
+            self._transition(MissionPhase.MOW)
         return True
 
     def request_reexplore(self) -> bool:
         """Owner override: thaw the frozen map and keep exploring."""
-        if self.phase != MissionPhase.REVIEW:
-            return False
+        return self.request_explore()
+
+    def request_explore(self, *, full: bool = False) -> bool:
+        """Owner override: start / resume mapping without waiting for auto."""
+        if full:
+            apply_full_explore(self.settings, world_width_m=float(self.cfg.world.width_m))
+            self._emit("owner_full_explore", {"explore_complete": self.settings.explore_complete})
+        if self.phase == MissionPhase.EXPLORE:
+            return True
+        if self.phase == MissionPhase.CALIBRATE_BOUNDARY:
+            self._close_calibrate_now()
+            return True
         self._review_hold = False
         self._mow_requested = False
         self.snapshot = None
         self.global_plan = None
         self.plan = None
-        self._emit("owner_reexplore", {"phase_step": self.phase_step})
+        self.explore_plan = None
+        self._return_kind = ""
+        if self.observed is not None:
+            # Thaw so cameras can keep growing after MAP READY.
+            self.observed.locked[:] = False
+        self._emit("owner_explore", {"phase_step": self.phase_step, "from": self.phase.value})
         self._transition(MissionPhase.EXPLORE)
         return True
+
+    def request_return_home(self, *, reason: str = "owner") -> bool:
+        """Owner override: dock now. Battery returns resume the leftover plan."""
+        if self.phase in {MissionPhase.COMPLETE, MissionPhase.FAULT}:
+            return self.phase == MissionPhase.COMPLETE
+        if self.phase == MissionPhase.RETURN_HOME and self._return_kind == reason:
+            return True
+        if self.phase == MissionPhase.MOW:
+            self._resume_phase = MissionPhase.MOW
+            self._resume_index = int(self.index)
+        elif self.phase == MissionPhase.EXPLORE:
+            self._resume_phase = MissionPhase.EXPLORE
+            self._resume_index = int(self.index)
+        self._return_kind = str(reason or "owner")
+        self._detour = []
+        self._detour_index = 0
+        self._emit("owner_return", {"reason": self._return_kind, "from": self.phase.value})
+        self._transition(MissionPhase.RETURN_HOME)
+        return True
+
+    def apply_full_explore_mode(self, enabled: bool = True) -> bool:
+        if enabled:
+            if self._demo_explore_complete is None:
+                self._demo_explore_complete = float(self.settings.explore_complete)
+                self._demo_max_explore = int(self.settings.max_explore_steps)
+                self._demo_mow_frac = float(self.settings.mow_complete_frac)
+                self._demo_max_mow = int(self.settings.max_mow_steps)
+            apply_full_explore(self.settings, world_width_m=float(self.cfg.world.width_m))
+        else:
+            self.settings.full_explore = False
+            if self._demo_explore_complete is not None:
+                self.settings.explore_complete = float(self._demo_explore_complete)
+            if self._demo_max_explore is not None:
+                self.settings.max_explore_steps = int(self._demo_max_explore)
+            if self._demo_mow_frac is not None:
+                self.settings.mow_complete_frac = float(self._demo_mow_frac)
+            if self._demo_max_mow is not None:
+                self.settings.max_mow_steps = int(self._demo_max_mow)
+        self._emit("full_explore", {"enabled": bool(self.settings.full_explore)})
+        return bool(self.settings.full_explore)
 
     def request_estop(self, reason: str = "owner estop") -> None:
         self.safe.request_estop(reason)
@@ -275,9 +364,12 @@ class MissionPolicy:
         """Copy fog + yard onto the env so ``save_mission`` is a full day-2 bundle."""
         if env is None:
             return
+        self._env = env
         env._observed_map = self.observed.copy() if self.observed is not None else None
         env._yard_profile = self.profile
         env._mission_phase = self.phase.value if isinstance(self.phase, MissionPhase) else str(self.phase)
+        env._charging = self.phase == MissionPhase.CHARGING
+        env._charge_delta = float(self.settings.gym_charge_soc_per_step)
 
     def save_session(
         self,
@@ -398,6 +490,15 @@ class MissionPolicy:
         self._stop_cool = 0
         self._calibrate_stall = 0
         self.fence_unusable = False
+        self.explore_reason = {}
+        self._explore_blocked = 0
+        self._explore_spin = 0
+        self._return_kind = ""
+        self._resume_phase = None
+        self._resume_index = 0
+        self._resume_copy_steps = 0
+        self._last_info = {}
+        self._last_pose = None
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self._wet = bool((info.get("weather") or {}).get("wet", False))
@@ -443,9 +544,13 @@ class MissionPolicy:
             seed_xy=(pose_hint.x, pose_hint.y),
         )
         pose = pose_hint
+        self._last_info = dict(info or {})
+        self._last_pose = pose
         self._geofence = geofence_from_info(info, self.cfg)
         self._wet = bool((info.get("weather") or {}).get("wet", False))
         self._stamp(obs, info, pose, explored=True)
+        if self._resume_copy_steps > 0:
+            self._resume_copy_steps -= 1
 
         advice = self._sense_advice(obs, info, fused, pose_hint)
         self.last_advice = advice
@@ -474,7 +579,9 @@ class MissionPolicy:
         }:
             return self._finish(self._hold(), advice, info)
 
-        if self.phase == MissionPhase.CALIBRATE_BOUNDARY:
+        if self._maybe_battery_return(info, pose):
+            action = self._tick_return(obs, info, pose, advice)
+        elif self.phase == MissionPhase.CALIBRATE_BOUNDARY:
             action = self._tick_calibrate(obs, info, pose, advice)
         elif self.phase == MissionPhase.EXPLORE:
             action = self._tick_explore(obs, info, pose, advice)
@@ -484,6 +591,8 @@ class MissionPolicy:
             action = self._tick_mow(obs, info, pose, advice)
         elif self.phase == MissionPhase.RETURN_HOME:
             action = self._tick_return(obs, info, pose, advice)
+        elif self.phase == MissionPhase.CHARGING:
+            action = self._tick_charge(obs, info, pose)
         else:
             action = self._hold()
         self.step += 1
@@ -526,6 +635,13 @@ class MissionPolicy:
             "skipped_global": len(self._skipped_global),
             "closed": bool(self.snapshot.closed) if self.snapshot else False,
             "fence_unusable": bool(self.fence_unusable),
+            "explore_reason": dict(self.explore_reason or self._build_explore_reason(completion, info)),
+            "full_explore": bool(self.settings.full_explore),
+            "return_kind": self._return_kind,
+            "charge_state": self._charge_state(),
+            "resume_phase": self._resume_phase.value if self._resume_phase is not None else "",
+            "resume_index": int(self._resume_index),
+            "area_legend": ObservedMap.area_legend(),
             "not_a_benchmark": True,
         }
 
@@ -692,30 +808,36 @@ class MissionPolicy:
         timed_out = self.phase_step + 1 >= int(self.settings.max_calibrate_steps)
         confirmed = self._calibrate_confirmed()
         if self.teach.done or timed_out or confirmed:
-            keep_out = [list(poly) for poly in (self._geofence.keep_out or [])]
-            self.profile = self.teach.to_profile(name="mission", keep_out=keep_out)
-            self.profile.home = {"x": self._home.x, "y": self._home.y, "theta": self._home.theta}
-            # Authored / planned ring is the keep-in. A demo confirm or
-            # timeout must not slice the yard from a partial trail.
-            planned = self.teach.planned_ring()
-            if len(planned) >= 3:
-                self.profile.keep_in = planned
-            self._geofence = self.profile.geofence_spec()
-            if self.observed is not None:
-                self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
-            self._emit(
-                "boundary_recorded",
-                {
-                    "keep_in_vertices": len(self.profile.keep_in),
-                    "trail_points": len(self.teach.trail),
-                    "trail_m": self._trail_length_m(),
-                    "timed_out": bool(timed_out and not self.teach.done and not confirmed),
-                    "confirmed": bool(confirmed and not self.teach.done),
-                },
+            self._close_calibrate_now(
+                timed_out=bool(timed_out and not self.teach.done and not confirmed),
+                confirmed=bool(confirmed and not self.teach.done),
             )
-            self._transition(MissionPhase.EXPLORE)
         wheels = np.asarray(action, dtype=np.float32).reshape(-1)
         return self._drive(float(wheels[0]), float(wheels[1]), 0.0, pose)
+
+    def _close_calibrate_now(self, *, timed_out: bool = False, confirmed: bool = False) -> None:
+        """Accept authored / taught keep-in and enter explore (manual or auto)."""
+        keep_out = [list(poly) for poly in (self._geofence.keep_out or [])]
+        if self.profile is None or len(getattr(self.profile, "keep_in", []) or []) < 3:
+            self.profile = self.teach.to_profile(name="mission", keep_out=keep_out)
+        self.profile.home = {"x": self._home.x, "y": self._home.y, "theta": self._home.theta}
+        planned = self.teach.planned_ring()
+        if len(planned) >= 3:
+            self.profile.keep_in = planned
+        self._geofence = self.profile.geofence_spec()
+        if self.observed is not None:
+            self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
+        self._emit(
+            "boundary_recorded",
+            {
+                "keep_in_vertices": len(self.profile.keep_in),
+                "trail_points": len(self.teach.trail),
+                "trail_m": self._trail_length_m(),
+                "timed_out": bool(timed_out),
+                "confirmed": bool(confirmed),
+            },
+        )
+        self._transition(MissionPhase.EXPLORE)
 
     def _tick_explore(
         self,
@@ -732,7 +854,14 @@ class MissionPolicy:
         completion = self.observed.completion(keep)
         ready = self._explore_ready(completion, bool(thin))
         timed_out = self.phase_step + 1 >= int(self.settings.max_explore_steps)
+        # Full explore: a step cap is not MAP READY while frontiers remain
+        # and the production target is unmet.
+        if timed_out and not ready and self.settings.full_explore and thin:
+            timed_out = False
         if ready or timed_out:
+            self.explore_reason = self._build_explore_reason(
+                completion, info, n_frontiers=len(thin), code="map_progress" if ready else "waiting_cap"
+            )
             self._emit(
                 "explore_complete",
                 {
@@ -740,6 +869,7 @@ class MissionPolicy:
                     "n_frontiers": len(thin),
                     "timed_out": bool(timed_out and not ready),
                     "no_frontier": not thin,
+                    "full_explore": bool(self.settings.full_explore),
                 },
             )
             if self._keep_in_too_small():
@@ -763,18 +893,60 @@ class MissionPolicy:
             if self.explore_plan.target is not None:
                 tx, ty = self.observed.cell_to_world(*self.explore_plan.target)
                 self._emit("frontier_target", {"x": tx, "y": ty, "n_frontiers": len(thin)})
+        if advice == "stop":
+            self.explore_reason = self._build_explore_reason(
+                completion, info, n_frontiers=len(thin), code="tip_recovery"
+            )
+            self._explore_spin += 1
+            if self._explore_spin % 2 == 1:
+                return self._reverse_nudge(pose)
+            return self._look_around(pose)
+        self._explore_spin = 0
         if self.explore_plan is None or not self.explore_plan.waypoints:
-            # No reachable frontier: keep trying until a min explore beat,
-            # then review. Instant give-up at step 0 made a scribble fence
-            # look like MAP READY.
+            # Frontiers exist but A* cannot connect, or none remain.
+            self._explore_blocked += 1
+            blocked = bool(thin) or int(getattr(self.explore_plan, "unreachable_frontiers", 0) or 0) > 0
+            code = "path_blocked" if blocked else "no_frontier"
+            self.explore_reason = self._build_explore_reason(
+                completion, info, n_frontiers=len(thin), code=code
+            )
             give_up = max(8, int(getattr(self.settings, "min_explore_steps", 8) or 8))
-            if self.phase_step >= give_up and (
-                completion >= float(self.settings.explore_no_frontier) or self.phase_step > give_up + 8
-            ):
+            demo_exit = (
+                not bool(self.settings.full_explore)
+                and self.phase_step >= give_up
+                and (
+                    completion >= float(self.settings.explore_no_frontier)
+                    or self.phase_step > give_up + 8
+                )
+            )
+            full_clear = (
+                bool(self.settings.full_explore)
+                and not blocked
+                and self.phase_step >= give_up
+                and completion >= float(self.settings.explore_no_frontier)
+            )
+            # Look around a few ticks so a real stall can unstick, then
+            # demo may still MAP READY with leftover frontiers.
+            if self._explore_blocked <= 6:
+                if self._explore_blocked % 3 == 1:
+                    return self._look_around(pose)
+                if thin and self._explore_blocked % 3 == 2:
+                    return self._nudge_toward_frontier(pose, thin[0])
+                return self._hold()
+            if demo_exit or full_clear:
                 if self._keep_in_too_small():
                     self.fence_unusable = True
                 self._transition(MissionPhase.REVIEW)
+                return self._hold()
+            if self._explore_blocked % 3 == 1:
+                return self._look_around(pose)
+            if thin and self._explore_blocked % 3 == 2:
+                return self._nudge_toward_frontier(pose, thin[0])
             return self._hold()
+        self._explore_blocked = 0
+        self.explore_reason = self._build_explore_reason(
+            completion, info, n_frontiers=len(thin), code="seeking_frontier"
+        )
         return self._track_list(
             self.explore_plan.waypoints,
             pose,
@@ -964,10 +1136,16 @@ class MissionPolicy:
         advice: str,
     ) -> np.ndarray:
         if math.hypot(pose.x - self._home.x, pose.y - self._home.y) <= 0.45:
+            if self._return_kind == "battery":
+                self._transition(MissionPhase.CHARGING)
+                return self._hold()
             self._transition(MissionPhase.COMPLETE)
             return self._hold()
         if self.phase_step + 1 >= int(self.settings.max_return_steps):
             self._emit("return_timeout", {"x": pose.x, "y": pose.y})
+            if self._return_kind == "battery":
+                self._transition(MissionPhase.CHARGING)
+                return self._hold()
             self._transition(MissionPhase.COMPLETE)
             return self._hold()
         if not self._detour:
@@ -983,6 +1161,172 @@ class MissionPolicy:
             trimmer=0.0,
             index_attr="_detour_index",
         )
+
+    def _tick_charge(self, obs: dict[str, Any], info: dict[str, Any], pose: Pose) -> np.ndarray:
+        _ = obs
+        self._sync_env_charge(True)
+        soc = self._current_soc(info)
+        target = self._charge_resume_soc()
+        if soc >= target:
+            self._emit(
+                "battery_charged",
+                {"soc": soc, "resume": self._resume_phase.value if self._resume_phase else "mow"},
+            )
+            return self._resume_after_charge(pose)
+        return self._hold()
+
+    def _resume_after_charge(self, pose: Pose) -> np.ndarray:
+        _ = pose
+        self._sync_env_charge(False)
+        self._return_kind = ""
+        self._resume_copy_steps = 16
+        target = self._resume_phase or MissionPhase.MOW
+        idx = int(self._resume_index)
+        self._emit("battery_resume", {"phase": target.value, "index": idx})
+        if target == MissionPhase.MOW and self.global_plan is not None:
+            self._transition(MissionPhase.MOW)
+            self.index = min(idx, max(0, len(self.global_plan.waypoints) - 1))
+        elif target == MissionPhase.EXPLORE:
+            self._transition(MissionPhase.EXPLORE)
+            self.index = 0
+            self.explore_plan = None
+        else:
+            self._transition(target)
+        return self._hold()
+
+    def _maybe_battery_return(self, info: dict[str, Any], pose: Pose) -> bool:
+        _ = pose
+        if self.phase not in {MissionPhase.EXPLORE, MissionPhase.MOW}:
+            return False
+        if self._return_kind == "battery":
+            return False
+        soc = self._current_soc(info)
+        if soc > self._soc_return_threshold():
+            return False
+        self._resume_phase = self.phase
+        self._resume_index = int(self.index)
+        self._return_kind = "battery"
+        self._detour = []
+        self._detour_index = 0
+        self._emit(
+            "battery_return",
+            {"soc": soc, "threshold": self._soc_return_threshold(), "from": self.phase.value, "index": self.index},
+        )
+        self._transition(MissionPhase.RETURN_HOME)
+        return True
+
+    def _current_soc(self, info: Optional[dict[str, Any]] = None) -> float:
+        if self._env is not None and getattr(self._env, "budget", None) is not None:
+            return float(self._env.budget.soc)
+        blob = info if isinstance(info, dict) else self._last_info
+        return float((blob or {}).get("battery_soc", 1.0) or 1.0)
+
+    def _soc_return_threshold(self) -> float:
+        configured = float(getattr(self.settings, "min_soc_return", 0.0) or 0.0)
+        if configured > 0.0:
+            return configured
+        schedule = getattr(self.profile, "schedule", None) if self.profile is not None else None
+        if isinstance(schedule, dict) and schedule.get("min_soc") is not None:
+            return float(schedule["min_soc"])
+        if schedule is not None and getattr(schedule, "min_soc", None) is not None:
+            return float(schedule.min_soc)
+        return float(self.cfg.runtime.battery.limp_soc)
+
+    def _charge_resume_soc(self) -> float:
+        target = float(getattr(self.settings, "charge_resume_soc", 0.80) or 0.80)
+        return min(1.0, max(target, self._soc_return_threshold() + 0.20))
+
+    def _charge_state(self) -> str:
+        if self.phase == MissionPhase.CHARGING:
+            return "charging"
+        if self.phase == MissionPhase.RETURN_HOME and self._return_kind == "battery":
+            return "returning"
+        if self._resume_copy_steps > 0 and self.phase in {MissionPhase.MOW, MissionPhase.EXPLORE}:
+            return "resuming"
+        return ""
+
+    def _sync_env_charge(self, charging: bool) -> None:
+        if self._env is None:
+            return
+        self._env._charging = bool(charging)
+        self._env._charge_delta = float(self.settings.gym_charge_soc_per_step)
+        self._env._mission_phase = self.phase.value
+
+    def _look_around(self, pose: Pose) -> np.ndarray:
+        _ = pose
+        return self._drive(0.42, -0.42, 0.0, pose)
+
+    def _nudge_toward_frontier(self, pose: Pose, cell: tuple[int, int]) -> np.ndarray:
+        if self.observed is None:
+            return self._look_around(pose)
+        tx, ty = self.observed.cell_to_world(*cell)
+        wheels, _dist, _err = tracking_action(
+            pose,
+            (tx, ty),
+            cruise=0.28,
+            wheelbase_m=self.cfg.robot.wheelbase_m,
+            turn_in_place_rad=0.85,
+        )
+        return self._drive(float(wheels[0]), float(wheels[1]), 0.0, pose)
+
+    def _build_explore_reason(
+        self,
+        completion: float,
+        info: Optional[dict[str, Any]] = None,
+        *,
+        n_frontiers: Optional[int] = None,
+        code: str = "",
+    ) -> dict[str, Any]:
+        _ = info
+        target = float(self.settings.explore_complete)
+        max_steps = int(self.settings.max_explore_steps)
+        n_front = int(n_frontiers if n_frontiers is not None else len(self._frontier_xy))
+        n_wp = 0
+        unreachable = 0
+        if self.explore_plan is not None:
+            n_wp = len(self.explore_plan.waypoints)
+            unreachable = int(getattr(self.explore_plan, "unreachable_frontiers", 0) or 0)
+        if not code:
+            if self.phase != MissionPhase.EXPLORE:
+                code = "idle"
+            elif self.last_advice == "stop":
+                code = "tip_recovery"
+            elif n_wp > 0:
+                code = "seeking_frontier"
+            elif n_front > 0 or unreachable > 0:
+                code = "path_blocked"
+            elif completion >= target:
+                code = "map_progress"
+            else:
+                code = "no_frontier"
+        labels = {
+            "seeking_frontier": "Seeking frontier",
+            "path_blocked": "Path blocked — looking around",
+            "tip_recovery": "Tip recovery",
+            "map_progress": "Map progress",
+            "waiting_cap": "Waiting on explore cap",
+            "no_frontier": "No reachable frontier",
+            "stalled": "Explore stalled",
+            "idle": "Idle",
+        }
+        label = (
+            f"{labels.get(code, code)} · map {100.0 * completion:.0f}% of target "
+            f"{100.0 * target:.0f}% · step {self.phase_step}/{max_steps}"
+        )
+        if n_front:
+            label = f"{label} · {n_front} frontiers"
+        return {
+            "code": code,
+            "label": label,
+            "map_pct": float(completion),
+            "target_pct": target,
+            "phase_step": int(self.phase_step),
+            "max_steps": max_steps,
+            "n_frontiers": n_front,
+            "n_waypoints": n_wp,
+            "unreachable_frontiers": unreachable,
+            "full_explore": bool(self.settings.full_explore),
+        }
 
     def _freeze(self, info: dict[str, Any]) -> YardSnapshot:
         assert self.observed is not None
@@ -1348,6 +1692,7 @@ class MissionPolicy:
         return np.array([0.0, 0.0, 0.0], dtype=np.float32)
 
     def _finish(self, action: np.ndarray, advice: str, info: dict[str, Any]) -> np.ndarray:
+        self._sync_env_charge(self.phase == MissionPhase.CHARGING)
         if self.help_requested:
             self.safe.enter_safe("call-for-help")
         # Ridge IMU stop during mow is a skip/replan, not a limp-park.
@@ -1382,6 +1727,7 @@ class MissionPolicy:
                 MissionPhase.REVIEW,
                 MissionPhase.MOW,
                 MissionPhase.RETURN_HOME,
+                MissionPhase.CHARGING,
             }
             and not self.help_requested
             and not bool(info.get("tipover"))
@@ -1535,8 +1881,8 @@ class MissionPolicy:
 
 
 def _fast_settings(base: MissionConfig) -> MissionConfig:
-    return MissionConfig(
-        observe_confidence=base.observe_confidence,
+    data = {item.name: getattr(base, item.name) for item in fields(MissionConfig)}
+    data.update(
         explore_complete=0.62,
         explore_no_frontier=0.40,
         stamp_radius_m=max(2.2, float(base.stamp_radius_m)),
@@ -1560,6 +1906,34 @@ def _fast_settings(base: MissionConfig) -> MissionConfig:
         mow_skip_cluster=max(4, int(base.mow_skip_cluster or 4)),
         mow_stop_cool=max(6, int(base.mow_stop_cool or 10)),
     )
+    return MissionConfig(**data)
+
+
+def apply_full_explore(settings: MissionConfig, *, world_width_m: float = 70.0) -> MissionConfig:
+    """Production explore: no demo 30% / short-cap early exit.
+
+    Tiny CI yards keep a tractable target so tests can still finish. Acre
+    and larger yards raise the map-ready gate and the step budget.
+    """
+    settings.full_explore = True
+    tiny = float(world_width_m) < 20.0
+    if tiny:
+        settings.explore_complete = max(float(settings.explore_complete), 0.70)
+        settings.max_explore_steps = max(int(settings.max_explore_steps), 360)
+        settings.mow_complete_frac = 0.0
+        settings.max_mow_steps = max(int(settings.max_mow_steps), 280)
+    else:
+        settings.explore_complete = max(
+            float(settings.explore_complete),
+            float(settings.full_explore_complete or 0.80),
+        )
+        settings.max_explore_steps = max(
+            int(settings.max_explore_steps),
+            int(settings.full_explore_steps or 4000),
+        )
+        settings.mow_complete_frac = 0.0
+        settings.max_mow_steps = max(int(settings.max_mow_steps), 5500)
+    return settings
 
 
 def scale_mission_budget(settings: MissionConfig, scale: float) -> MissionConfig:
@@ -1791,6 +2165,7 @@ __all__ = [
     "YardSnapshot",
     "keepouts_from_env",
     "mission_timeline",
+    "apply_full_explore",
     "scale_mission_budget",
     "session_summary",
 ]

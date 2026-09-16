@@ -118,6 +118,9 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert snap["path_overlay"]["phase"]
         assert "trail" in snap["path_overlay"]
         assert snap["mode_banner"]["kind"] in {"mapping", "mowing", "idle", "done"}
+        assert "explore_reason" in snap
+        assert "area_legend" in snap
+        assert "full_explore" in snap
 
         code, status = _json(host, port, "GET", "/status")
         assert "path_overlay" in status
@@ -169,6 +172,13 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "/api/live/control" in js
         assert "Start job" in js
         assert "Start mow" in js
+        assert "cmd-explore" in js
+        assert "cmd-mow" in js
+        assert "cmd-return" in js
+        assert "Full explore" in js
+        assert "explore_reason" in js
+        assert "Inject low SOC" in js
+        assert "area_legend" in js or "Mow this" in js
         assert "Teach boundary" in js
         assert "Save yard" in js
         assert "Inject SOS" in js
