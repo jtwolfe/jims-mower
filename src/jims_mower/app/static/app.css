@@ -222,7 +222,7 @@ body {
   gap: 8px;
   margin-top: 6px;
 }
-.phase-row .btn { margin-top: 0; padding: 12px 6px; font-size: 15px; }
+.phase-row .btn { margin-top: 0; padding: 12px 4px; font-size: 14px; white-space: nowrap; }
 .phase-hint { margin: 8px 0 2px; font-size: 12px; }
 .full-explore-card { margin-bottom: 10px; }
 .full-explore-card .sub { margin-bottom: 0; }
