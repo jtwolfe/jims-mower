@@ -201,6 +201,7 @@ p.lead, .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 
 .btn.warn { background: var(--gold); color: #2a2208; }
 .btn.danger { background: var(--danger); color: #fff; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn[hidden], [hidden] { display: none !important; }
 
 .hero {
   height: 168px;

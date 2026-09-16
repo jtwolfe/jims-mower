@@ -307,7 +307,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <button class="btn ghost" id="pause" ${job !== "running" ? "disabled" : ""}>Pause</button>
       </div>
       <button class="btn ghost" id="resume" ${job !== "paused" && job !== "hold" ? "disabled" : ""}>Resume</button>
-      <button class="btn warn" id="start-mow" ${canMow ? "" : "hidden"}>Start mow</button>
+      ${canMow ? `<button class="btn warn" id="start-mow">Start mow</button>` : ""}
       <button class="btn danger" id="estop">ESTOP</button>
       ${sessionCardHtml(st, live)}
       <div class="row">
