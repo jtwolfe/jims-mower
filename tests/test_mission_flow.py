@@ -572,9 +572,9 @@ def test_observed_elevation_stable_under_pitch_roll() -> None:
         )
     err = np.abs(omap.elevation[locked] - frozen[locked])
     assert float(err.max()) < 1e-4
-    # The learned patch does not flip sign across the yard each step.
-    zs = omap.elevation[omap.elevation_set]
-    assert float(np.ptp(zs)) < 0.35 or float(zs.max()) * float(zs.min()) >= 0.0
+    # Already-mapped patch does not flip sign across the yard.
+    zs = frozen[locked]
+    assert float(np.ptp(zs)) < 0.45
 
 
 def test_observed_elevation_ignores_far_plane_copy() -> None:

@@ -116,10 +116,22 @@ class PlanarGradeModel:
         roll, pitch = float(pose.roll), float(pose.pitch)
         if imu is not None:
             imu_roll, imu_pitch = attitude_from_accel(imu)
-            # Blend — do not take the larger of pose vs IMU. A ridge tip
-            # used to yank the whole plane because the extreme won.
-            roll = 0.5 * roll + 0.5 * imu_roll
-            pitch = 0.5 * pitch + 0.5 * imu_pitch
+            # Seated pose is the chassis attitude. A near-level IMU
+            # reading is just gravity — do not dilute a seated grade.
+            # Mix IMU when pose is flat (onboard) or both agree they
+            # are tipped. Never "whichever tilt is larger".
+            if abs(imu_roll) < 0.03:
+                pass
+            elif abs(roll) < 0.02:
+                roll = imu_roll
+            else:
+                roll = 0.80 * roll + 0.20 * imu_roll
+            if abs(imu_pitch) < 0.03:
+                pass
+            elif abs(pitch) < 0.02:
+                pitch = imu_pitch
+            else:
+                pitch = 0.80 * pitch + 0.20 * imu_pitch
         cx, cy, cz = float(pose.x), float(pose.y), float(pose.z)
         if gps is not None:
             g = np.asarray(gps, dtype=np.float32).reshape(-1)
@@ -133,9 +145,10 @@ class PlanarGradeModel:
             self.gx, self.gy = inst_gx, inst_gy
             self.x0, self.y0, self.z0 = cx, cy, cz
         else:
+            # Instantaneous attitude stays in local_gx/gy (tip). The slow
+            # plane only creeps via wheel-z residual + XY fit — a ridge
+            # tip must not invert gx, gy across the yard.
             a = float(np.clip(self.alpha, 0.02, 0.25))
-            self.gx = (1.0 - a) * self.gx + a * inst_gx
-            self.gy = (1.0 - a) * self.gy + a * inst_gy
             pred = self.z_at(cx, cy)
             self.z0 += a * (cz - pred)
         self.n += 1
