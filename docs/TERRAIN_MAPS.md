@@ -25,15 +25,16 @@ from instantaneous chassis tip.
    hits) → `ObservedMap.observed`. That is occupancy of known cells,
    not a height field.
 2. **Local height at the robot**: wheel / pose `z` (and short-range ToF)
-   is a local sample. New cells in a ~2.5 m neighborhood get
-   `z ≈ pose.z + gx·Δx + gy·Δy` from the *slow* grade prior.
+   is a local sample. The first neighborhood is `pose.z`. After that,
+   new cells inherit locked neighbours (85%) plus a little `pose.z`
+   (15%) so a climb creeps. They do **not** take the current IMU plane.
 3. **IMU tilt (pitch/roll, not yaw)** is the local surface normal under
-   the chassis. Use it for tip risk (`imu_advice`) and as a slow prior
-   for nearby cells. It is **not** a license to re-orient the mapped
-   sheet every frame.
-4. **Already-observed heights stay put.** First stamp locks the cell
-   (optional ~5% revisit mix in the neighborhood). Old cells must not
-   leap when the robot tips on a ridge.
+   the chassis. Use it for tip risk (`imu_advice`). It is **not** a
+   license to re-orient the mapped sheet — globally *or* as a local
+   flop of the bright growing patch.
+4. **Already-observed heights stay put.** First stamp locks the cell.
+   Old cells must not leap when the robot tips on a ridge. The growing
+   edge must not reshape from a new attitude either.
 
 `elevation_prior` may still be a yard-scale raster so the costmap can
 floor a flattened CV slope. The **owner / control** mesh is
@@ -48,11 +49,15 @@ the observer map sat near `[-0.14, 0]` (MAE ≈ 0.43 m) and painted
 thousands of false lips. The costmap then blocked or detoured as if the
 yard were flat and pitted.
 
-**What went wrong after that (flopping sheet):** `paint_planar_grade`
-wrote the current IMU plane into **every** elevation cell each step, and
-`ObservedMap.ingest_observer` copied `obs["elevation"]` onto **all**
-seen cells. A ridge tip re-oriented the whole learned surface. The
-viewer `relief` scale made that swing obvious.
+**What went wrong after that (flopping sheet / local patch):**
+`paint_planar_grade` wrote the current IMU plane into **every**
+elevation cell each step, and `ObservedMap.ingest_observer` copied
+`obs["elevation"]` onto **all** seen cells. Live owner view on acre
+often read as a **local** flop — the bright orange/green patch
+reshaping and its edge expanding on each `mesh_seq` — more than a
+single rigid yard hinge. 4× viewer relief plus a full mesh replace
+(and a 32↔48 `mesh_side` swap, 696→1920 verts) made that rewrite
+obvious. The broad surface could still look planar when orbited.
 
 **Fix:**
 
@@ -66,10 +71,11 @@ viewer `relief` scale made that swing obvious.
    slope with the low-frequency prior so a flattened CV map cannot fight
    physics.
 4. Viewer: plan waypoints carry world `z` from the same height field as
-   the mesh; `relief_scale` is applied to both. Observed mesh vertices
-   update in place when the grid is unchanged (grow quads, do not
-   re-hinge). Fog / observed overlays stay flat. Toggle **observer vs
-   true elev** for the error overlay.
+   the mesh; `relief_scale` is applied to both. The observed-mesh
+   **vertex grid stays fixed** for the session (grow triangles, freeze
+   interior Y, do not swap 32↔48 mid-run). Fog / observed overlays stay
+   flat (footprint colour ≠ mesh hinge). Toggle **observer vs true
+   elev** for the error overlay.
 
 Oracle maps still copy the height field (training / eval only).
 

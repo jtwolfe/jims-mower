@@ -201,9 +201,9 @@ class ObservedMap:
         """Copy heuristic hazard/structure onto seen cells. Height is local.
 
         Cameras grow the *seen* mask. Elevation is fused only in a
-        neighborhood around ``pose`` (wheel-z + slow grade prior). Already
-        stamped heights freeze (tiny revisit mix). The current IMU plane
-        is not copied onto the whole learned sheet.
+        neighborhood around ``pose``. Already-stamped heights freeze.
+        New cells inherit locked neighbours + wheel ``z`` — not a
+        swinging IMU plane on the growing edge.
         """
         mask = self.observed if only_observed else np.ones_like(self.observed, dtype=bool)
         if not np.any(mask):
@@ -410,14 +410,44 @@ class ObservedMap:
             radius,
             self.resolution_m,
         )
-        neighborhood = mask & local & have_meas
+        neighborhood = mask & local
         fresh = neighborhood & ~self.elevation_set
         if np.any(fresh):
-            self.elevation[fresh] = meas[fresh]
+            seeded = self._seed_fresh_heights(fresh, pose.z)
+            self.elevation[fresh] = seeded[fresh]
             self.elevation_set[fresh] = True
-        # Already-mapped cells stay put. A ridge tip must not leap them.
-        # Seen-but-far cells keep their first height (or stay unset).
-        # Never copy the current IMU plane across the yard.
+        # Already-mapped cells stay put. A ridge tip must not leap them
+        # or reshape the growing edge from a new IMU plane.
+
+    def _seed_fresh_heights(self, fresh: np.ndarray, pose_z: float) -> np.ndarray:
+        """Height for new cells: locked neighbours, else wheel ``z``.
+
+        The swinging observer / IMU plane is not used. A climb creeps in
+        via ``pose.z``; the bright patch must not flop at the frontier.
+        """
+        seed = np.full(self.elevation.shape, np.float32(pose_z))
+        locked = np.asarray(self.elevation_set, dtype=bool)
+        if not np.any(locked):
+            return seed
+        z = np.asarray(self.elevation, dtype=np.float64)
+        acc = np.zeros(self.elevation.shape, dtype=np.float64)
+        cnt = np.zeros(self.elevation.shape, dtype=np.float64)
+        pairs = (
+            ((slice(0, -1), slice(None)), (slice(1, None), slice(None))),
+            ((slice(1, None), slice(None)), (slice(0, -1), slice(None))),
+            ((slice(None), slice(0, -1)), (slice(None), slice(1, None))),
+            ((slice(None), slice(1, None)), (slice(None), slice(0, -1))),
+        )
+        for sl_src, sl_dst in pairs:
+            src = locked[sl_src]
+            acc[sl_dst] += np.where(src, z[sl_src], 0.0)
+            cnt[sl_dst] += src.astype(np.float64)
+        have = cnt > 0
+        take = fresh & have
+        if np.any(take):
+            nb = (acc[take] / cnt[take]).astype(np.float32)
+            seed[take] = np.float32(0.85) * nb + np.float32(0.15) * np.float32(pose_z)
+        return seed
 
     def _disk_indices(self, x: float, y: float, radius_m: float) -> tuple[np.ndarray, np.ndarray]:
         r = max(float(radius_m), self.resolution_m * 0.5)

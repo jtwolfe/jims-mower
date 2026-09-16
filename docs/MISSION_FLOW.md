@@ -144,9 +144,9 @@ card from Teach → Save).
   not height.
 * **IMU pitch/roll** is local chassis attitude / tip. It is a slow prior
   for a neighborhood around the robot, not a global hinge.
-* **Elevation** is fused from wheel/pose `z` + that slow prior on first
-  stamp in the neighborhood, then frozen (tiny revisit mix). Already
-  mapped cells do not leap when the chassis tips on a ridge.
+* **Elevation** is fused from wheel/pose `z` and locked neighbours on
+  first stamp in the neighborhood, then frozen. Already mapped cells
+  do not leap, and the growing edge does not take a new IMU plane.
 * Authored/god-view structure in `obs["structure"]` is not a control
   input outside the observed mask.
 * Map-ready when `observed` fraction ≥ `mission.explore_complete`, or
@@ -189,11 +189,13 @@ used by physics, not what the robot has learned.
 
 **Learning terrain** in the live viewer means a **partial observed
 elevation mesh** that grows with `ObservedMap`. Camera stamps lift the
-fog (seen mask). Body / pose `z` plus a slow local grade prior lift
-cells into a 3D surface once they have a height sample (grade, sheds
-as low boxes, ponds as slightly sunken cyan water). The mesh must not
-flop when the IMU tips — old cells keep their first height. Unknown
-stays a dark pad + fog veil — not painted holes on a finished mesh.
+fog (seen mask) — the orange/green/gray *overlay* footprint is not the
+3D hinge. Body / pose `z` plus locked neighbours lift cells into a 3D
+surface once they have a height sample (grade, sheds as low boxes,
+ponds as slightly sunken cyan water). The mesh must not flop when the
+IMU tips: old cells keep their first height, and the growing edge
+inherits neighbours instead of a new attitude plane. The vertex grid
+stays fixed (triangles grow). Unknown stays a dark pad + fog veil.
 Physics still uses the true field; owner view and `MissionPolicy` use
 observed elevation only.
 
@@ -202,9 +204,11 @@ Toggle **true elev (god-view debug)** to reveal the physics mesh —
 evaluation only, same idea as **observer vs true elev**. The `yard.glb`
 on disk is still the true field so debug / replay can show it.
 
-Acre rasters coarsen to ≤96 px (2D) / ≤48 (observed mesh). Mesh
-rebuilds every `--observed-mesh-stride` steps (default 8). Cameras are
-JPEG-throttled (~2.5 Hz). Full acre explore→mow need not finish in CI.
+Acre rasters coarsen to ≤96 px (2D). Observed mesh stays ≤48 on a
+**fixed** vertex grid (high speed only skips rebuilds; it does not
+swap 32↔48). Mesh rebuilds every `--observed-mesh-stride` steps
+(default 8). Cameras are JPEG-throttled (~2.5 Hz). Full acre
+explore→mow need not finish in CI.
 
 ## Viewer
 

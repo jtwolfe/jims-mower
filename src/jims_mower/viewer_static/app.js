@@ -563,6 +563,19 @@ function applyObservedMesh(payload) {
     existing.geometry.getAttribute("position").count === pos.length / 3;
   if (sameVerts) {
     const geo = existing.geometry;
+    const prev = geo.getAttribute("position").array;
+    const locked = existing.userData.lockedVerts;
+    if (locked && locked.size) {
+      // Interior Y stays put. New verts (not yet in a quad) take payload
+      // height so the patch grows without a local re-tilt of old cells.
+      for (const vi of locked) {
+        const y = vi * 3 + 1;
+        pos[y] = prev[y];
+      }
+    }
+    const nextLocked = new Set(locked || []);
+    for (let i = 0; i < idx.length; i += 1) nextLocked.add(idx[i]);
+    existing.userData.lockedVerts = nextLocked;
     geo.getAttribute("position").array.set(pos);
     geo.getAttribute("position").needsUpdate = true;
     if (payload.normals && geo.getAttribute("normal") && payload.normals.length) {
@@ -579,6 +592,7 @@ function applyObservedMesh(payload) {
     const mesh = applyMeshPayload(payload);
     mesh.name = "observedTerrain";
     mesh.userData.kind = "observed";
+    mesh.userData.lockedVerts = new Set(idx);
     if (state.observedTerrain) {
       if (state.meshGroup) state.meshGroup.remove(state.observedTerrain);
       else scene.remove(state.observedTerrain);
@@ -590,7 +604,7 @@ function applyObservedMesh(payload) {
   }
   const chip = $("mesh-chip");
   if (chip && payload.vertex_count) {
-    chip.textContent = `observed ${payload.vertex_count} v / ${payload.triangle_count || 0} t`;
+    chip.textContent = `observed ${payload.triangle_count || 0} t · ${payload.vertex_count} v`;
   }
   setOverlayVis();
 }

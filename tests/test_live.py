@@ -11,6 +11,7 @@ import numpy as np
 
 from jims_mower.constants import LIVE_SCHEMA, VIEWER_SCHEMA
 from jims_mower.live import (
+    MESH_MAX_SIDE,
     LiveSession,
     build_parser,
     coarsen2d,
@@ -41,6 +42,17 @@ def test_parse_speed_and_config() -> None:
     assert "--phase-budget" in help_text
     assert "--calibrate-stride" in help_text
     assert "acre_yard_demo" in help_text
+
+
+def test_live_mesh_side_stable_across_speeds() -> None:
+    """Speed may coarsen rebuild stride, not the vertex grid."""
+    session = LiveSession(config="mission_tiny", fast=True, speed="1", steps=4)
+    sides = []
+    for label in ("1", "5", "max"):
+        session.speed = parse_speed(label)
+        budget = session._stream_budget()
+        sides.append(int(budget["mesh_side"]))
+    assert sides[0] == sides[1] == sides[2] == MESH_MAX_SIDE
 
 
 def test_fog_rgba_unknown_opaque_observed_clear() -> None:

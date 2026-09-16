@@ -577,6 +577,31 @@ def test_observed_elevation_stable_under_pitch_roll() -> None:
     assert float(np.ptp(zs)) < 0.45
 
 
+def test_growing_edge_follows_neighbors_not_swung_plane() -> None:
+    """New cells after a tip stay near the locked patch, not the IMU plane."""
+    omap = ObservedMap.empty(8.0, 8.0, 0.25)
+    pose = Pose(2.0, 2.0, 0.0, z=0.10, pitch=0.0, roll=0.0)
+    flat = np.full(omap.elevation.shape, 0.10, dtype=np.float32)
+    omap.stamp_disk(2.0, 2.0, 1.2, explored=True)
+    omap.ingest_observer({"elevation": flat}, pose=pose, grade_radius_m=1.4)
+    locked = omap.elevation_set.copy()
+    assert int(locked.sum()) > 8
+    # Swung plane would put the forward edge ~0.5 m higher.
+    gx, gy = np.meshgrid(
+        (np.arange(omap.cols) + 0.5) * 0.25,
+        (np.arange(omap.rows) + 0.5) * 0.25,
+    )
+    swung = (0.10 + 0.45 * (gx - 2.0)).astype(np.float32)
+    tip = Pose(2.6, 2.0, 0.0, z=0.12, pitch=0.40, roll=0.0)
+    omap.stamp_disk(2.6, 2.0, 1.2)
+    omap.ingest_observer({"elevation": swung, "elevation_prior": swung}, pose=tip, grade_radius_m=1.4)
+    fresh = omap.elevation_set & ~locked
+    assert int(fresh.sum()) > 0
+    # Neighbour inherit + 15% pose.z — not the 0.45 grade rewrite.
+    assert float(np.abs(omap.elevation[fresh] - 0.10).max()) < 0.08
+    assert float(np.abs(omap.elevation[locked] - 0.10).max()) < 1e-4
+
+
 def test_observed_elevation_ignores_far_plane_copy() -> None:
     """Camera-seen far cells must not inherit the current IMU plane."""
     omap = ObservedMap.empty(10.0, 10.0, 0.25)
