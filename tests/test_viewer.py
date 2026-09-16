@@ -38,6 +38,12 @@ def test_viewer_static_assets_present() -> None:
     assert "CALIBRATE" in html
     assert "mission-metrics" in html
     assert "tog-observed" in html
+    assert "tog-fog" in html
+    assert "tog-god" in html
+    assert "EventSource" in js
+    assert "unknownPad" in js
+    assert "setOwnerMeshVis" in js
+    assert "observed_fog" in js or "fog of war" in html.lower() or "fog" in js
 
 
 def test_demo_writes_viewer_bundle(tmp_path: Path) -> None:

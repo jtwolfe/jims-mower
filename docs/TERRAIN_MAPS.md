@@ -107,6 +107,7 @@ cells (same “stay tractable” idea as `property_scale` at 48×40 m @
 
 ```bash
 jims-mower-demo --config acre_yard --steps 80 --out demo_acre
+jims-mower-live --config acre_yard --speed 5
 jims-mower-mission-demo --config acre_yard --out mission_acre
 jims-mower-viewer --episode mission_acre
 jims-mower-mesh --out acre.glb --config acre_yard --seed 3 --stride 4

@@ -22,6 +22,12 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   padding: 4px 10px; font-size: 12px;
 }
 .chip.muted { color: var(--muted); }
+.chip.live {
+  background: #3d1e1e;
+  border-color: #8a3030;
+  color: #f0c0c0;
+  letter-spacing: 0.08em;
+}
 #phase-bar {
   display: flex; gap: 0; border-bottom: 1px solid var(--line); background: #0e1014;
 }

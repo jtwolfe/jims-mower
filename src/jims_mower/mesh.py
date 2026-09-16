@@ -18,13 +18,25 @@ import numpy as np
 from PIL import Image
 
 from jims_mower.constants import (
+    BUILDING_RGB,
+    BUNKER_RGB,
     CUT_GRASS_RGB,
     DIRT_RGB,
+    GARDEN_RGB,
+    GREEN_RGB,
     HAZARD_DRAIN,
     HAZARD_DRAIN_EDGE,
     HAZARD_NONE,
     HAZARD_STEEP,
     MESH_SCHEMA,
+    PATH_RGB,
+    POND_RGB,
+    STRUCTURE_BUILDING,
+    STRUCTURE_BUNKER,
+    STRUCTURE_GARDEN,
+    STRUCTURE_GREEN,
+    STRUCTURE_PATH,
+    STRUCTURE_POND,
     UNCUT_GRASS_RGB,
 )
 
@@ -33,6 +45,15 @@ HAZARD_RGB = {
     HAZARD_STEEP: (210, 168, 48),
     HAZARD_DRAIN_EDGE: (196, 96, 36),
     HAZARD_DRAIN: (92, 48, 28),
+}
+
+STRUCTURE_MESH_RGB = {
+    STRUCTURE_PATH: PATH_RGB,
+    STRUCTURE_BUILDING: BUILDING_RGB,
+    STRUCTURE_BUNKER: BUNKER_RGB,
+    STRUCTURE_GARDEN: GARDEN_RGB,
+    STRUCTURE_GREEN: GREEN_RGB,
+    STRUCTURE_POND: POND_RGB,
 }
 
 
@@ -100,6 +121,7 @@ def mesh_from_elevation(
     resolution_m: float,
     hazard: Optional[np.ndarray] = None,
     coverage: Optional[np.ndarray] = None,
+    structure: Optional[np.ndarray] = None,
     stride: int = 2,
     z_scale: float = 1.0,
 ) -> TerrainMesh:
@@ -135,6 +157,11 @@ def mesh_from_elevation(
         colors_grid[cut] = np.asarray(CUT_GRASS_RGB, dtype=np.float32) / 255.0
         colors_grid[uncut] = np.asarray(UNCUT_GRASS_RGB, dtype=np.float32) / 255.0
         colors_grid[dirt] = np.asarray(DIRT_RGB, dtype=np.float32) / 255.0
+    if structure is not None and np.asarray(structure).shape == (rows, cols):
+        st = np.asarray(structure)
+        colors_grid = colors_grid.copy()
+        for code, color in STRUCTURE_MESH_RGB.items():
+            colors_grid[st == code] = np.asarray(color, dtype=np.float32) / 255.0
     colors = colors_grid[np.ix_(row_i, col_i)].reshape(-1, 3).astype(np.float32)
 
     uvs = np.stack(
@@ -406,6 +433,10 @@ def mesh_from_env(env: Any, *, stride: int = 2, z_scale: float = 1.0) -> Terrain
     terrain = env._terrain
     hazard = terrain.hazard_map(env.cfg.robot.steep_slope_rad)
     coverage = env._coverage.as_float()
+    structure = None
+    layer = getattr(env, "_structure", None)
+    if layer is not None and getattr(layer, "grid", None) is not None:
+        structure = np.asarray(layer.grid)
     return mesh_from_elevation(
         terrain.elevation,
         width_m=env.cfg.world.width_m,
@@ -413,6 +444,7 @@ def mesh_from_env(env: Any, *, stride: int = 2, z_scale: float = 1.0) -> Terrain
         resolution_m=env.cfg.world.resolution_m,
         hazard=hazard,
         coverage=coverage,
+        structure=structure,
         stride=stride,
         z_scale=z_scale,
     )

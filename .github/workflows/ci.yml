@@ -74,6 +74,10 @@ jobs:
           jims-mower-mission-demo --fast --out /tmp/jims-mower-ci-mission --cameras 4
           test -f /tmp/jims-mower-ci-mission/mission.json
           test -f /tmp/jims-mower-ci-mission/viewer.json
+          jims-mower-live --fast --speed max --steps 24 --prepare-only --out /tmp/jims-mower-ci-live --cameras 4
+          test -f /tmp/jims-mower-ci-live/viewer.json
+          test -f /tmp/jims-mower-ci-live/maps/fog.png
+          test -f /tmp/jims-mower-ci-live/maps/observed.png
       - name: World Viewer + Teach Boundary smoke
         run: |
           jims-mower-mesh --out /tmp/jims-mower-ci-yard.glb --cameras 4 --seed 1 --stride 3

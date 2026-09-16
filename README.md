@@ -57,6 +57,15 @@ jims-mower-mission-demo --config golf_rough --out mission_out
 jims-mower-mission-demo --fast --out mission_fast
 jims-mower-viewer --episode mission_out
 
+# Live owner session (fog-of-war, wall-clock). One command: sim + viewer.
+# Default yard is acre_yard. Open http://127.0.0.1:8765/ while it runs —
+# do not wait for the episode folder to finish.
+jims-mower-live
+jims-mower-live --config acre_yard --speed 5
+jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
+# CI / laptop smoke uses --fast (mission_tiny). Acre explore→mow to
+# completion is a manual run, not a benchmark.
+
 # Keep the old scripted creep or random wheels:
 python -m jims_mower.demo --policy scripted --out demo_scripted
 python -m jims_mower.demo --policy random --out demo_random
@@ -97,6 +106,7 @@ jims-mower-demo --steps 160 --out demo_out
 jims-mower-viewer --episode demo_out
 jims-mower-teach --steps 80 --out teach_out
 jims-mower-demo --profile teach_out/profile.json --out demo_taught
+jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
 
 # WAVE UX-B — software self-test (no RF hardware)
 jims-mower-selftest
@@ -196,9 +206,11 @@ speeds. When the heuristic map grows new lips, the planner replans.
 
 That policy still plans from the **current** observer raster, so a 160-step
 clip only covers a few metres. For a visual yard job use
-`jims-mower-mission-demo`: calibrate the keep-in, explore unknown space,
-freeze the map, then mow every reachable mowable cell. Unknown cells are
-not assumed safe. See [`docs/MISSION_FLOW.md`](docs/MISSION_FLOW.md).
+`jims-mower-live` (wall-clock + fog-of-war viewer) or
+`jims-mower-mission-demo` (writes a finished episode, then scrub it):
+calibrate the keep-in, explore unknown space, freeze the map, then mow
+every reachable mowable cell. Unknown cells are not assumed safe. See
+[`docs/MISSION_FLOW.md`](docs/MISSION_FLOW.md).
 
 ## From detection to a wheel command
 
@@ -626,6 +638,8 @@ src/jims_mower/perception/    observers, BEV fuse, temporal filters, train stub
 src/jims_mower/planning/      costmap, boustrophedon+A*, controller, EKF
 src/jims_mower/contract.py    versioned message schemas
 src/jims_mower/episode.py     record / replay
+src/jims_mower/live.py        wall-clock mission + fog-of-war SSE session
+src/jims_mower/viewer.py      World Viewer HTTP + live SSE
 scripts/train_terrain_seg.py  export → numpy terrain weights
 docs/WAVE2B.md                domain-rand training note
 src/jims_mower/bc.py          numpy behaviour-cloning stub

@@ -15,14 +15,17 @@ import numpy as np
 
 from jims_mower.cameras import attitude_plane_hits, camera_world_pose
 from jims_mower.constants import (
+    BUILDING_RGB,
     HAZARD_DRAIN,
     HAZARD_DRAIN_EDGE,
     HAZARD_STEEP,
+    POND_RGB,
     STRUCTURE_BUILDING,
     STRUCTURE_BUNKER,
     STRUCTURE_GARDEN,
     STRUCTURE_GREEN,
     STRUCTURE_NONE,
+    STRUCTURE_POND,
 )
 from jims_mower.geofence import GeofenceSpec, rasterize_geofence
 from jims_mower.perception.cv_terrain import classify_structure_rgb
@@ -34,7 +37,11 @@ FREE_RGB = (46, 140, 58)
 EXPLORED_RGB = (72, 176, 88)
 HAZARD_RGB = (196, 96, 36)
 STRUCTURE_RGB = (92, 92, 110)
+POND_VIEW_RGB = POND_RGB
+BUILDING_VIEW_RGB = BUILDING_RGB
 FRONTIER_RGB = (42, 196, 220)
+FOG_RGB = (16, 18, 22)
+FOG_ALPHA_UNKNOWN = 236
 
 
 @dataclass
@@ -278,6 +285,8 @@ class ObservedMap:
         rgb[self.observed & (self.hazard >= HAZARD_STEEP)] = (210, 168, 48)
         rgb[self.observed & (self.hazard >= HAZARD_DRAIN_EDGE)] = HAZARD_RGB
         rgb[self.observed & (self.structure != STRUCTURE_NONE)] = STRUCTURE_RGB
+        rgb[self.observed & (self.structure == STRUCTURE_BUILDING)] = BUILDING_VIEW_RGB
+        rgb[self.observed & (self.structure == STRUCTURE_POND)] = POND_VIEW_RGB
         if frontiers:
             for row, col in frontiers:
                 if 0 <= row < self.rows and 0 <= col < self.cols:
@@ -386,3 +395,16 @@ def downsample_frontiers(
         if len(picked) >= int(limit):
             break
     return picked
+
+
+def fog_rgba(observed: np.ndarray) -> np.ndarray:
+    """Owner fog veil: unknown is nearly opaque, observed cells are holes.
+
+    Physics may still use the true height field. This raster is the owner
+    map: unknown is not shown as a finished god-view mesh.
+    """
+    mask = np.asarray(observed, dtype=bool)
+    rgba = np.zeros(mask.shape + (4,), dtype=np.uint8)
+    rgba[:, :] = (*FOG_RGB, FOG_ALPHA_UNKNOWN)
+    rgba[mask] = (0, 0, 0, 0)
+    return rgba[::-1]

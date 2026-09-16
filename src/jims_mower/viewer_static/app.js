@@ -29,6 +29,13 @@ const state = {
   trailLine: null,
   handles: [],
   drag: null,
+  live: false,
+  followLive: true,
+  lastMapSeq: -1,
+  lastCamSeq: -1,
+  lastStep: -1,
+  liveSource: null,
+  unknownPad: null,
 };
 
 const renderer = new THREE.WebGLRenderer({ canvas: $("view"), antialias: true });
@@ -145,7 +152,7 @@ async function loadTerrain(manifest) {
 
   const maps = manifest.maps || {};
   const loader = new THREE.TextureLoader();
-  const mkOverlay = async (key, url, color) => {
+  const mkOverlay = async (key, url, color, opacity = 0.42) => {
     if (!url) return null;
     try {
       const tex = await loader.loadAsync(`/data/${url}`);
@@ -158,13 +165,13 @@ async function loadTerrain(manifest) {
         new THREE.MeshBasicMaterial({
           map: tex,
           transparent: true,
-          opacity: 0.42,
+          opacity,
           depthWrite: false,
           color,
         })
       );
       plane.rotation.x = -Math.PI / 2;
-      plane.position.set(w / 2, 0.12, h / 2);
+      plane.position.set(w / 2, key === "fog" ? 0.18 : 0.12, h / 2);
       plane.visible = false;
       group.add(plane);
       state.overlays[key] = plane;
@@ -179,6 +186,7 @@ async function loadTerrain(manifest) {
   await mkOverlay("occupancy", maps.occupancy, 0xffffff);
   await mkOverlay("error", maps.elevation_error, 0xffffff);
   await mkOverlay("observed", maps.observed, 0xffffff);
+  await mkOverlay("fog", maps.fog, 0xffffff, 1.0);
   return group;
 }
 
@@ -190,6 +198,10 @@ function setOverlayVis() {
   if (state.overlays.observed) {
     state.overlays.observed.visible = $("tog-observed") ? $("tog-observed").checked : false;
   }
+  const god = $("tog-god") && $("tog-god").checked;
+  const fogOn = $("tog-fog") && $("tog-fog").checked && !god;
+  if (state.overlays.fog) state.overlays.fog.visible = !!fogOn;
+  setOwnerMeshVis(fogOn);
   if (state.planLine) state.planLine.visible = $("tog-plan").checked;
   if (state.exploreLine) {
     state.exploreLine.visible = $("tog-explore") ? $("tog-explore").checked : false;
@@ -452,20 +464,25 @@ $("btn-save").addEventListener("click", async () => {
   }
 });
 
-["tog-coverage", "tog-hazard", "tog-occupancy", "tog-observed", "tog-plan", "tog-explore", "tog-pose", "tog-fence", "tog-trail", "tog-error"].forEach(
+["tog-coverage", "tog-hazard", "tog-occupancy", "tog-observed", "tog-fog", "tog-god", "tog-plan", "tog-explore", "tog-pose", "tog-fence", "tog-trail", "tog-error"].forEach(
   (id) => $(id) && $(id).addEventListener("change", setOverlayVis)
 );
 
 $("scrub").addEventListener("input", (ev) => updatePose(Number(ev.target.value)));
 $("cam-select").addEventListener("change", () => updatePip(state.index));
 $("btn-play").addEventListener("click", () => {
+  if (state.live) {
+    state.followLive = !state.followLive;
+    $("btn-play").textContent = state.followLive ? "Follow" : "Paused";
+    return;
+  }
   state.playing = !state.playing;
   $("btn-play").textContent = state.playing ? "Pause" : "Play";
 });
 
 function tick() {
   requestAnimationFrame(tick);
-  if (state.playing && state.poses.length) {
+  if (state.playing && state.poses.length && !state.followLive) {
     const next = state.index + 1;
     if (next >= state.poses.length) {
       state.playing = false;
@@ -476,6 +493,214 @@ function tick() {
   }
   controls.update();
   renderer.render(scene, camera);
+}
+
+function ensureUnknownPad() {
+  if (state.unknownPad) return state.unknownPad;
+  const w = state.width || 12;
+  const h = state.height || 12;
+  const pad = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshLambertMaterial({ color: 0x12141a, side: THREE.DoubleSide })
+  );
+  pad.rotation.x = -Math.PI / 2;
+  pad.position.set(w / 2, 0.01, h / 2);
+  pad.name = "unknownPad";
+  scene.add(pad);
+  state.unknownPad = pad;
+  return pad;
+}
+
+function setOwnerMeshVis(fogOn) {
+  // Owner fog hides the true height-field mesh. Physics may still use it;
+  // the owner map must not look finished from t=0.
+  const hideTrue = !!fogOn;
+  ensureUnknownPad();
+  if (state.unknownPad) state.unknownPad.visible = hideTrue;
+  if (state.meshGroup) {
+    const overlaySet = new Set(Object.values(state.overlays).filter(Boolean));
+    state.meshGroup.traverse((obj) => {
+      if (!obj.isMesh) return;
+      if (overlaySet.has(obj)) return;
+      obj.visible = !hideTrue;
+    });
+  }
+  if (state.overlays.observed && state.overlays.observed.material) {
+    state.overlays.observed.material.opacity = hideTrue ? 0.92 : 0.42;
+  }
+}
+
+function ensureOverlayPlane(key, opacity) {
+  if (state.overlays[key]) return state.overlays[key];
+  if (!state.meshGroup) return null;
+  const w = state.width || 12;
+  const h = state.height || 12;
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: opacity == null ? 0.42 : opacity,
+      depthWrite: false,
+      color: 0xffffff,
+    })
+  );
+  plane.rotation.x = -Math.PI / 2;
+  plane.position.set(w / 2, key === "fog" ? 0.18 : 0.12, h / 2);
+  state.meshGroup.add(plane);
+  state.overlays[key] = plane;
+  return plane;
+}
+
+function loadOverlayUrl(key, url, opacity) {
+  if (!url) return;
+  const plane = ensureOverlayPlane(key, opacity);
+  if (!plane) return;
+  const loader = new THREE.TextureLoader();
+  loader.load(url, (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.flipY = true;
+    if (plane.material.map) plane.material.map.dispose();
+    plane.material.map = tex;
+    plane.material.needsUpdate = true;
+    setOverlayVis();
+  });
+}
+
+function replaceLine(key, points, color) {
+  if (state[key]) {
+    scene.remove(state[key]);
+    state[key].geometry.dispose();
+  }
+  if (!points || points.length < 2) {
+    state[key] = null;
+    return;
+  }
+  const line = lineFromXY(points, color, false);
+  scene.add(line);
+  state[key] = line;
+}
+
+function replaceFrontiers(pts) {
+  if (state.frontierGroup) {
+    scene.remove(state.frontierGroup);
+    state.frontierGroup.traverse((child) => {
+      if (child.geometry) child.geometry.dispose();
+    });
+  }
+  if (!pts || !pts.length) {
+    state.frontierGroup = null;
+    return;
+  }
+  const g = new THREE.Group();
+  pts.forEach((pt) => {
+    const sph = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 8, 8),
+      new THREE.MeshLambertMaterial({ color: 0x42c4dc })
+    );
+    sph.position.copy(worldToScene(pt.x, pt.y, 0.12));
+    g.add(sph);
+  });
+  scene.add(g);
+  state.frontierGroup = g;
+  setOverlayVis();
+}
+
+function applyLiveFrame(frame) {
+  if (!frame || frame.live === false) return;
+  if (frame.step != null && frame.step !== state.lastStep && frame.pose) {
+    const row = Object.assign({}, frame.pose, {
+      phase: frame.phase,
+      phase_label: frame.phase_label,
+      map_completion: frame.map_pct,
+      actual_coverage_fraction: frame.cut_pct,
+      step: frame.step,
+    });
+    state.poses.push(row);
+    state.lastStep = frame.step;
+    $("scrub").max = String(Math.max(0, state.poses.length - 1));
+  }
+  if (state.followLive && frame.pose && state.poseMarker) {
+    state.poseMarker.position.copy(worldToScene(frame.pose.x, frame.pose.y, frame.pose.z || 0));
+    state.poseMarker.rotation.y = -(frame.pose.theta || 0);
+    const phase = frame.phase || "";
+    $("scrub").value = String(Math.max(0, state.poses.length - 1));
+    $("scrub-label").textContent = `LIVE step ${frame.step || 0} · ${frame.phase_label || phase}`;
+    setPhaseBar(phase);
+    const el = $("mission-metrics");
+    if (el) {
+      const reach = frame.reachable || 0;
+      const unreach = frame.unreachable || 0;
+      const denom = reach + unreach;
+      const reachPct = denom ? (100 * reach) / denom : 0;
+      const unreachPct = denom ? (100 * unreach) / denom : 0;
+      el.textContent =
+        `map ${(100 * (frame.map_pct || 0)).toFixed(1)}%\n` +
+        `reachable mowable ${reachPct.toFixed(1)}%  unreachable ${unreachPct.toFixed(1)}%\n` +
+        `planned ${(100 * (frame.planned_pct || 0)).toFixed(1)}%  cut ${(100 * (frame.cut_pct || 0)).toFixed(1)}%`;
+    }
+    const chip = $("phase-chip");
+    if (chip) chip.textContent = `LIVE ${frame.phase_label || frame.phase || "—"}`;
+    const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
+    if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
+    if (phase === "mow" && $("tog-coverage")) $("tog-coverage").checked = true;
+  }
+  if (frame.map_seq != null && frame.map_seq !== state.lastMapSeq) {
+    loadOverlayUrl("observed", frame.observed_url, 0.48);
+    loadOverlayUrl("fog", frame.fog_url, 1.0);
+    state.lastMapSeq = frame.map_seq;
+    replaceFrontiers(frame.frontiers || []);
+    replaceLine("exploreLine", (frame.explore || []).map((p) => [p.x, p.y]), 0xf0a030);
+    if (frame.plan && frame.plan.length >= 2) {
+      replaceLine("planLine", frame.plan.map((p) => [p.x, p.y]), 0x2ad4e6);
+    }
+    setOverlayVis();
+  }
+  if (frame.cam_seq != null && frame.cam_seq !== state.lastCamSeq) {
+    const select = $("cam-select");
+    const name = (select && select.value) || (frame.cameras && frame.cameras[0]) || "front";
+    $("pip-img").src = `/api/live/cam/${name}?v=${frame.cam_seq}`;
+    $("pip-meta").textContent = `live · ${name}`;
+    state.lastCamSeq = frame.cam_seq;
+  }
+  if (frame.keep_in && frame.keep_in.length >= 3) {
+    if (!state.profile) state.profile = { keep_in: [], keep_out: [], home: { x: 1, y: 1, theta: 0 } };
+    state.profile.keep_in = frame.keep_in;
+    if (frame.keep_out) state.profile.keep_out = frame.keep_out;
+    rebuildFence();
+  }
+}
+
+function startLive() {
+  state.live = true;
+  state.followLive = true;
+  const chip = $("live-chip");
+  if (chip) {
+    chip.hidden = false;
+    chip.classList.add("live");
+    chip.textContent = "LIVE";
+  }
+  if ($("tog-fog")) $("tog-fog").checked = true;
+  if ($("tog-god")) $("tog-god").checked = false;
+  if ($("tog-observed")) $("tog-observed").checked = true;
+  if ($("tog-error")) $("tog-error").checked = false;
+  if ($("btn-play")) $("btn-play").textContent = "Follow";
+  setOverlayVis();
+  if (typeof EventSource === "undefined") {
+    $("save-status").textContent = "EventSource missing — poll /api/live/snapshot";
+    return;
+  }
+  const src = new EventSource("/api/live");
+  state.liveSource = src;
+  src.onmessage = (ev) => {
+    try {
+      applyLiveFrame(JSON.parse(ev.data));
+    } catch (err) {
+      console.warn("live frame", err);
+    }
+  };
+  src.onerror = () => {
+    $("save-status").textContent = "live stream reconnecting…";
+  };
 }
 
 async function boot() {
@@ -493,7 +718,10 @@ async function boot() {
       console.warn("elevation json failed", err);
     }
   }
-  $("subtitle").textContent = `${manifest.policy || "sim"} · ${state.width.toFixed(1)}×${state.height.toFixed(1)} m · no mAP/FPS`;
+  const live = !!manifest.live;
+  $("subtitle").textContent = live
+    ? `LIVE ${manifest.policy || "mission"} · fog-of-war · ${state.width.toFixed(1)}×${state.height.toFixed(1)} m · no mAP/FPS`
+    : `${manifest.policy || "sim"} · ${state.width.toFixed(1)}×${state.height.toFixed(1)} m · no mAP/FPS`;
   $("mesh-chip").textContent = `mesh ${manifest.vertex_count || 0} v / ${manifest.triangle_count || 0} t`;
   controls.target.set(state.width / 2, 0, state.height / 2);
   camera.position.set(state.width * 0.15, Math.max(state.width, state.height) * 0.9, state.height * 1.15);
@@ -581,8 +809,14 @@ async function boot() {
   });
   $("scrub").max = String(Math.max(0, state.poses.length - 1));
   $("tog-coverage").checked = false;
+  if (live) {
+    startLive();
+  } else if ($("tog-fog") && manifest.fog) {
+    $("tog-fog").checked = true;
+  }
   setOverlayVis();
-  updatePose(0);
+  if (state.poses.length) updatePose(0);
+  else if (state.poseMarker) updatePose(0);
   tick();
 }
 
