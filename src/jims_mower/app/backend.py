@@ -23,6 +23,12 @@ from jims_mower.geofence import allowed_xy
 from jims_mower.mesh import mesh_from_elevation, mesh_to_payload
 from jims_mower.profile import RadioPrefs
 from jims_mower.safe_state import SafeStateMachine
+from jims_mower.schedule import (
+    Clock,
+    ScheduleHook,
+    gates_from_owner_state,
+    rain_from_weather,
+)
 from jims_mower.yard_profile import (
     YardProfile,
     YardProfileError,
@@ -47,6 +53,15 @@ class AppBackend(Protocol):
 
 def _pose_dict(x: float, y: float, theta: float) -> dict[str, float]:
     return {"x": float(x), "y": float(y), "theta": float(theta)}
+
+
+def _weather_status(*, rain: bool, extra: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    blob = {"rain": bool(rain), "wet": bool(rain)}
+    if isinstance(extra, dict):
+        blob.update({k: extra[k] for k in extra if k not in blob})
+        blob["rain"] = bool(rain or extra.get("wet") or extra.get("rain"))
+        blob["wet"] = bool(blob["rain"])
+    return blob
 
 
 def _radio_status(radio: Any, *, rssi: int = -88) -> dict[str, Any]:
@@ -259,11 +274,47 @@ class MemoryBackend:
         self.temp_c = 42.0
         self.faults: list[dict[str, str]] = []
         self.hours_mowed = 1.4
+        self.rain = False
+        self.schedule_hook = ScheduleHook.from_profile_schedule(self.yard.schedule)
         rows = max(1, int(round(self.yard.height_m / self.yard.resolution_m)))
         cols = max(1, int(round(self.yard.width_m / self.yard.resolution_m)))
         self._coverage = np.zeros((rows, cols), dtype=np.float32)
         self._occ = np.zeros((rows, cols), dtype=np.float32)
         self._paint_keepout()
+
+    def set_clock(self, clock: Clock) -> None:
+        self.schedule_hook.set_clock(clock)
+
+    def _gates_unlocked(self) -> Any:
+        mode = self.safe.mode if self.safe.mode in SAFE_MODES else "run"
+        mission = self.mission
+        if mode == "estop":
+            mission = "estop"
+        return gates_from_owner_state(
+            soc=float(self.soc),
+            rain=bool(self.rain),
+            faults=self.faults,
+            mission=mission,
+            machine=mode,
+        )
+
+    def _arm_from_schedule(self) -> None:
+        if self.safe.mode == "estop":
+            self.safe.clear()
+        self.faults = []
+        self.mission = "mowing"
+
+    def _stop_from_schedule(self) -> None:
+        if self.safe.mode != "estop":
+            self.mission = "idle"
+
+    def _poll_schedule_unlocked(self) -> None:
+        self.schedule_hook.poll(
+            self._gates_unlocked(),
+            start=self._arm_from_schedule,
+            stop=self._stop_from_schedule,
+            spec=self.yard.schedule,
+        )
 
     def _paint_keepout(self) -> None:
         spec = self.yard.geofence_spec()
@@ -289,6 +340,7 @@ class MemoryBackend:
             return self._status_unlocked()
 
     def _status_unlocked(self) -> dict[str, Any]:
+        self._poll_schedule_unlocked()
         grass = self._coverage >= 0.0
         cut = grass & (self._coverage >= 0.5)
         total = int(grass.sum())
@@ -316,6 +368,8 @@ class MemoryBackend:
             "coverage_pct": coverage_pct,
             "hours_mowed": float(self.hours_mowed),
             "yard": self.yard.name,
+            "weather": _weather_status(rain=self.rain),
+            "schedule": self.schedule_hook.status_dict(),
             "not_a_benchmark": True,
         }
 
@@ -334,6 +388,7 @@ class MemoryBackend:
             self._paint_keepout()
             if self.yard_path is not None:
                 save_yard_profile(profile, self.yard_path)
+            self.schedule_hook.sync(profile.schedule)
             return profile.as_dict()
 
     def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
@@ -450,6 +505,41 @@ class SimBackend:
         self.safe = SafeStateMachine()
         self.faults: list[dict[str, str]] = []
         self.hours_mowed = 0.0
+        self.rain = rain_from_weather(self._info.get("weather"))
+        self.schedule_hook = ScheduleHook.from_profile_schedule(self.yard.schedule)
+
+    def set_clock(self, clock: Clock) -> None:
+        self.schedule_hook.set_clock(clock)
+
+    def _gates_unlocked(self) -> Any:
+        mode = self.safe.mode
+        mission = "estop" if mode == "estop" else self.mission
+        return gates_from_owner_state(
+            soc=float(self._info.get("battery_soc", 0.9)),
+            rain=bool(self.rain or rain_from_weather(self._info.get("weather"))),
+            faults=_ux_b_faults(self._info, self.faults),
+            mission=mission,
+            machine=mode,
+        )
+
+    def _arm_from_schedule(self) -> None:
+        if self.safe.mode == "estop":
+            self.safe.clear()
+        self.faults = []
+        self.mission = "mowing"
+
+    def _stop_from_schedule(self) -> None:
+        if self.safe.mode != "estop":
+            self.mission = "idle"
+
+    def _poll_schedule_unlocked(self) -> None:
+        self.rain = bool(self.rain or rain_from_weather(self._info.get("weather")))
+        self.schedule_hook.poll(
+            self._gates_unlocked(),
+            start=self._arm_from_schedule,
+            stop=self._stop_from_schedule,
+            spec=self.yard.schedule,
+        )
 
     def _pose(self) -> dict[str, float]:
         pose = self._info.get("pose") or {}
@@ -468,6 +558,13 @@ class SimBackend:
         if self._info.get("drain_drop"):
             faults.append({"code": "DRAIN", "detail": "wheel in channel"})
         faults = _ux_b_faults(self._info, faults)
+        self._poll_schedule_unlocked()
+        mode = self.safe.mode
+        mission = self.mission
+        if mode == "estop":
+            mission = "estop"
+        weather = self._info.get("weather") if isinstance(self._info.get("weather"), dict) else {}
+        rain = bool(self.rain or rain_from_weather(weather))
         return {
             "schema": APP_STATUS_SCHEMA,
             "pose": self._pose(),
@@ -485,6 +582,8 @@ class SimBackend:
             "coverage_pct": 100.0 * float(self._info.get("coverage_fraction") or 0.0),
             "hours_mowed": float(self.hours_mowed),
             "yard": self.yard.name,
+            "weather": _weather_status(rain=rain, extra=weather if isinstance(weather, dict) else None),
+            "schedule": self.schedule_hook.status_dict(),
             "not_a_benchmark": True,
         }
 
@@ -501,6 +600,7 @@ class SimBackend:
             self.yard = profile
             if self.yard_path is not None:
                 save_yard_profile(profile, self.yard_path)
+            self.schedule_hook.sync(profile.schedule)
             return profile.as_dict()
 
     def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
@@ -592,6 +692,33 @@ class EpisodeBackend:
         self.yard_path = Path(yard_path) if yard_path else None
         self.yard = yard or self._yard_from_episode()
         self.hours_mowed = 0.0
+        self.rain = False
+        self.schedule_hook = ScheduleHook.from_profile_schedule(self.yard.schedule)
+
+    def set_clock(self, clock: Clock) -> None:
+        self.schedule_hook.set_clock(clock)
+
+    def _gates_unlocked(self, info: Optional[dict[str, Any]] = None) -> Any:
+        blob = info if isinstance(info, dict) else {}
+        mode = self.safe.mode
+        mission = "estop" if mode == "estop" else self.mission
+        return gates_from_owner_state(
+            soc=float(blob.get("battery_soc", 0.88)),
+            rain=bool(self.rain or rain_from_weather(blob.get("weather"))),
+            faults=_ux_b_faults(blob, self.faults),
+            mission=mission,
+            machine=mode,
+        )
+
+    def _arm_from_schedule(self) -> None:
+        if self.safe.mode == "estop":
+            self.safe.clear()
+        self.faults = []
+        self.mission = "mowing"
+
+    def _stop_from_schedule(self) -> None:
+        if self.safe.mode != "estop":
+            self.mission = "idle"
 
     def _records(self) -> list[dict[str, Any]]:
         recs: list[dict[str, Any]] = []
@@ -642,6 +769,18 @@ class EpisodeBackend:
         mission = self.mission
         if mode == "estop":
             mission = "estop"
+        self.schedule_hook.poll(
+            self._gates_unlocked(info),
+            start=self._arm_from_schedule,
+            stop=self._stop_from_schedule,
+            spec=self.yard.schedule,
+        )
+        mode = self.safe.mode
+        mission = self.mission
+        if mode == "estop":
+            mission = "estop"
+        weather = info.get("weather") if isinstance(info.get("weather"), dict) else {}
+        rain = bool(self.rain or rain_from_weather(weather) or rain_from_weather(info.get("weather")))
         return {
             "schema": APP_STATUS_SCHEMA,
             "pose": _pose_dict(float(pose.get("x", 0.0)), float(pose.get("y", 0.0)), float(pose.get("theta", 0.0))),
@@ -663,6 +802,8 @@ class EpisodeBackend:
             "hours_mowed": float(self.hours_mowed),
             "yard": self.yard.name,
             "episode": str(self.reader.episode_dir),
+            "weather": _weather_status(rain=rain, extra=weather if isinstance(weather, dict) else None),
+            "schedule": self.schedule_hook.status_dict(),
             "not_a_benchmark": True,
         }
 
@@ -679,6 +820,7 @@ class EpisodeBackend:
             self.yard = profile
             if self.yard_path is not None:
                 save_yard_profile(profile, self.yard_path)
+            self.schedule_hook.sync(profile.schedule)
             return profile.as_dict()
 
     def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:

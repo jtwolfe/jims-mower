@@ -172,7 +172,7 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 | Method | Path | Contract |
 | --- | --- | --- |
 | `GET` | `/status` | `jims_mower.app_status.v1` — `pose`, `battery`, `state` (`mission` + SafeState `machine`), `radio`, `faults` |
-| `GET` / `PUT` | `/yard` | full [`YardProfile`](src/jims_mower/profile.py) (`jims_mower.yard.v1`) |
+| `GET` / `PUT` | `/yard` | full [`YardProfile`](src/jims_mower/profile.py) (`jims_mower.yard.v1`) — `schedule` is evaluated by [`ScheduleEngine`](src/jims_mower/schedule.py) |
 | `POST` | `/command` | `{cmd}` ∈ `start` / `stop` / `return` / `estop` / `teach` (live also `save_yard` / `load_yard` / `pair`) |
 | `GET` | `/map/mesh` | UX-A `mesh_to_payload` + `ux_a_href: /viewer` |
 | `GET` | `/map/coverage` | downsampled cut / uncut / non-grass |
@@ -183,7 +183,11 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 `--live` `/status` adds `backend`, `robot` (idle / pairing / live /
 fault), `owner_copy`, `radio_path`, map/cut %, `session_summary`.
 `start` after `estop` is the operator clear of the software latch.
-See [`docs/UX_C.md`](docs/UX_C.md).
+`/status` also carries `schedule` (`jims_mower.schedule.v1`) and
+`weather.rain`. The weekly window arms `start` / duration-stops when
+`YardProfile.schedule.enabled` is true (SOC / rain / fault gates).
+Not a cloud calendar. See [`docs/SCHEDULE.md`](docs/SCHEDULE.md) and
+[`docs/UX_C.md`](docs/UX_C.md).
 
 ## Learning stubs (WAVE 3A)
 

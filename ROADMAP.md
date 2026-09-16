@@ -41,7 +41,7 @@ Later items stay unchecked until they land. No claimed mAP / FPS.
 
 ## WAVE UX-C — owner app shell + YardProfile API (done, on main)
 
-- [x] YardProfile JSON (`jims_mower.yard.v1`) — home, keep-in/out, mesh, radio prefs, schedule stub
+- [x] YardProfile JSON (`jims_mower.yard.v1`) — home, keep-in/out, mesh, radio prefs, weekly schedule fields
 - [x] Load / save / validate on the UX-A `YardProfile` (radio / schedule extras)
 - [x] Local HTTP JSON API: `/status`, `/yard`, `/command`, `/map/mesh`, `/map/coverage`
 - [x] SSE `/events` for live status
@@ -331,6 +331,26 @@ jims-mower-owner --live
 - [x] Radio path chips (BT teach / Wi-Fi map / LoRa sparse, simulated)
 - [x] Pairing stub before Start; stuck vs dead-motor SOS inject
 - [x] App live control contract smoke + existing live tests
+
+## Product → hardware (schedule engine first)
+
+ROADMAP boxes above are **hooks**, not production CV. Honest inventory:
+[`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md). Construction
+math: [`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md). No claimed
+mAP / FPS / field runtime.
+
+- [x] `YardProfile.schedule` engine arms / skips / duration-stops a job
+      (wall clock in app/live; FrozenClock in tests). SOC / rain / fault
+      / ESTOP gates. [`docs/SCHEDULE.md`](docs/SCHEDULE.md)
+- [x] Phone `#/health` next-run + enable toggle (`PUT /yard`)
+- [x] `/status` carries `jims_mower.schedule.v1` + `weather.rain`
+- [ ] Remaining build-order rows (ESTOP rail, CSI, IMU/GNSS/ToF, dataset,
+      real heads, fusion, fab) stay unchecked until they are the field
+      article — not another stub
+
+```bash
+pytest tests/test_schedule.py tests/test_yard_profile.py tests/test_app_api.py
+```
 
 ## WAVE UX-B — faults + radio sim (append)
 

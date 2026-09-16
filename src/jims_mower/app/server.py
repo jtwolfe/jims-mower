@@ -334,9 +334,24 @@ def serve_app(
     port: int = 8765,
     assets: Optional[Path] = None,
 ) -> None:
+    import threading
+    import time
+
     httpd = make_server(backend, host=host, port=port, assets=assets)
+    stop = threading.Event()
+
+    def _schedule_tick() -> None:
+        while not stop.wait(1.0):
+            try:
+                backend.tick()
+            except Exception:
+                time.sleep(0.0)
+
+    ticker = threading.Thread(target=_schedule_tick, daemon=True, name="jims-mower-schedule")
+    ticker.start()
     try:
         httpd.serve_forever()
     finally:
+        stop.set()
         httpd.server_close()
         backend.close()

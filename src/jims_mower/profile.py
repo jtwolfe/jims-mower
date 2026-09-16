@@ -12,7 +12,11 @@ import re
 
 from jims_mower.constants import RADIO_LINKS, SCHEDULE_DAYS, SURVEY_SCHEMA, YARD_PROFILE_SCHEMA
 from jims_mower.geofence import GeofenceSpec
+from jims_mower.schedule import DEFAULT_NOTE, ScheduleSpec, resolve_timezone
 from jims_mower.types import Pose
+
+# Older name — same document, now a real weekly window.
+ScheduleStub = ScheduleSpec
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -41,26 +45,6 @@ class RadioPrefs:
             "wifi": {"enabled": bool(self.wifi_enabled), "ssid": str(self.wifi_ssid)},
             "lora": {"enabled": bool(self.lora_enabled), "channel": int(self.lora_channel)},
             "primary": str(self.primary),
-        }
-
-
-@dataclass(frozen=True)
-class ScheduleStub:
-    """Placeholder weekly window — not a running scheduler."""
-
-    enabled: bool = False
-    days: tuple[str, ...] = ()
-    start_local: str = "09:00"
-    duration_min: int = 60
-    note: str = "stub — not a scheduler"
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "enabled": bool(self.enabled),
-            "days": list(self.days),
-            "start_local": str(self.start_local),
-            "duration_min": int(self.duration_min),
-            "note": str(self.note),
         }
 
 
@@ -105,7 +89,7 @@ def _parse_radio(raw: Any) -> dict[str, Any]:
 
 def _parse_schedule(raw: Any) -> dict[str, Any]:
     if raw is None:
-        return ScheduleStub().as_dict()
+        return ScheduleSpec().as_dict()
     if not isinstance(raw, dict):
         raise ProfileError("schedule must be a mapping")
     days_raw = raw.get("days") or []
@@ -127,12 +111,36 @@ def _parse_schedule(raw: Any) -> dict[str, Any]:
         raise ProfileError("schedule.duration_min must be an integer") from exc
     if duration < 0 or duration > 24 * 60:
         raise ProfileError("schedule.duration_min must be in 0..1440")
-    return ScheduleStub(
+    timezone = str(raw.get("timezone") or "local").strip() or "local"
+    try:
+        resolve_timezone(timezone)
+    except ValueError as exc:
+        raise ProfileError(str(exc)) from exc
+    try:
+        min_soc = float(raw.get("min_soc", 0.25))
+    except (TypeError, ValueError) as exc:
+        raise ProfileError("schedule.min_soc must be a number") from exc
+    if min_soc < 0.0 or min_soc > 1.0:
+        raise ProfileError("schedule.min_soc must be in [0, 1]")
+    try:
+        arm_window = int(raw.get("arm_window_min", 15))
+    except (TypeError, ValueError) as exc:
+        raise ProfileError("schedule.arm_window_min must be an integer") from exc
+    if arm_window < 1 or arm_window > 180:
+        raise ProfileError("schedule.arm_window_min must be in 1..180")
+    note = str(raw.get("note") or DEFAULT_NOTE).strip() or DEFAULT_NOTE
+    if note == "stub — not a scheduler":
+        note = DEFAULT_NOTE
+    return ScheduleSpec(
         enabled=bool(raw.get("enabled", False)),
         days=tuple(days),
         start_local=start,
         duration_min=duration,
-        note=str(raw.get("note") or "stub — not a scheduler"),
+        timezone=timezone,
+        min_soc=min_soc,
+        skip_rain=bool(raw.get("skip_rain", True)),
+        arm_window_min=arm_window,
+        note=note,
     ).as_dict()
 
 

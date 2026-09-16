@@ -35,6 +35,10 @@ def test_default_roundtrip(tmp_path: Path) -> None:
     assert loaded.radio["wifi"]["enabled"] is False
     assert loaded.radio["lora"]["enabled"] is True
     assert loaded.schedule["days"] == ["mon", "wed", "fri"]
+    assert loaded.schedule["timezone"] == "local"
+    assert loaded.schedule["min_soc"] == pytest.approx(0.25)
+    assert loaded.schedule["skip_rain"] is True
+    assert "stub" not in loaded.schedule["note"]
     assert loaded.geofence_spec().has_polygons()
 
 
@@ -64,6 +68,10 @@ def test_validate_radio_and_schedule() -> None:
         validate_yard_profile(dict(base, schedule={**base["schedule"], "start_local": "9am"}))
     with pytest.raises(YardProfileError, match="days"):
         validate_yard_profile(dict(base, schedule={**base["schedule"], "days": ["funday"]}))
+    with pytest.raises(YardProfileError, match="IANA"):
+        validate_yard_profile(dict(base, schedule={**base["schedule"], "timezone": "Nope/Zone"}))
+    with pytest.raises(YardProfileError, match="min_soc"):
+        validate_yard_profile(dict(base, schedule={**base["schedule"], "min_soc": 4}))
 
 
 def test_from_geofence_and_survey() -> None:

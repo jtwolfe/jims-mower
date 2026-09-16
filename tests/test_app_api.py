@@ -215,6 +215,53 @@ def test_ux_b_fault_and_radio_overlay() -> None:
     assert lost["link"] == "none"
 
 
+def test_status_includes_schedule_and_health_toggle() -> None:
+    from datetime import datetime, timezone
+
+    from jims_mower.constants import SCHEDULE_SCHEMA
+    from jims_mower.schedule import FrozenClock
+
+    backend = MemoryBackend(default_yard_profile())
+    backend.set_clock(FrozenClock(datetime(2026, 9, 14, 9, 0, tzinfo=timezone.utc)))
+    httpd, host, port, _ = _serve(backend)
+    try:
+        code, status = _json(host, port, "GET", "/status")
+        assert code == 200
+        assert status["schedule"]["schema"] == SCHEDULE_SCHEMA
+        assert status["schedule"]["enabled"] is False
+        assert status["state"]["mission"] == "idle"
+
+        yard = backend.get_yard()
+        yard["schedule"] = {
+            **yard["schedule"],
+            "enabled": True,
+            "timezone": "UTC",
+            "days": ["mon", "wed", "fri"],
+            "start_local": "09:00",
+        }
+        code, saved = _json(host, port, "PUT", "/yard", yard)
+        assert code == 200
+        assert saved["schedule"]["enabled"] is True
+
+        code, armed = _json(host, port, "GET", "/status")
+        assert armed["state"]["mission"] == "mowing"
+        assert armed["schedule"]["action"] == "arm"
+        assert armed["schedule"]["next_run"]
+
+        conn = HTTPConnection(host, port, timeout=4.0)
+        conn.request("GET", "/static/app.js")
+        resp = conn.getresponse()
+        js = resp.read().decode("utf-8")
+        conn.close()
+        assert "sched-toggle" in js
+        assert "Schedule is a stub" not in js
+        assert "Next run:" in js
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        backend.close()
+
+
 def test_make_backend_rejects_unknown() -> None:
     from jims_mower.yard_profile import YardProfileError
 

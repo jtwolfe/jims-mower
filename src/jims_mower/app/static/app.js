@@ -419,15 +419,39 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     $("#ret").onclick = () => command("return");
   }
 
+  function scheduleCardHtml(st, yard) {
+    const live = st.schedule || {};
+    const sch = Object.assign({}, (yard && yard.schedule) || {}, live);
+    const enabled = !!sch.enabled;
+    const next = sch.next_run_local || sch.next_run || "—";
+    const reason = sch.reason || sch.skip_reason;
+    const action = sch.action || "idle";
+    const rain = !!(st.weather && (st.weather.rain || st.weather.wet));
+    const skipLine = reason
+      ? `${action === "skip" ? "Skipped" : action}: ${reason}`
+      : enabled
+        ? "Armed — will start in the next window if SOC / rain / fault gates pass."
+        : "Disabled — jobs only start from the map.";
+    return `<div class="card" id="schedule-card">
+        <div class="toggle-row">
+          <strong>Schedule</strong>
+          <button type="button" class="toggle ${enabled ? "on" : ""}" id="sched-toggle" aria-pressed="${enabled ? "true" : "false"}" aria-label="Enable schedule">${enabled ? "On" : "Off"}</button>
+        </div>
+        <div class="sub" id="sched-next">Next run: ${next}</div>
+        <div class="sub">${(sch.days || []).join(", ") || "no days"} @ ${sch.start_local || "—"} · ${sch.timezone || "local"}</div>
+        <div class="sub">SOC gate ${(Number(sch.min_soc != null ? sch.min_soc : 0.25) * 100).toFixed(0)}% · rain skip ${sch.skip_rain === false ? "off" : "on"}${rain ? " · raining now" : ""}</div>
+        <div class="sub" id="sched-reason">${skipLine}</div>
+      </div>`;
+  }
+
   function renderHealth() {
     const st = state.status || {};
     const bat = st.battery || {};
     const radio = st.radio || {};
-    const sch = (state.yard && state.yard.schedule) || {};
     const path = st.radio_path || (state.live && state.live.radio_path) || {};
     screen().innerHTML = `
       <h1>Health</h1>
-      <p class="lead">Maintenance and radio prefs. Schedule is a stub.</p>
+      <p class="lead">Maintenance, radios, and the weekly job window.</p>
       ${radioChipsHtml(path)}
       <div class="row">
         <div class="chip">Battery<b>${Math.round(100 * Number(bat.soc || 0))}%</b></div>
@@ -445,12 +469,23 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <strong>Hours mowed</strong>${Number(st.hours_mowed || 0).toFixed(2)}
         <div class="sub">String-head check every 8 hours (stub).</div>
       </div>
-      <div class="card">
-        <strong>Schedule stub</strong>
-        ${(sch.days || []).join(", ") || "no days"} @ ${sch.start_local || "—"}
-        <div class="sub">${sch.note || ""}</div>
-      </div>
+      ${scheduleCardHtml(st, state.yard)}
       <button class="btn ghost" id="redo">Replay onboarding</button>`;
+    const toggle = $("#sched-toggle");
+    if (toggle) {
+      toggle.onclick = async () => {
+        const yard = state.yard || {};
+        const sch = Object.assign({}, yard.schedule || {}, { enabled: !toggle.classList.contains("on") });
+        try {
+          await saveYard({ schedule: sch });
+          await refresh();
+          render();
+        } catch (err) {
+          const reason = $("#sched-reason");
+          if (reason) reason.textContent = err.message || "Could not save schedule";
+        }
+      };
+    }
     $("#redo").onclick = () => {
       localStorage.removeItem(KEY);
       go("onboard/unbox");
@@ -558,6 +593,21 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         const r = route();
         if (r === "map" && $("#yard-svg") && window.JimsViewer && state.yard && !isLive()) {
           window.JimsViewer.drawYard($("#yard-svg"), state);
+        }
+        if (r === "health") {
+          const next = $("#sched-next");
+          const sch = state.status.schedule || {};
+          if (next) next.textContent = `Next run: ${sch.next_run_local || sch.next_run || "—"}`;
+          const reason = $("#sched-reason");
+          if (reason && (sch.reason || sch.skip_reason)) {
+            reason.textContent = `${sch.action || "skip"}: ${sch.reason || sch.skip_reason}`;
+          }
+          const toggle = $("#sched-toggle");
+          if (toggle && sch.enabled != null) {
+            toggle.classList.toggle("on", !!sch.enabled);
+            toggle.setAttribute("aria-pressed", sch.enabled ? "true" : "false");
+            toggle.textContent = sch.enabled ? "On" : "Off";
+          }
         }
       } catch (_err) {
         /* ignore parse errors */

@@ -124,9 +124,13 @@ jims-mower-owner --live
 jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
 ```
 
-Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md).
+Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md),
+[`docs/SCHEDULE.md`](docs/SCHEDULE.md), [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md),
+[`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md).
 
 Contracts and the no-hardware backlog: [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md).
+Health `#/health` enable toggle arms the weekly window (SOC / rain / fault
+gates). ROADMAP checkboxes are not production CV.
 
 ```python
 import gymnasium as gym
@@ -634,7 +638,7 @@ ROADMAP.md ICD.md
 configs/default.yaml          camera poses + yard / terrain / sensors / planner
 configs/steep_yard.yaml       louder drain / bank demo + stronger yard grade
 configs/scenarios/            WAVE 1A/1C/2A yards (suburban, gradient_yard, …)
-docs/                         WAVE notes + UX.md / UX_B.md + JETSON + runtime contract
+docs/                         WAVE notes + UX + schedule + product→hardware + JETSON
 docker/Dockerfile.aarch64     Orin / aarch64 packaging notes (not CI)
 src/jims_mower/               env, kinematics, terrain, planning, sensors, safety
 src/jims_mower/runtime/       fake drivers, bridge, budget, TRT placeholder

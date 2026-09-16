@@ -16,11 +16,18 @@ from jims_mower.app.backend import (
     _radio_sim_from_info,
     _radio_status,
     _ux_b_faults,
+    _weather_status,
 )
 from jims_mower.constants import APP_STATUS_SCHEMA, LIVE_CONTROL_CMDS
 from jims_mower.live import (
     LiveSession,
     robot_status_for,
+)
+from jims_mower.schedule import (
+    Clock,
+    ScheduleHook,
+    gates_from_owner_state,
+    rain_from_weather,
 )
 from jims_mower.yard_profile import (
     YardProfile,
@@ -81,9 +88,15 @@ class LiveBackend:
         self.session.yard_path = persist
         self.yard = yard or default_yard_profile(name=str(self.session.config_name))
         self.paired = bool(getattr(self.session, "paired", False))
+        self.rain = False
+        self.schedule_hook = ScheduleHook.from_profile_schedule(self.yard.schedule)
         if reset and not self.session.started:
             self.session.reset()
         self._sync_yard_from_session()
+        self.schedule_hook.sync(self.yard.schedule)
+
+    def set_clock(self, clock: Clock) -> None:
+        self.schedule_hook.set_clock(clock)
 
     def _sync_yard_from_session(self) -> None:
         if self.session.yard_profile is not None and len(self.session.yard_profile.keep_in) >= 3:
@@ -125,6 +138,14 @@ class LiveBackend:
         self._sync_yard_from_session()
         return result
 
+    def _arm_from_schedule(self) -> None:
+        self.paired = True
+        self.session.paired = True
+        self.session.control("start")
+
+    def _stop_from_schedule(self) -> None:
+        self.session.control("pause")
+
     def _status_unlocked(self) -> dict[str, Any]:
         snap = self.session.snapshot()
         info = self.session.info if isinstance(self.session.info, dict) else {}
@@ -153,6 +174,35 @@ class LiveBackend:
             faults=faults,
             done=bool(snap.get("done")),
         )
+        weather = info.get("weather") if isinstance(info.get("weather"), dict) else {}
+        rain = bool(self.rain or rain_from_weather(weather))
+        self.schedule_hook.poll(
+            gates_from_owner_state(
+                soc=float(info.get("battery_soc", 0.9)),
+                rain=rain,
+                faults=faults,
+                mission=mission,
+                machine=str(snap.get("safe_mode") or ("estop" if job_state == "estop" else "run")),
+            ),
+            start=self._arm_from_schedule,
+            stop=self._stop_from_schedule,
+            spec=self.yard.schedule,
+        )
+        snap = self.session.snapshot()
+        job_state = str(snap.get("job_state") or job_state)
+        mission = {
+            "idle": "idle",
+            "running": "mowing",
+            "paused": "idle",
+            "hold": "idle",
+            "estop": "estop",
+        }.get(job_state, job_state)
+        if snap.get("phase") == "return_home":
+            mission = "returning"
+        if snap.get("can_start_mow"):
+            mission = "review"
+        if job_state == "teach" or snap.get("phase") == "teach":
+            mission = "teach"
         return {
             "schema": APP_STATUS_SCHEMA,
             "backend": "live",
@@ -205,6 +255,8 @@ class LiveBackend:
             "yard_path": snap.get("yard_path") or (str(self.yard_path) if self.yard_path else ""),
             "yard_saved": bool(snap.get("yard_saved") or (self.yard_path is not None and self.yard_path.is_file())),
             "viewer": "/viewer",
+            "weather": _weather_status(rain=rain, extra=weather if isinstance(weather, dict) else None),
+            "schedule": self.schedule_hook.status_dict(),
             "not_a_benchmark": True,
         }
 
@@ -224,6 +276,7 @@ class LiveBackend:
             save_yard_profile(profile, dest)
             self.yard_path = dest
             self.session.yard_path = dest
+            self.schedule_hook.sync(profile.schedule)
             return profile.as_dict()
 
     def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:

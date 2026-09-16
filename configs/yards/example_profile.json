@@ -42,6 +42,10 @@
     "days": ["mon", "wed", "fri"],
     "start_local": "09:00",
     "duration_min": 60,
-    "note": "stub — not a scheduler"
+    "timezone": "local",
+    "min_soc": 0.25,
+    "skip_rain": true,
+    "arm_window_min": 15,
+    "note": "weekly window — engine arms start when due"
   }
 }

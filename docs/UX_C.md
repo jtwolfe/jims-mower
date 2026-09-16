@@ -45,7 +45,7 @@ bad schema, short polygons, and parent-traversing `mesh` paths.
 | `keep_out` | List of no-go polygons |
 | `mesh` | Relative mesh path (`yard.glb` / JSON). Alias: `mesh_path` |
 | `radio` | `bluetooth`, `wifi.enabled` / `ssid`, `lora.enabled` / `channel`, `primary` |
-| `schedule` | Stub only: `days`, `start_local` (`HH:MM`), `duration_min` |
+| `schedule` | Weekly window: `enabled`, `days`, `start_local` (`HH:MM`), `duration_min`, `timezone`, `min_soc`, `skip_rain`, `arm_window_min`. Evaluated by `ScheduleEngine` — arms / skips / duration-stops a job. Not a cloud calendar. |
 | `width_m` / `height_m` / `resolution_m` | Local metre frame |
 
 Example: [`configs/yards/example_profile.json`](../configs/yards/example_profile.json).
@@ -88,7 +88,7 @@ Narrow phone chrome (~390 px). Hash routes:
 
 - `#/onboard/unbox` → `pair` → `home` → `teach` → `mow`
 - `#/map` — live job (status / radios / Start / Pause / ESTOP / fog) when `--live`; else 2D SVG yard
-- `#/health` — battery, thermal, radio-path chips, hours, schedule stub
+- `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run
 - `#/fault` — ESTOP / SOS vs stuck recovery
 
 `viewer.js` is a 2D SVG fallback for the phone chrome only. The three.js
@@ -164,7 +164,7 @@ Inject stuck vs dead-motor SOS from the job or SOS tab.
 ## Tests
 
 ```bash
-pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_first_run.py tests/test_live.py
+pytest tests/test_yard_profile.py tests/test_app_api.py tests/test_app_live.py tests/test_first_run.py tests/test_live.py tests/test_schedule.py
 jims-mower-app --live --help
 jims-mower-owner --live --first-run --help
 ```
