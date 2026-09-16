@@ -23,6 +23,7 @@ const state = {
   overlays: {},
   fenceGroup: null,
   poseMarker: null,
+  targetMarker: null,
   planLine: null,
   exploreLine: null,
   frontierGroup: null,
@@ -38,6 +39,8 @@ const state = {
   unknownPad: null,
   observedTerrain: null,
   lastMeshSeq: -1,
+  lastDefaultPhase: null,
+  hasTarget: false,
 };
 
 const renderer = new THREE.WebGLRenderer({ canvas: $("view"), antialias: true });
@@ -198,6 +201,29 @@ async function loadTerrain(manifest) {
   return group;
 }
 
+function applyPhaseLayerDefaults(phase) {
+  if (!phase || phase === state.lastDefaultPhase) return;
+  state.lastDefaultPhase = phase;
+  const mapping = phase === "explore" || phase === "calibrate_boundary" || phase === "teach";
+  const mowing = phase === "mow" || phase === "return_home" || phase === "complete";
+  if (mapping) {
+    if ($("tog-explore")) $("tog-explore").checked = true;
+    if ($("tog-trail")) $("tog-trail").checked = true;
+    if ($("tog-plan")) $("tog-plan").checked = false;
+    if ($("tog-coverage")) $("tog-coverage").checked = false;
+  } else if (mowing) {
+    if ($("tog-plan")) $("tog-plan").checked = true;
+    if ($("tog-trail")) $("tog-trail").checked = true;
+    if ($("tog-coverage")) $("tog-coverage").checked = true;
+    if ($("tog-explore")) $("tog-explore").checked = false;
+  } else if (phase === "review") {
+    if ($("tog-plan")) $("tog-plan").checked = true;
+    if ($("tog-trail")) $("tog-trail").checked = true;
+    if ($("tog-explore")) $("tog-explore").checked = false;
+  }
+  setOverlayVis();
+}
+
 function setOverlayVis() {
   if (state.overlays.coverage) state.overlays.coverage.visible = $("tog-coverage").checked;
   if (state.overlays.hazard) state.overlays.hazard.visible = $("tog-hazard").checked;
@@ -218,6 +244,7 @@ function setOverlayVis() {
     state.frontierGroup.visible = $("tog-explore") ? $("tog-explore").checked : true;
   }
   if (state.poseMarker) state.poseMarker.visible = $("tog-pose").checked;
+  if (state.targetMarker) state.targetMarker.visible = $("tog-pose").checked && !!state.hasTarget;
   if (state.fenceGroup) state.fenceGroup.visible = $("tog-fence").checked;
   if (state.trailLine) state.trailLine.visible = $("tog-trail").checked;
 }
@@ -382,6 +409,30 @@ function makePoseMarker() {
   g.add(body);
   scene.add(g);
   return g;
+}
+
+function makeTargetMarker() {
+  const mesh = new THREE.Mesh(
+    new THREE.RingGeometry(0.12, 0.2, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffee88, side: THREE.DoubleSide })
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.visible = false;
+  scene.add(mesh);
+  return mesh;
+}
+
+function placeTargetMarker(target) {
+  if (!state.targetMarker) state.targetMarker = makeTargetMarker();
+  const x = target == null ? null : (Array.isArray(target) ? target[0] : target.x);
+  const y = target == null ? null : (Array.isArray(target) ? target[1] : target.y);
+  state.hasTarget = x != null && y != null;
+  if (!state.hasTarget) {
+    state.targetMarker.visible = false;
+    return;
+  }
+  state.targetMarker.position.copy(worldToScene(x, y, 0.14));
+  state.targetMarker.visible = $("tog-pose") ? $("tog-pose").checked : true;
 }
 
 function pointerFromEvent(ev) {
@@ -672,11 +723,13 @@ function replaceFrontiers(pts) {
   }
   const g = new THREE.Group();
   pts.forEach((pt) => {
+    const x = Array.isArray(pt) ? pt[0] : pt.x;
+    const y = Array.isArray(pt) ? pt[1] : pt.y;
     const sph = new THREE.Mesh(
       new THREE.SphereGeometry(0.08, 8, 8),
       new THREE.MeshLambertMaterial({ color: 0x42c4dc })
     );
-    sph.position.copy(worldToScene(pt.x, pt.y, 0.12));
+    sph.position.copy(worldToScene(x, y, 0.12));
     g.add(sph);
   });
   scene.add(g);
@@ -720,6 +773,7 @@ function setOwnerBar(frame) {
   const reexplore = $("btn-reexplore");
   if (reexplore) reexplore.hidden = !frame.can_reexplore;
   setPhaseBar(idle ? "" : (frame.phase || ""));
+  applyPhaseLayerDefaults(idle ? "" : (frame.phase || ""));
   const chip = $("phase-chip");
   if (chip) chip.textContent = idle ? "IDLE" : `LIVE ${frame.phase_label || frame.phase || "—"}`;
   const summary = $("session-summary");
@@ -810,8 +864,14 @@ function applyLiveFrame(frame) {
     }
     const showMow = phase === "mow" || phase === "return_home" || phase === "complete" || phase === "review";
     if (state.planLine) state.planLine.visible = $("tog-plan").checked && showMow;
-    if (phase === "mow" && $("tog-coverage")) $("tog-coverage").checked = true;
+    applyPhaseLayerDefaults(phase);
   }
+  const overlay = frame.path_overlay || {};
+  if (overlay.trail && overlay.trail.length >= 2) {
+    replaceLine("trailLine", overlay.trail, 0xaa88ff);
+    if (state.trailLine) state.trailLine.visible = $("tog-trail") ? $("tog-trail").checked : true;
+  }
+  placeTargetMarker(overlay.target);
   if (frame.mesh_seq != null && frame.mesh_seq !== state.lastMeshSeq && frame.observed_mesh_url) {
     fetch(frame.observed_mesh_url)
       .then((r) => r.json())
@@ -824,10 +884,13 @@ function applyLiveFrame(frame) {
     loadOverlayUrl("fog", frame.fog_url, 1.0);
     if (frame.coverage_url) loadOverlayUrl("coverage", frame.coverage_url, 0.55);
     state.lastMapSeq = frame.map_seq;
-    replaceFrontiers(frame.frontiers || []);
-    replaceLine("exploreLine", (frame.explore || []).map((p) => [p.x, p.y]), 0xf0a030);
-    if (frame.plan && frame.plan.length >= 2) {
-      replaceLine("planLine", frame.plan.map((p) => [p.x, p.y]), 0x2ad4e6);
+    const overlayPts = frame.path_overlay || {};
+    replaceFrontiers(overlayPts.frontiers && overlayPts.frontiers.length ? overlayPts.frontiers : (frame.frontiers || []));
+    const explorePts = (overlayPts.explore && overlayPts.explore.length ? overlayPts.explore : (frame.explore || [])).map((p) => (Array.isArray(p) ? p : [p.x, p.y]));
+    replaceLine("exploreLine", explorePts, 0xf0a030);
+    const planSrc = overlayPts.plan && overlayPts.plan.length >= 2 ? overlayPts.plan : (frame.plan || []);
+    if (planSrc.length >= 2) {
+      replaceLine("planLine", planSrc.map((p) => (Array.isArray(p) ? p : [p.x, p.y])), 0x2ad4e6);
     }
     setOverlayVis();
   }
@@ -984,6 +1047,7 @@ async function boot() {
   }
   rebuildFence();
   state.poseMarker = makePoseMarker();
+  state.targetMarker = makeTargetMarker();
 
   const cams = manifest.cameras || [];
   const select = $("cam-select");

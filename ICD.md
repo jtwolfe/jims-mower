@@ -205,7 +205,10 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 | `POST` | `/api/live/control` | same cmds as `jims-mower-live` (`start` / `pause` / `teach` / `save_yard` / `load_yard` / …; no second mission loop) |
 
 `--live` `/status` adds `backend`, `robot` (idle / pairing / live /
-fault), `owner_copy`, `radio_path`, map/cut %, `session_summary`.
+fault), `owner_copy`, `radio_path`, map/cut %, `session_summary`,
+`path_overlay`, and `mode_banner` (Mapping vs Mowing). `/api/live` and
+`/api/live/snapshot` carry the same overlay (downsampled trail / plan /
+frontiers). No RF range or mAP claim.
 `start` after `estop` is the operator clear of the software latch.
 `/status` also carries `schedule` (`jims_mower.schedule.v1`) and
 `weather.rain`. The weekly window arms `start` / duration-stops when

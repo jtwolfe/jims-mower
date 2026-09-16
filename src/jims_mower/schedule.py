@@ -459,7 +459,15 @@ def gates_from_owner_state(
                 break
     mission_l = str(mission or "idle").strip().lower()
     machine_l = str(machine or "run").strip().lower()
-    running = mission_l in {"mowing", "returning", "teach", "review"} or mission_l == "running"
+    running = mission_l in {
+        "mowing",
+        "returning",
+        "teach",
+        "review",
+        "explore",
+        "calibrate_boundary",
+        "mapping",
+    } or mission_l == "running"
     hw_estop = False
     if isinstance(faults, list):
         hw_estop = any(

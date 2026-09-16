@@ -50,6 +50,15 @@
     const pill = $("#robot-pill");
     if (!pill) return;
     const robot = (status && status.robot) || ((status && status.state && status.state.mission) || "idle");
+    const live = !!(status && (status.live || status.backend === "live"));
+    const mode = (status && status.mode_banner) || {};
+    const kind = mode.kind || "";
+    if (live && robot === "live" && kind && kind !== "idle") {
+      const short = { mapping: "mapping", mowing: "mowing", teach: "teach", done: "done" }[kind] || kind;
+      pill.textContent = short;
+      pill.className = ["mapping", "mowing", "teach", "done"].includes(kind) ? kind : "live";
+      return;
+    }
     pill.textContent = robot;
     pill.className = ["idle", "pairing", "live", "fault"].includes(robot) ? robot : "idle";
   }
@@ -328,18 +337,141 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     };
   }
 
-  function fenceOverlayHtml(st, live) {
+  const MODE_COPY = {
+    idle: { label: "Ready", tone: "idle", kind: "idle" },
+    teach: { label: "Teaching boundary", tone: "teach", kind: "mapping" },
+    calibrate_boundary: { label: "Teaching boundary", tone: "teach", kind: "mapping" },
+    explore: { label: "Mapping yard", tone: "map", kind: "mapping" },
+    review: { label: "Map ready — review", tone: "review", kind: "mapping" },
+    mow: { label: "Mowing", tone: "mow", kind: "mowing" },
+    return_home: { label: "Returning home", tone: "home", kind: "mowing" },
+    complete: { label: "Done", tone: "done", kind: "done" },
+    safe: { label: "Hold — safe", tone: "idle", kind: "idle" },
+  };
+
+  function asXYList(raw) {
+    return (raw || []).map((p) => (Array.isArray(p) ? p : [p.x, p.y])).filter((p) => p[0] != null && p[1] != null);
+  }
+
+  function overlayFrom(st, live) {
+    const built = (live && live.path_overlay) || (st && st.path_overlay) || {};
+    const livePlan = asXYList((live && live.plan) || (st && st.plan));
+    const liveExplore = asXYList((live && live.explore) || (st && st.explore));
+    const liveFrontiers = asXYList((live && live.frontiers) || (st && st.frontiers));
+    const idx = built.waypoint_index != null ? built.waypoint_index : (live && live.waypoint_index != null ? live.waypoint_index : (st && st.waypoint_index));
+    const plan = (built.plan && built.plan.length ? built.plan : livePlan) || [];
+    const explore = (built.explore && built.explore.length ? built.explore : liveExplore) || [];
+    const active = plan.length ? plan : explore;
+    let target = built.target;
+    if (!target && active.length && idx != null) {
+      const i = Math.max(0, Math.min(active.length - 1, Number(idx)));
+      target = active[i];
+    }
+    return Object.assign({}, built, {
+      trail: built.trail || [],
+      plan,
+      explore,
+      frontiers: (built.frontiers && built.frontiers.length ? built.frontiers : liveFrontiers) || [],
+      pose: built.pose || (live && live.pose) || (st && st.pose),
+      target,
+      waypoint_index: idx,
+      path_remaining: built.path_remaining != null ? built.path_remaining : (live && live.path_remaining != null ? live.path_remaining : st && st.path_remaining),
+    });
+  }
+
+  function modeFrom(st, live) {
+    const overlay = overlayFrom(st, live);
+    const raw = (live && live.mode_banner) || (st && st.mode_banner) || overlay.mode || {};
+    const phase = raw.phase || overlay.phase || (live && live.phase) || ((st && st.state) || {}).phase || "idle";
+    const job = raw.job_state || (live && live.job_state) || ((st && st.state) || {}).job_state || "idle";
+    if (job === "idle" && phase !== "complete" && phase !== "teach") {
+      return { label: "Ready", tone: "idle", kind: "idle", hold: null, phase, job_state: job };
+    }
+    const fallback = MODE_COPY[phase] || MODE_COPY.idle;
+    return {
+      label: raw.label || fallback.label,
+      tone: raw.tone || fallback.tone,
+      kind: raw.kind || fallback.kind,
+      hold: raw.hold || null,
+      phase,
+      job_state: job,
+    };
+  }
+
+  function mapBoxSize(st, live) {
     const yard = state.yard || {};
-    const keep = (live && live.keep_in) || st.keep_in || yard.keep_in || [];
-    if (!keep.length) return "";
-    const w = Number(yard.width_m || live.width_m || 16);
-    const h = Number(yard.height_m || live.height_m || 12);
-    const pts = keep.map((p) => `${Number(p[0] != null ? p[0] : p.x)},${Number(p[1] != null ? p[1] : p.y)}`).join(" ");
-    return `<svg class="fence-overlay" id="fence-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
-      <g transform="translate(0 ${h}) scale(1 -1)">
-        <polygon points="${pts}" fill="none" stroke="#ffcc33" stroke-width="0.18"/>
-      </g>
-    </svg>`;
+    return {
+      w: Number(yard.width_m || live.width_m || st.width_m || 16),
+      h: Number(yard.height_m || live.height_m || st.height_m || 12),
+      keep: (live && live.keep_in) || st.keep_in || yard.keep_in || [],
+      keepOut: (live && live.keep_out) || st.keep_out || yard.keep_out || [],
+    };
+  }
+
+  function paintLiveOverlay(st, live) {
+    const svg = $("#path-overlay");
+    if (!svg || !window.JimsViewer || !window.JimsViewer.drawPathOverlay) return;
+    const box = mapBoxSize(st, live);
+    window.JimsViewer.drawPathOverlay(svg, {
+      width: box.w,
+      height: box.h,
+      keepIn: box.keep,
+      keepOut: box.keepOut,
+      overlay: overlayFrom(st, live),
+      pose: (live && live.pose) || (st && st.pose),
+    });
+  }
+
+  function modeBannerHtml(st, live) {
+    const mode = modeFrom(st, live);
+    const tone = mode.tone || "idle";
+    const label = mode.label || "Ready";
+    const hold = mode.hold ? `<span class="mode-hold" id="mode-hold">${mode.hold}</span>` : `<span class="mode-hold" id="mode-hold" hidden></span>`;
+    return `<div class="mode-banner tone-${tone}" id="mode-banner" data-kind="${mode.kind || "idle"}">
+      <span class="mode-label" id="mode-label">${label}</span>
+      ${hold}
+    </div>`;
+  }
+
+  function progressRowHtml(st, live) {
+    const overlay = overlayFrom(st, live);
+    const mode = modeFrom(st, live);
+    const kind = overlay.progress_kind || mode.kind || "idle";
+    const mapping = kind === "mapping";
+    const mowing = kind === "mowing";
+    const mapPct = Number(st.map_pct != null ? st.map_pct : 100 * (live.map_pct || 0));
+    const cutPct = Number(st.cut_pct != null ? st.cut_pct : 100 * (live.cut_pct || 0));
+    const remaining = overlay.path_remaining != null ? overlay.path_remaining : live.path_remaining;
+    const planned = Number(st.planned_pct != null ? st.planned_pct : 100 * (live.planned_pct || 0));
+    const cutLabel = mapping ? "Cut (idle)" : "Cut";
+    const idx = overlay.waypoint_index;
+    let pathLabel = "—";
+    if (remaining != null && remaining !== "") pathLabel = `${Number(remaining)} left`;
+    if (idx != null && Number(overlay.n_waypoints || live.n_waypoints || 0) > 0) {
+      const n = Number(overlay.n_waypoints || live.n_waypoints || 0);
+      pathLabel = `${Number(idx) + 1}/${n}`;
+    }
+    if (mowing && planned > 0) pathLabel = `${pathLabel} · ${planned.toFixed(0)}%`;
+    return `<div class="row progress-row" id="progress-row" data-kind="${kind}">
+      <div class="chip ${mapping ? "emphasis" : "secondary"}" id="map-chip"><span class="chip-kicker">Map</span><b id="map-pct">${mapPct.toFixed(1)}%</b></div>
+      <div class="chip ${mowing ? "emphasis" : "muted"}" id="cut-chip"><span class="chip-kicker" id="cut-kicker">${cutLabel}</span><b id="cut-pct">${cutPct.toFixed(1)}%</b></div>
+      <div class="chip" id="path-chip"><span class="chip-kicker">Path</span><b id="path-remaining">${pathLabel}</b></div>
+    </div>`;
+  }
+
+  function legendHtml() {
+    return `<div class="map-legend" id="map-legend" aria-label="map legend">
+      <span><i class="swatch fog"></i>Fog</span>
+      <span><i class="swatch mapped"></i>Mapped</span>
+      <span><i class="swatch trail"></i>Trail</span>
+      <span><i class="swatch plan"></i>Plan</span>
+      <span><i class="swatch cut"></i>Cut</span>
+    </div>`;
+  }
+
+  function fenceOverlayHtml(st, live) {
+    const box = mapBoxSize(st, live);
+    return `<svg class="path-overlay" id="path-overlay" viewBox="0 0 ${box.w} ${box.h}" preserveAspectRatio="none" aria-hidden="true"></svg>`;
   }
 
   function renderLiveJob() {
@@ -353,31 +485,31 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const job = live.job_state || (st.state || {}).job_state || "idle";
     const taught = !!(st.taught || live.taught);
     const copy = st.owner_copy || live.owner_copy || "Yard unknown — start a job when ready.";
-    const mapPct = Number(st.map_pct != null ? st.map_pct : 100 * (live.map_pct || 0));
-    const cutPct = Number(st.cut_pct != null ? st.cut_pct : 100 * (live.cut_pct || 0));
     const speed = String(st.speed_label || live.speed_label || "5");
     const needsReteach = !!(st.needs_reteach || live.needs_reteach || st.fence_unusable || live.fence_unusable);
     const canMow = !!(st.can_start_mow || live.can_start_mow) && !needsReteach;
     const fog = live.fog_url || st.fog_url || "/api/live/fog.png";
     const observed = live.observed_url || st.observed_url || "/api/live/observed.png";
+    const coverage = live.coverage_url || st.coverage_url || "/api/live/coverage.png";
     const path = st.radio_path || live.radio_path || {};
     const yardName = (state.yard && state.yard.name) || st.yard || live.yard || "yard";
     const saved = !!(st.yard_saved || live.yard_saved);
     const teaching = job === "teach";
+    const kind = (overlayFrom(st, live).progress_kind || modeFrom(st, live).kind || "idle");
     screen().innerHTML = `
       <h1>Live job</h1>
       ${radioChipsHtml(path)}
-      <p class="owner-copy" id="owner-copy">${copy}</p>
+      ${modeBannerHtml(st, live)}
+      <p class="owner-copy secondary" id="owner-copy">${copy}</p>
       <p class="sub" id="yard-chip">${yardName}${taught ? " · taught fence" : " · authored demo fence until you teach"}</p>
-      <div class="live-preview">
+      <div class="live-preview kind-${kind}" id="live-preview">
         <img class="obs" id="obs-img" alt="observed terrain" src="${observed}"/>
+        <img class="cut" id="cut-img" alt="cut coverage" src="${coverage}"/>
         <img class="fog" id="fog-img" alt="fog of war" src="${fog}"/>
         ${fenceOverlayHtml(st, live)}
       </div>
-      <div class="row">
-        <div class="chip">Map<b id="map-pct">${mapPct.toFixed(1)}%</b></div>
-        <div class="chip">Cut<b id="cut-pct">${cutPct.toFixed(1)}%</b></div>
-      </div>
+      ${legendHtml()}
+      ${progressRowHtml(st, live)}
       <div class="speed-row" id="speed-row">
         <button type="button" data-speed="1">1×</button>
         <button type="button" data-speed="2">2×</button>
@@ -430,6 +562,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (injRadio) injRadio.onclick = () => liveControl("inject", { kind: "radio_lost" });
     const unpairBtn = $("#unpair");
     if (unpairBtn) unpairBtn.onclick = () => liveControl("unpair");
+    paintLiveOverlay(st, live);
   }
 
   function renderMap() {
@@ -591,31 +724,92 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
 
   function patchLiveChrome(frame) {
     if (!frame || frame.live === false) return;
+    const prev = state.live || {};
     state.live = frame;
+    const phaseChanged = prev.phase !== frame.phase || prev.job_state !== frame.job_state;
+    const buttonsChanged =
+      !!prev.can_start_mow !== !!frame.can_start_mow ||
+      !!prev.needs_reteach !== !!frame.needs_reteach;
+    if (state.status) {
+      state.status.cut_pct = 100 * Number(frame.cut_pct || 0);
+      state.status.map_pct = 100 * Number(frame.map_pct || 0);
+      state.status.done = !!(frame.done || frame.phase === "complete");
+      state.status.owner_copy = frame.owner_copy;
+      state.status.can_start_mow = frame.can_start_mow;
+      state.status.needs_reteach = frame.needs_reteach;
+      state.status.path_overlay = frame.path_overlay;
+      state.status.mode_banner = frame.mode_banner;
+      state.status.planned_pct = 100 * Number(frame.planned_pct || 0);
+      state.status.waypoint_index = frame.waypoint_index;
+      state.status.coverage_url = frame.coverage_url || state.status.coverage_url;
+      state.status.frontiers = frame.frontiers;
+      state.status.explore = frame.explore;
+      state.status.plan = frame.plan;
+      if (frame.session_summary) state.status.session_summary = frame.session_summary;
+      if (state.status.state) {
+        state.status.state.phase = frame.phase;
+        state.status.state.job_state = frame.job_state;
+        state.status.state.mission = frame.mission || (frame.path_overlay && frame.path_overlay.mission) || state.status.state.mission;
+      }
+    }
+    if (route() === "map" && (phaseChanged || buttonsChanged || (frame.done && !$("#session-card")))) {
+      render();
+      return;
+    }
     const copy = $("#owner-copy");
     if (copy && frame.owner_copy) copy.textContent = frame.owner_copy;
+    const mode = frame.mode_banner || (frame.path_overlay && frame.path_overlay.mode) || {};
+    const banner = $("#mode-banner");
+    if (banner) {
+      banner.className = `mode-banner tone-${mode.tone || "idle"}`;
+      banner.dataset.kind = mode.kind || "idle";
+    }
+    const label = $("#mode-label");
+    if (label && mode.label) label.textContent = mode.label;
+    const hold = $("#mode-hold");
+    if (hold) {
+      if (mode.hold) {
+        hold.hidden = false;
+        hold.textContent = mode.hold;
+      } else {
+        hold.hidden = true;
+        hold.textContent = "";
+      }
+    }
+    const preview = $("#live-preview");
+    const kind = (frame.path_overlay && frame.path_overlay.progress_kind) || mode.kind || "idle";
+    if (preview) preview.className = `live-preview kind-${kind}`;
+    const row = $("#progress-row");
+    if (row) row.dataset.kind = kind;
+    const mapChip = $("#map-chip");
+    if (mapChip) mapChip.className = `chip ${kind === "mapping" ? "emphasis" : "secondary"}`;
+    const cutChip = $("#cut-chip");
+    if (cutChip) cutChip.className = `chip ${kind === "mowing" ? "emphasis" : "muted"}`;
+    const cutKicker = $("#cut-kicker");
+    if (cutKicker) cutKicker.textContent = kind === "mapping" ? "Cut (idle)" : "Cut";
     const mapEl = $("#map-pct");
     if (mapEl && frame.map_pct != null) mapEl.textContent = `${(100 * Number(frame.map_pct)).toFixed(1)}%`;
     const cutEl = $("#cut-pct");
     if (cutEl && frame.cut_pct != null) cutEl.textContent = `${(100 * Number(frame.cut_pct)).toFixed(1)}%`;
-    if (state.status) {
-      state.status.cut_pct = 100 * Number(frame.cut_pct || 0);
-      state.status.done = !!(frame.done || frame.phase === "complete");
-      if (frame.session_summary) state.status.session_summary = frame.session_summary;
-    }
-    if (frame.done && !$("#session-card") && route() === "map") {
-      render();
-      return;
+    const pathEl = $("#path-remaining");
+    if (pathEl) {
+      const overlay = overlayFrom(state.status || {}, frame);
+      const remaining = overlay.path_remaining;
+      const idx = overlay.waypoint_index;
+      const n = Number(overlay.n_waypoints || frame.n_waypoints || 0);
+      const planned = Number(state.status && state.status.planned_pct != null ? state.status.planned_pct : 100 * (frame.planned_pct || 0));
+      let pathLabel = remaining != null ? `${Number(remaining)} left` : "—";
+      if (idx != null && n > 0) pathLabel = `${Number(idx) + 1}/${n}`;
+      if (kind === "mowing" && planned > 0) pathLabel = `${pathLabel} · ${planned.toFixed(0)}%`;
+      pathEl.textContent = pathLabel;
     }
     const fog = $("#fog-img");
     if (fog && frame.fog_url) fog.src = frame.fog_url;
     const obs = $("#obs-img");
     if (obs && frame.observed_url) obs.src = frame.observed_url;
-    if (state.status) {
-      state.status.owner_copy = frame.owner_copy;
-      state.status.can_start_mow = frame.can_start_mow;
-      state.status.robot = state.status.robot;
-    }
+    const cutImg = $("#cut-img");
+    if (cutImg && frame.coverage_url) cutImg.src = frame.coverage_url;
+    paintLiveOverlay(state.status || {}, frame);
   }
 
   $("#tabbar").addEventListener("click", (ev) => {
