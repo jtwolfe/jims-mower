@@ -12,6 +12,7 @@ import yaml
 from jims_mower.constants import (
     COVERAGE_SOURCES,
     DETECTOR_BACKENDS,
+    GYM_PAIR_PIN,
     INTERLOCK_SOURCES,
     GRASS_MODES,
     MOTOR_KILL_MODES,
@@ -546,6 +547,14 @@ class RadioConfig:
 
 
 @dataclass
+class OwnerConfig:
+    """Owner-app / live overlay. Gym unit tests leave ``require_pair`` false."""
+
+    require_pair: bool = False
+    pair_pin: str = GYM_PAIR_PIN
+
+
+@dataclass
 class EnvConfig:
     dt: float = 0.10
     max_steps: int = 500
@@ -565,6 +574,7 @@ class EnvConfig:
     faults: FaultsConfig = field(default_factory=FaultsConfig)
     radio: RadioConfig = field(default_factory=RadioConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
+    owner: OwnerConfig = field(default_factory=OwnerConfig)
 
     def resolved_cameras(self) -> list[CameraSpec]:
         """Return the 4–6 camera rig, applying the default FOV when needed."""
@@ -846,6 +856,12 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
             f"radio.on_loss must be one of {sorted(RADIO_LOSS_ACTIONS)}; got {radio.on_loss!r}"
         )
     radio.on_loss = on_loss
+    owner = cfg.owner
+    pin = str(getattr(owner, "pair_pin", GYM_PAIR_PIN) or GYM_PAIR_PIN).strip()
+    if not pin:
+        raise ConfigError("owner.pair_pin must be a non-empty gym PIN")
+    owner.pair_pin = pin
+    owner.require_pair = bool(getattr(owner, "require_pair", False))
     for name in RADIO_CHANNELS:
         link = getattr(radio, name)
         if float(link.bandwidth_bps) <= 0 or float(link.range_m) <= 0:

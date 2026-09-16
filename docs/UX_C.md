@@ -9,18 +9,21 @@ or recorded episode, and walk unbox → first mow on a narrow layout.
 
 ## Buy → mow checklist
 
-Matches the radio profile: **Bluetooth pair required**, **Wi-Fi optional**,
-**LoRa long-range** for command / status once the mower leaves the porch.
+Matches the radio profile: **Bluetooth pair required** before Start,
+**Wi-Fi optional**, **LoRa far-fence sim** for Pause / ESTOP /
+Start-if-paired after BT is lost. No metre range claimed.
 
 1. **Unbox** — charge to a green ring, unfold the handle, confirm the
    hardware ESTOP paddle moves freely. Wheel the mower to the yard edge.
-2. **Bluetooth pair** — phone stays next to the mower for first contact.
-   The app will not skip this step. No account, no QR cloud claim.
+2. **Bluetooth pair** — explicit Pair request (optional gym PIN `2468`).
+   States: unpaired → pairing → paired / failed / lost. Live owner
+   `require_pair: true`. Start is refused until `paired`. Unpair /
+   radio-lost **holds safe** (not ESTOP). No BlueZ. No account, no QR.
 3. **Wi-Fi (optional)** — skip unless you want OTA / map upload on the
    home AP. The mower does not need Wi-Fi to mow.
-4. **LoRa long-range** — default command link after pairing. Walk to the
-   far fence and confirm the status pill still reads a LoRa link. If it
-   drops, move closer; do not “fix” it by forcing Wi-Fi.
+4. **LoRa far-fence sim** — when BT is lost, Pause / ESTOP /
+   Start-if-paired can still ride the LoRa sim channel. Owner status
+   shows the active transport and `rf_claim: null`. Do not invent metres.
 5. **Place home** — park on the dock / start pose. The app stores
    `home` `{x, y, theta}` in the YardProfile. Return-to-home uses this.
 6. **Teach keep-in** — walk or tap the yellow boundary (at least three
@@ -47,8 +50,9 @@ bad schema, short polygons, and parent-traversing `mesh` paths.
 | `keep_out` | List of no-go polygons |
 | `origin` | Surveyed/local-ENU peg (`e_m/n_m/u_m`, optional lat/lon). Default gym SW corner. **Not** a WGS84 field survey unless `surveyed: true`. See [`SURVEY_ORIGIN.md`](SURVEY_ORIGIN.md). |
 | `mesh` | Relative mesh path (`yard.glb` / JSON). Alias: `mesh_path` |
-| `radio` | `bluetooth`, `wifi.enabled` / `ssid`, `lora.enabled` / `channel`, `primary` |
-| `schedule` | Weekly window: `enabled`, `days`, `start_local` (`HH:MM`), `duration_min`, `timezone`, `min_soc`, `skip_rain`, `arm_window_min`. Evaluated by `ScheduleEngine` — arms / skips / duration-stops a job. Not a cloud calendar. |
+| `radio` | `bluetooth`, `wifi.enabled` / `ssid`, `lora.enabled` / `channel`, `primary`. Owner overlay adds `rf_claim: null` — never RSSI / metres. |
+| `pairing` | State machine (`unpaired` / `pairing` / `paired` / `failed` / `lost`). Persist on the profile. |
+| `schedule` | Weekly window: `enabled`, `days`, `start_local` (`HH:MM`), `duration_min`, `timezone` (default `Australia/Brisbane`), `min_soc`, `skip_rain`, `arm_window_min`. Evaluated by `ScheduleEngine` — arms / skips / duration-stops a job. Not a cloud calendar. |
 | `width_m` / `height_m` / `resolution_m` | Local metre frame |
 
 Example: [`configs/yards/example_profile.json`](../configs/yards/example_profile.json).
@@ -68,7 +72,7 @@ JSON in / JSON out. Same origin as the static shell.
 | `POST` | `/yards/select` | `{name}` — switch profile; keep-in/home replace (no fence bleed) |
 | `GET` | `/notifications` | in-app skip/finish list (not SMS; UX-2) |
 | `GET` | `/ota` | SAF-4 documented no-op (`available: false`) |
-| `POST` | `/command` | `{cmd, reason?}` — `start` / `stop` / `return` / `estop` / `teach` |
+| `POST` | `/command` | `{cmd, reason?, pin?}` — `start` / `stop` / `return` / `estop` / `teach` / `pair` / `unpair` |
 | `GET` | `/map/mesh` | coarse occupancy mesh + `ux_a_href` |
 | `GET` | `/map/coverage` | downsampled cut/uncut raster |
 | `GET` | `/events` | SSE `data: <status>`; `?n=2` bounds the stream for tests |

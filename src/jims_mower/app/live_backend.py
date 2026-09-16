@@ -62,6 +62,7 @@ class LiveBackend:
         out_dir: Union[str, Path] = "live_out",
         reset: bool = True,
         first_run: bool = False,
+        require_pair: bool = True,
     ) -> None:
         self._lock = threading.Lock()
         persist = Path(yard_path) if yard_path else Path(out_dir) / "profile.json"
@@ -76,6 +77,7 @@ class LiveBackend:
             yard_profile=yard,
             yard_path=persist,
             first_run=first_run,
+            require_pair=require_pair,
         )
         if session is not None:
             if yard is not None:
@@ -85,6 +87,12 @@ class LiveBackend:
             if yard_path is not None:
                 self.session.yard_path = persist
             self.session.first_run = bool(first_run or self.session.first_run)
+        self.session.require_pair = True if require_pair else bool(self.session.require_pair)
+        self.session._require_pair_explicit = True
+        self.session.pairing.require_pair = bool(self.session.require_pair)
+        if yard is not None and getattr(yard, "pairing", None):
+            if str(yard.pairing.get("state") or "") == "paired":
+                self.session.pairing.force_paired()
         self.yard_path = persist
         self.session.yard_path = persist
         self.yard = yard or default_yard_profile(name=str(self.session.config_name))
@@ -127,21 +135,16 @@ class LiveBackend:
 
     def live_control(self, cmd: str, **kwargs: Any) -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
-        if key == "pair":
-            self.paired = True
-            self.session.paired = True
         result = self.session.control(cmd, **kwargs)
-        if key == "start":
-            self.paired = True
-            self.session.paired = True
-        if key in {"save_yard", "load_yard", "teach"}:
+        self.paired = bool(self.session.paired)
+        if key in {"save_yard", "load_yard", "teach", "pair", "unpair"}:
             self._sync_yard_from_session()
         self._sync_yard_from_session()
         return result
 
     def _arm_from_schedule(self) -> None:
-        self.paired = True
-        self.session.paired = True
+        if not self.session.pairing.can_start:
+            return
         self.session.control("start")
 
     def _stop_from_schedule(self) -> None:
@@ -167,8 +170,13 @@ class LiveBackend:
             mission = "review"
         if job_state == "teach" or snap.get("phase") == "teach":
             mission = "teach"
-        radio = _overlay_radio_sim(_radio_status(self.yard.radio), _radio_sim_from_info(info))
+        radio = _overlay_radio_sim(
+            _radio_status(self.yard.radio, pairing=self.session.pairing),
+            _radio_sim_from_info(info),
+            env_radio=getattr(self.session.env, "radio", None) if self.session.env is not None else None,
+        )
         radio["path"] = snap.get("radio_path") or {}
+        self.paired = bool(self.session.paired)
         robot = robot_status_for(
             paired=self.paired,
             job_state=job_state,
@@ -255,6 +263,8 @@ class LiveBackend:
             "speed": snap.get("speed"),
             "speed_label": snap.get("speed_label"),
             "paired": bool(self.paired),
+            "pairing": self.session.pairing.as_info(),
+            "require_pair": bool(self.session.require_pair),
             "robot": robot,
             "done": bool(snap.get("done")),
             "fog_url": snap.get("fog_url"),
@@ -291,19 +301,14 @@ class LiveBackend:
             self.schedule_hook.sync(profile.schedule)
             return profile.as_dict()
 
-    def command(self, cmd: str, *, reason: str = "") -> dict[str, Any]:
+    def command(self, cmd: str, *, reason: str = "", **kwargs: Any) -> dict[str, Any]:
         key = str(cmd or "").strip().lower()
         mapped = {"stop": "pause", "return": "hold"}.get(key, key)
-        if mapped == "pair":
-            with self._lock:
-                self.paired = True
-                self.session.paired = True
-                return self._status_unlocked()
-        if mapped not in LIVE_CONTROL_CMDS:
-            raise YardProfileError(f"unknown command {cmd!r}; expected live control or pair")
-        extra: dict[str, Any] = {}
+        extra: dict[str, Any] = dict(kwargs)
         if reason:
             extra["reason"] = reason
+        if mapped not in LIVE_CONTROL_CMDS:
+            raise YardProfileError(f"unknown command {cmd!r}; expected live control or pair")
         with self._lock:
             self.live_control(mapped, **extra)
             return self._status_unlocked()

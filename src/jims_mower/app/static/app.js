@@ -69,12 +69,26 @@
     return status;
   }
 
-  async function command(cmd, reason) {
-    if (isLive() && cmd !== "pair") {
-      await liveControl(cmd === "stop" ? "pause" : cmd, reason ? { reason } : {});
+  function pairingState(st) {
+    const p = (st && st.pairing) || {};
+    if (p.state) return p.state;
+    return st && st.paired ? "paired" : "unpaired";
+  }
+
+  function isPaired(st) {
+    return pairingState(st) === "paired";
+  }
+
+  async function command(cmd, reason, extra) {
+    const body = Object.assign({ cmd, reason: reason || "" }, extra || {});
+    if (isLive()) {
+      const mapped = cmd === "stop" ? "pause" : cmd;
+      const liveExtra = Object.assign({}, extra || {});
+      if (reason) liveExtra.reason = reason;
+      await liveControl(mapped, liveExtra);
       return;
     }
-    await api("/command", { method: "POST", body: JSON.stringify({ cmd, reason }) });
+    await api("/command", { method: "POST", body: JSON.stringify(body) });
     await refresh();
     render();
   }
@@ -137,13 +151,14 @@
       screen().innerHTML = onboardFrame(
         "pair",
         "Pair radios",
-        `<p class="lead">Bluetooth is required for first contact. Wi-Fi is optional. LoRa is the long-range command link. Stub only — no RF hardware.</p>
+        `<p class="lead">Bluetooth pair is required before Start. Wi-Fi is optional. LoRa is the far-fence sim command link after pair — no metre range claimed. No BlueZ.</p>
          <div class="card radio-list">
            <label>Bluetooth <span class="tag">required</span></label>
            <label>Wi-Fi <span class="tag opt">optional</span></label>
-           <label>LoRa <span class="tag">long-range</span></label>
+           <label>LoRa <span class="tag">far-fence sim</span></label>
          </div>
-         <p class="sub">SSID is only needed if you turn Wi-Fi on later in Health.</p>`,
+         <p class="sub">Gym PIN 2468 if prompted. SSID is only needed if you turn Wi-Fi on later in Health.</p>
+         <input class="pin" id="pair-pin" inputmode="numeric" maxlength="8" placeholder="PIN (2468)" value="2468"/>`,
         "Pair over Bluetooth",
         null
       );
@@ -156,7 +171,9 @@
           wifi: (state.yard && state.yard.radio && state.yard.radio.wifi) || { enabled: false, ssid: "" },
         });
         if (state.yard) await saveYard({ radio });
-        try { await command("pair"); } catch (_err) { /* memory backend has no pair */ }
+        const pinEl = $("#pair-pin");
+        const pin = pinEl ? pinEl.value : "2468";
+        try { await command("pair", "", { pin }); } catch (_err) { /* show next even if already paired */ }
         go("onboard/home");
       };
       return;
@@ -237,7 +254,7 @@
       "mow",
       "First mow",
       `<p class="lead">Stay in the yard for the first run. Start, watch the pose, and hit SOS if anything feels wrong.</p>
-       <div class="card"><strong>Radios</strong>BT paired · LoRa long-range · Wi-Fi optional</div>`,
+       <div class="card"><strong>Radios</strong>Pair before Start · LoRa far-fence sim · no RF range</div>`,
       "Start first mow",
       null,
       `<button class="btn ghost" id="skip">Skip to layout</button>`
@@ -282,16 +299,33 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
   }
 
   function renderPairingStub() {
+    const st = state.status || {};
+    const live = state.live || {};
+    const pair = pairingState(st) || pairingState(live);
+    const copy = {
+      unpaired: "Pair Bluetooth before Start. Sim pair — no BlueZ.",
+      pairing: "Pairing…",
+      failed: "Pairing failed — gym PIN is 2468.",
+      lost: "Radio lost — hold safe. Pair again to Start.",
+    }[pair] || "Pair Bluetooth before Start. Sim pair — no BlueZ.";
     screen().innerHTML = `
       <h1>Pair Bluetooth</h1>
-      <p class="lead">Hold the phone next to the mower for first contact. Stub only — no real RF.</p>
+      <p class="lead">${copy}</p>
+      <p class="sub">State: ${pair} · rf_claim: none · no metre range</p>
       <div class="card radio-list">
         <label>Bluetooth <span class="tag">required</span></label>
         <label>Wi-Fi <span class="tag opt">optional</span></label>
-        <label>LoRa <span class="tag">long-range after pair</span></label>
+        <label>LoRa <span class="tag">far-fence sim after pair</span></label>
       </div>
+      <input class="pin" id="pair-pin" inputmode="numeric" maxlength="8" placeholder="PIN (2468)" value="2468"/>
       <button class="btn primary" id="pair-bt">Pair over Bluetooth</button>`;
-    $("#pair-bt").onclick = () => command("pair");
+    $("#pair-bt").onclick = () => {
+      const pinEl = $("#pair-pin");
+      command("pair", "", { pin: pinEl ? pinEl.value : "2468" }).catch((err) => {
+        const lead = document.querySelector(".lead");
+        if (lead) lead.textContent = err.message || "Pairing failed";
+      });
+    };
   }
 
   function fenceOverlayHtml(st, live) {
@@ -311,7 +345,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
   function renderLiveJob() {
     const st = state.status || {};
     const live = state.live || {};
-    const paired = st.paired === true || live.paired === true;
+    const paired = isPaired(st) || isPaired(live);
     if (!paired) {
       renderPairingStub();
       return;
@@ -367,6 +401,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       <div class="row">
         <button class="btn ghost" id="inj-stuck">Inject stuck</button>
         <button class="btn ghost" id="inj-sos">Inject SOS</button>
+        <button class="btn ghost" id="inj-radio">Inject radio lost</button>
+        <button class="btn ghost" id="unpair">Unpair</button>
       </div>
       <p style="margin-top:10px"><a class="linkish" href="/viewer">Open live fog viewer</a></p>`;
     document.querySelectorAll("#speed-row button").forEach((btn) => {
@@ -390,6 +426,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       await liveControl("inject", { kind: "sos" });
       go("fault");
     };
+    const injRadio = $("#inj-radio");
+    if (injRadio) injRadio.onclick = () => liveControl("inject", { kind: "radio_lost" });
+    const unpairBtn = $("#unpair");
+    if (unpairBtn) unpairBtn.onclick = () => liveControl("unpair");
   }
 
   function renderMap() {
@@ -398,6 +438,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       return;
     }
     const st = state.status || {};
+    if (st.require_pair && !isPaired(st)) {
+      renderPairingStub();
+      return;
+    }
     const mission = ((st.state || {}).mission) || "idle";
     screen().innerHTML = `
       <h1>Yard</h1>
@@ -438,7 +482,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
           <button type="button" class="toggle ${enabled ? "on" : ""}" id="sched-toggle" aria-pressed="${enabled ? "true" : "false"}" aria-label="Enable schedule">${enabled ? "On" : "Off"}</button>
         </div>
         <div class="sub" id="sched-next">Next run: ${next}</div>
-        <div class="sub">${(sch.days || []).join(", ") || "no days"} @ ${sch.start_local || "—"} · ${sch.timezone || "local"}</div>
+        <div class="sub">${(sch.days || []).join(", ") || "no days"} @ ${sch.start_local || "—"} · ${sch.timezone || "Australia/Brisbane"}</div>
         <div class="sub">SOC gate ${(Number(sch.min_soc != null ? sch.min_soc : 0.25) * 100).toFixed(0)}% · rain skip ${sch.skip_rain === false ? "off" : "on"}${rain ? " · raining now" : ""}</div>
         <div class="sub" id="sched-reason">${skipLine}</div>
       </div>`;
@@ -459,11 +503,11 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       </div>
       <div class="card">
         <strong>Radio link</strong>
-        ${radio.link || "none"} · RSSI ${radio.rssi || "—"}
-        <div class="sub">BT ${radio.bluetooth && radio.bluetooth.paired ? "paired" : "no"} ·
+        ${radio.transport || radio.link || "none"} · rf_claim ${radio.rf_claim == null ? "none" : radio.rf_claim}
+        <div class="sub">BT ${pairingState(st)} ·
           Wi-Fi ${radio.wifi && radio.wifi.enabled ? "on" : "optional / off"} ·
-          LoRa ${radio.lora && radio.lora.enabled ? "long-range" : "off"}
-          ${(path && path.simulated) ? " · simulated path" : ""}</div>
+          LoRa ${radio.lora && radio.lora.enabled ? "far-fence sim" : "off"}
+          ${(path && path.simulated) ? " · simulated path" : ""} · no metre range</div>
       </div>
       <div class="card">
         <strong>Hours mowed</strong>${Number(st.hours_mowed || 0).toFixed(2)}

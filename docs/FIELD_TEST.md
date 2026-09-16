@@ -15,8 +15,10 @@ jims-mower-field-dryrun --out artifacts/field_dryrun/scorecard.yaml
 
 That command walks bring-up, a short `mission_tiny` teach → explore →
 MAP READY → mow → return-home (capped steps are OK), appearance living
-interlock, gym red-bias hand-signal stop, tip inject, rain/SOC schedule
-skips, day-2 new-process restore, and a sim HW ESTOP paddle. It writes
+interlock, gym red-bias hand-signal stop, pair-before-start, LoRa
+far-fence sim (no metre range), Brisbane 09:00 ≠ UTC 09:00, tip inject,
+rain/SOC schedule skips, day-2 new-process restore, and a sim HW ESTOP
+paddle. It writes
 the same scorecard schema with `domain: gym_dryrun` and
 `field_ready: false`. **Honest: not a field test.** No mAP / FPS / acre
 runtime. Optional `--scenario acre_yard_demo` is the same gym walk on
@@ -42,6 +44,7 @@ Copy the YAML template, or tick this list on paper and type it later.
 | --- | --- | --- |
 | `jims-mower-selftest` on the **wired** robot | | gym streams are not this line |
 | Hardware ESTOP paddle + dummy load; rails die; Start does not restore | | [`ESTOP.md`](ESTOP.md) |
+| Pair Bluetooth before Start (`require_pair`) | | unpaired Start is a hard no; sim pair, no BlueZ |
 | SOC from the fuel gauge (fraction 0–1) | | gym stub 50 Wh is not this |
 | Rain flag (`weather.wet` / `status.weather.rain`) readable | | no radar required |
 

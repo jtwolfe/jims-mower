@@ -28,7 +28,8 @@ from typing import Any, Optional, Union
 import numpy as np
 from PIL import Image
 
-from jims_mower.constants import LIVE_CONTROL_CMDS, LIVE_SCHEMA, VIEWER_SCHEMA
+from jims_mower.constants import GYM_PAIR_PIN, LIVE_CONTROL_CMDS, LIVE_SCHEMA, VIEWER_SCHEMA
+from jims_mower.pairing import PairingMachine
 from jims_mower.env import MowerEnv
 from jims_mower.mission_demo import (
     FAST_CAM_HEIGHT,
@@ -111,6 +112,10 @@ OWNER_COPY = {
     "safe": "Hold — safe.",
     "immobilised": "SOS — immobilised. Retrieve the mower.",
     "stuck": "Stuck — recovering (reverse / pivot).",
+    "unpaired": "Pair Bluetooth before Start.",
+    "pairing": "Pairing…",
+    "pair_failed": "Pairing failed — check the gym PIN.",
+    "radio_lost": "Radio lost — hold safe. Pair again to Start.",
 }
 RADIO_PATH_CHIPS = (
     {"id": "bt", "label": "BT teach", "role": "teach"},
@@ -127,6 +132,10 @@ INJECT_ALIASES = {
     "hw_estop": "hw_estop",
     "hardware_estop": "hw_estop",
     "estop_paddle": "hw_estop",
+    "radio_lost": "radio_lost",
+    "lost": "radio_lost",
+    "radio-lost": "radio_lost",
+    "bt_lost": "bt_lost",
 }
 
 SPEED_ALIASES = {
@@ -176,6 +185,8 @@ def owner_copy_for(
     fence_unusable: bool = False,
     done: bool = False,
     hw_estop: bool = False,
+    pairing_state: Optional[str] = None,
+    require_pair: bool = False,
 ) -> str:
     blob = fault if isinstance(fault, dict) else None
     if hw_estop or (blob and str(blob.get("code") or "") == "HW_ESTOP"):
@@ -188,6 +199,15 @@ def owner_copy_for(
             return OWNER_COPY["immobilised"]
         if code == "STUCK":
             return OWNER_COPY["stuck"]
+    if require_pair and pairing_state in {"unpaired", "pairing", "failed", "lost"}:
+        if pairing_state == "lost":
+            return OWNER_COPY["radio_lost"]
+        if pairing_state == "failed":
+            return OWNER_COPY["pair_failed"]
+        if pairing_state == "pairing":
+            return OWNER_COPY["pairing"]
+        if job_state in {"idle", "paused", "hold"}:
+            return OWNER_COPY["unpaired"]
     if done and job_state == "idle":
         return OWNER_COPY["complete"]
     if job_state == "teach" or phase == "teach":
@@ -215,7 +235,13 @@ def radio_path_for(phase: str, job_state: str = "running") -> dict[str, Any]:
     else:
         active = "lora"
     chips = [{**chip, "active": chip["id"] == active} for chip in RADIO_PATH_CHIPS]
-    return {"active": active, "chips": chips, "simulated": True, "not_rf_hardware": True}
+    return {
+        "active": active,
+        "chips": chips,
+        "rf_claim": None,
+        "simulated": True,
+        "not_rf_hardware": True,
+    }
 
 
 def robot_status_for(
@@ -339,6 +365,7 @@ class LiveSession:
         yard_profile: Optional[YardProfile] = None,
         yard_path: Optional[Union[str, Path]] = None,
         first_run: bool = False,
+        require_pair: Optional[bool] = None,
     ) -> None:
         self.config_name = resolve_live_config(config, fast=fast)
         self.fast = bool(fast)
@@ -388,11 +415,30 @@ class LiveSession:
         self.job_state = "idle"
         self.unattended = False
         self.estop = False
-        self.paired = False
+        pin = GYM_PAIR_PIN
+        self._require_pair_explicit = require_pair is not None
+        require = bool(require_pair) if require_pair is not None else False
+        persisted = None
+        if yard_profile is not None:
+            persisted = getattr(yard_profile, "pairing", None)
+        self.pairing = PairingMachine.from_profile(persisted, require_pair=require, pin=pin)
+        self.require_pair = require
         self._t0_wall = 0.0
         self._review_wall0: Optional[float] = None
         self.session_card: dict[str, Any] = {}
         self._fault_overlay: dict[str, Any] = {}
+
+    @property
+    def paired(self) -> bool:
+        return self.pairing.is_paired
+
+    @paired.setter
+    def paired(self, value: bool) -> None:
+        if value:
+            if not self.pairing.is_paired:
+                self.pairing.force_paired()
+        elif self.pairing.is_paired:
+            self.pairing.unpair()
 
     @property
     def dt(self) -> float:
@@ -426,6 +472,12 @@ class LiveSession:
         if self.env is not None:
             self.env.close()
         self.env = MowerEnv(config=cfg, scenario=scenario, render_mode="rgb_array")
+        owner = getattr(cfg, "owner", None)
+        if owner is not None:
+            self.pairing.pin = str(getattr(owner, "pair_pin", GYM_PAIR_PIN) or GYM_PAIR_PIN)
+            if not self._require_pair_explicit:
+                self.require_pair = bool(getattr(owner, "require_pair", False))
+                self.pairing.require_pair = self.require_pair
         reset_opts: dict[str, Any] = {
             "blackbox": str(self.out_dir / "blackbox.jsonl"),
             "save_mission": str(self.out_dir / "session.npz"),
@@ -634,6 +686,19 @@ class LiveSession:
             return {"ok": False, "error": f"unknown command {cmd}", **self.snapshot()}
         if not self.started:
             self.reset()
+        if key in {"start", "resume", "start_mow"}:
+            refused = self.pairing.refuse_start()
+            if refused:
+                return {
+                    "ok": False,
+                    "error": "not paired — Pair Bluetooth before Start",
+                    "reason": refused,
+                    "cmd": key,
+                    **self.snapshot(),
+                }
+        radio_block = self._command_via_radio(key)
+        if radio_block is not None:
+            return radio_block
         if key == "start":
             yard = kwargs.get("yard")
             if yard:
@@ -710,7 +775,16 @@ class LiveSession:
             self._apply_yard(str(kwargs.get("yard") or self.config_name))
             self.job_state = "idle"
         elif key == "pair":
-            self.paired = True
+            pin = kwargs.get("pin") if kwargs.get("pin") is not None else kwargs.get("code")
+            result = self.pairing.request_pair(None if pin is None else str(pin))
+            self.require_pair = self.pairing.require_pair
+            self._persist_pairing()
+            snap = self.snapshot()
+            return {"ok": bool(result.ok), "cmd": key, "reason": result.reason, **snap}
+        elif key == "unpair":
+            self.pairing.unpair()
+            self._hold_after_link_loss("unpaired")
+            self._persist_pairing()
         elif key == "teach":
             return self._begin_teach(**kwargs)
         elif key == "save_yard":
@@ -724,9 +798,61 @@ class LiveSession:
             )
         return {"ok": True, "cmd": key, **self.snapshot()}
 
+    def _command_via_radio(self, key: str) -> Optional[dict[str, Any]]:
+        """When radio sim is enabled, route owner cmds. BT lost → LoRa far-fence."""
+        if self.env is None:
+            return None
+        radio = getattr(self.env, "radio", None)
+        if radio is None or not (bool(getattr(radio, "enabled", False)) or getattr(radio, "any_lost", False)):
+            return None
+        if not getattr(radio, "any_lost", False) and not radio.enabled:
+            return None
+        if key not in {"start", "pause", "resume", "estop", "hold", "hw_estop", "start_mow"}:
+            return None
+        if not getattr(radio, "any_lost", False) and not radio.enabled:
+            return None
+        if not getattr(radio, "any_lost", False):
+            return None
+        delivery = radio.route_command(key, paired=self.pairing.is_paired)
+        if delivery.ok:
+            return None
+        return {
+            "ok": False,
+            "error": str(delivery.reason or "radio_refused"),
+            "cmd": key,
+            "radio_channel": delivery.channel,
+            **self.snapshot(),
+        }
+
+    def _hold_after_link_loss(self, reason: str) -> None:
+        """Unpair / radio-lost: hold safe, not ESTOP."""
+        if self.job_state == "running":
+            self.job_state = "hold"
+            if self.policy is not None:
+                self.policy.request_hold(f"{reason} — hold safe")
+
+    def _persist_pairing(self) -> None:
+        blob = self.pairing.persist()
+        if self.yard_profile is not None:
+            self.yard_profile.pairing = blob
+            if self.yard_path is not None:
+                write_yard_profile(self.yard_path, self.yard_profile)
+
     def _inject_fault(self, kind: str, *, mode: str = "open_circuit") -> None:
         raw = str(kind or "stuck").strip().lower()
         resolved = INJECT_ALIASES.get(raw, raw)
+        if resolved == "radio_lost":
+            self.pairing.lose(reason="radio_lost")
+            if self.env is not None:
+                self.env.radio.lose_link("wifi")
+                self.env.radio.lose_link("bt")
+            self._hold_after_link_loss("radio_lost")
+            self._persist_pairing()
+            return
+        if resolved == "bt_lost":
+            if self.env is not None:
+                self.env.radio.lose_link("bt")
+            return
         if self.env is None:
             return
         self.env.inject_fault(resolved, mode=mode)
@@ -822,7 +948,9 @@ class LiveSession:
 
     def _reset_for_next_job(self) -> None:
         """Rebuild env/policy for a new Start. Keeps the taught yard if any."""
-        paired = self.paired
+        pairing = self.pairing
+        require_pair = self.require_pair
+        explicit = self._require_pair_explicit
         taught = self.owner_taught
         profile = self.yard_profile
         first = self.first_run
@@ -836,7 +964,10 @@ class LiveSession:
             self._apply_usable_keep_in(profile)
             self._snap_home_inside_keep_in(profile)
         self.reset()
-        self.paired = paired
+        self.pairing = pairing
+        self.require_pair = require_pair
+        self._require_pair_explicit = explicit
+        self.pairing.require_pair = require_pair
         self.done = False
 
     def _needs_taught_job_reset(self) -> bool:
@@ -1329,13 +1460,20 @@ class LiveSession:
                 "phase_label": "IDLE",
                 "job_state": self.job_state,
                 "owner_copy": owner_copy_for(
-                    self.job_state, "idle", fault, hw_estop=self._hw_estop_latched()
+                    self.job_state,
+                    "idle",
+                    fault,
+                    hw_estop=self._hw_estop_latched(),
+                    pairing_state=self.pairing.state,
+                    require_pair=self.require_pair,
                 ),
                 "radio_path": radio_path,
                 "faults": self._faults_payload(fault),
                 "hw_estop": self._hw_estop_latched(),
                 "estop_kind": "hardware" if self._hw_estop_latched() else None,
                 "paired": bool(self.paired),
+                "pairing": self.pairing.as_info(),
+                "require_pair": bool(self.require_pair),
                 "done": False,
                 "not_a_benchmark": True,
             }
@@ -1398,6 +1536,8 @@ class LiveSession:
                 fence_unusable=fence_unusable,
                 done=self.done,
                 hw_estop=self._hw_estop_latched(),
+                pairing_state=self.pairing.state,
+                require_pair=self.require_pair,
             ),
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
@@ -1407,6 +1547,8 @@ class LiveSession:
             "yard_saved": bool(self.yard_path is not None and Path(self.yard_path).is_file()),
             "faults": self._faults_payload(fault),
             "paired": bool(self.paired),
+            "pairing": self.pairing.as_info(),
+            "require_pair": bool(self.require_pair),
             "yards": list(LIVE_YARDS),
             "yard": str(self.config_name),
             "width_m": float(self.env.cfg.world.width_m) if self.env is not None else 16.0,

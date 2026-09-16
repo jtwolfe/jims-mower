@@ -143,7 +143,7 @@ classes:
     qty: 1
     class: BT + optional Wi-Fi + LoRa (USB/UART)
     buy_make: buy
-    verify_before_spin: pairing bool is still a stub — do not claim RF range
+    verify_before_spin: sim pairing state machine — do not claim RF range
     open_questions: which USB stick
     number_status: class
     feeds: not measured

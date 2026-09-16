@@ -104,6 +104,7 @@ def test_teach_save_start_skips_calibrate(tmp_path: Path) -> None:
         assert idle["taught"] is False
         assert idle["needs_teach"] is True
 
+        session.control("pair")
         saved = session.control("save_yard", keep_in=_tiny_keep_in())
         assert saved["ok"] is True
         assert saved["taught"] is True
@@ -115,6 +116,7 @@ def test_teach_save_start_skips_calibrate(tmp_path: Path) -> None:
         assert len(loaded.keep_in) >= 3
         assert loaded.width_m == session.env.cfg.world.width_m
 
+        session.control("pair")
         started = session.control("start")
         assert started["ok"] is True
         assert started["phase"] == "explore"
