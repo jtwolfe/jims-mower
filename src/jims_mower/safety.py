@@ -22,10 +22,17 @@ from jims_mower.geofence import (
 )
 from jims_mower.world import point_to_segment_distance
 from jims_mower.kinematics import sit_on_terrain, trimmer_xy, wheel_positions
-from jims_mower.types import Obstacle, Pose
+from jims_mower.types import Detection, Obstacle, Pose
 
 if TYPE_CHECKING:
     from jims_mower.terrain import HeightField
+
+# Forward cameras used by the dets-from-camera living interlock (PLN-4).
+# Rear / side blobs do not trip the trimmer — a person behind the robot
+# is out of the cutting view.
+FORWARD_CAMERAS = frozenset(
+    {"front", "front_left", "front_right", "stereo_left", "stereo_right"}
+)
 
 
 @dataclass(frozen=True)
@@ -108,6 +115,76 @@ def trimmer_interlock(
             kind,
             f"{kind} within {safety_radius_m:.2f} m of trimmer",
             living.advice if living.advice != "ok" else "reroute",
+        )
+    return SafetyDecision(True, True, dist, kind, None, living.advice)
+
+
+def _is_living_detection(det: Detection) -> bool:
+    if is_living(det.label):
+        return True
+    return str(det.category or "") in {"person", "animal"}
+
+
+def living_from_detections(
+    detections: Iterable[Detection],
+    *,
+    cameras: Optional[Iterable[str]] = None,
+) -> tuple[float, Optional[Detection]]:
+    """Nearest living appearance det. No world range — in-view is the trip.
+
+    Appearance blobs have no metric depth. A living det in a forward
+    camera is treated as inside the tool radius (``0.0`` m). Out of
+    those cameras → no trip (``inf``). Does not read the oracle list.
+    """
+    allowed = {str(c) for c in cameras} if cameras is not None else set(FORWARD_CAMERAS)
+    chosen: Optional[Detection] = None
+    for det in detections:
+        if not _is_living_detection(det):
+            continue
+        if allowed and det.camera not in allowed:
+            continue
+        chosen = det
+        break
+    if chosen is None:
+        return math.inf, None
+    return 0.0, chosen
+
+
+def trimmer_interlock_from_detections(
+    requested: bool,
+    detections: Iterable[Detection],
+    *,
+    safety_radius_m: float,
+    cameras: Optional[Iterable[str]] = None,
+) -> SafetyDecision:
+    """Trimmer interlock from camera dets — not ``context.obstacles``.
+
+    Gym trip: a painted living blob in a forward camera. A person on
+    the oracle list who is behind the robot and out of those cameras
+    does **not** fire. No invented metres.
+    """
+    if safety_radius_m <= 0:
+        raise ValueError("safety_radius_m must be positive")
+    dist, det = living_from_detections(detections, cameras=cameras)
+    kind = det.label if det is not None else None
+    living = living_advice(
+        dist,
+        kind,
+        slow_m=max(3.0, safety_radius_m * 2.0),
+        reroute_m=max(1.6, safety_radius_m),
+        stop_m=max(0.85, safety_radius_m * 0.55),
+    )
+    if not requested:
+        return SafetyDecision(False, False, dist, kind, None, living.advice)
+    if det is not None:
+        cam = det.camera
+        return SafetyDecision(
+            False,
+            True,
+            dist,
+            kind,
+            f"{kind} in {cam} camera (appearance)",
+            living.advice if living.advice != "ok" else "stop",
         )
     return SafetyDecision(True, True, dist, kind, None, living.advice)
 

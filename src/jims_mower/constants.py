@@ -133,6 +133,8 @@ COV_CLASS_NAMES = ("non_grass", "uncut", "cut")
 # perception.detector_backend. mock stays the gym default (god-view projector).
 DETECTOR_BACKENDS = frozenset({"mock", "trt", "tensorrt", "onnx", "appearance", "blind"})
 DETECTOR_BACKEND_CLI = ("mock", "trt", "onnx", "appearance", "blind")
+# PLN-4: mock stays god-view obstacles; appearance/onnx/blind use camera dets.
+INTERLOCK_SOURCES = frozenset({"auto", "detections", "obstacles"})
 
 GRAVITY_MPS2 = 9.80665
 

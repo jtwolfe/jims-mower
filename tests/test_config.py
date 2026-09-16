@@ -151,6 +151,8 @@ def test_default_has_terrain_and_imu() -> None:
     assert cfg.perception.terrain_mode == "heuristic"
     assert cfg.perception.onnx_path == ""
     assert cfg.perception.detector_backend == "mock"
+    assert cfg.perception.interlock_source == "auto"
+    assert cfg.robot.drive.measured is False
     assert cfg.perception.grass_mode == "color"
     assert cfg.perception.coverage_source == "gym_grid"
     assert cfg.world.terrain.base_gradient.effective_slope_rad() > 0.0

@@ -17,7 +17,12 @@ from jims_mower.perception.grass import (
 from jims_mower.perception.hand_signals import HandSignalCurriculum
 from jims_mower.perception.mock import MockDetector, detection_from_obstacle
 from jims_mower.perception.semantic import semantic_raster
-from jims_mower.perception.detect import AppearanceDetector, detector_from_mode
+from jims_mower.perception.detect import (
+    AppearanceDetector,
+    detect_palette_blobs,
+    detector_from_mode,
+    paint_kind_blob,
+)
 from jims_mower.perception.trt import TrtDetector, TrtTerrainObserver, tensorrt_available
 from jims_mower.perception.cv_terrain import (
     classify_structure_rgb,
@@ -118,7 +123,9 @@ __all__ = [
     "PlanarGradeModel",
     "paint_planar_grade",
     "detection_from_obstacle",
+    "detect_palette_blobs",
     "detector_from_mode",
+    "paint_kind_blob",
     "drain_pixel_fraction",
     "export_terrain_onnx",
     "fuse_camera_labels",

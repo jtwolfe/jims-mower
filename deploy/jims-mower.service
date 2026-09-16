@@ -1,0 +1,23 @@
+# Jim's Mower on-box control loop (RT-7).
+# Example unit — copy to /etc/systemd/system/ and edit paths.
+# This does **not** replace the hardware ESTOP paddle. See docs/ESTOP.md
+# and docs/ONBOX.md. Not a SIL rating. Fake CSI until JetPack + cameras.
+
+[Unit]
+Description=Jim's Mower on-box control loop (no gym renderer)
+Documentation=file:///opt/jims-mower/docs/ONBOX.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jims
+Group=jims
+WorkingDirectory=/var/lib/jims-mower
+ExecStart=/usr/bin/jims-mower-onbox --config /etc/jims-mower/bench.yaml --blackbox /var/lib/jims-mower/blackbox.jsonl --hold --action 0,0,0
+Restart=on-failure
+RestartSec=2
+# Hardware ESTOP is a paddle on the rails. Do not treat this unit as a kill.
+
+[Install]
+WantedBy=multi-user.target

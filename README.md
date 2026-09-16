@@ -113,6 +113,10 @@ jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
 # WAVE UX-B — software self-test (no RF hardware)
 jims-mower-selftest
 
+# On-box loop (no gym renderer) + first-boot bring-up
+jims-mower-onbox --config configs/orin/bench.yaml --steps 8 --blackbox /tmp/bb.jsonl
+jims-mower-bringup --config configs/orin/bench.yaml
+
 # WAVE UX-C — phone owns the live job (one command)
 jims-mower-owner --live
 # open http://127.0.0.1:8766/  Pair → Teach boundary → Save yard → Start
@@ -127,7 +131,8 @@ jims-mower-app --backend memory --yard configs/yards/example_profile.json --port
 Docs: [`docs/UX.md`](docs/UX.md), [`docs/UX_B.md`](docs/UX_B.md), [`docs/UX_C.md`](docs/UX_C.md),
 [`docs/SCHEDULE.md`](docs/SCHEDULE.md), [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md),
 [`docs/HARDWARE_DESIGN.md`](docs/HARDWARE_DESIGN.md),
-[`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/DATASET.md`](docs/DATASET.md),
+[`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/ONBOX.md`](docs/ONBOX.md),
+[`docs/SCALE.md`](docs/SCALE.md), [`docs/DATASET.md`](docs/DATASET.md),
 [`docs/PACK_THERMAL.md`](docs/PACK_THERMAL.md),
 [`docs/FAB_CHECKLIST.md`](docs/FAB_CHECKLIST.md),
 [`docs/FIELD_TEST.md`](docs/FIELD_TEST.md).
@@ -663,6 +668,8 @@ jims-mower-export-trt --dry-run
 | Radio sim | [`radio.py`](src/jims_mower/radio.py) — Wi-Fi → BT → LoRa, no RF hardware |
 | Self-test | `jims-mower-selftest` — spin / IMU still / frame entropy |
 | Stereo bench | `jims-mower-calibrate` — EXAMPLE YAML + gym lip / tape (not a field measure) |
+| On-box | `jims-mower-onbox` — control loop without `jims_mower.renderer` |
+| Bring-up | `jims-mower-bringup` — PASS/FAIL/SKIP first-boot checks (no invented numbers) |
 | Notes | [`docs/UX_B.md`](docs/UX_B.md), [`docs/CALIBRATION.md`](docs/CALIBRATION.md) |
 
 ```bash

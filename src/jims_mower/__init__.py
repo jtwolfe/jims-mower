@@ -1,30 +1,50 @@
-"""Jim's Mower: Gymnasium env for a camera-driven zero-turn string-trimmer."""
+"""Jim's Mower: Gymnasium env for a camera-driven zero-turn string-trimmer.
+
+Package import is **lazy**. Eagerly importing ``MowerEnv`` would pull
+``jims_mower.renderer``, which the on-box loop must never load. Gym
+registration stays a string entry point.
+"""
 
 from __future__ import annotations
 
 from gymnasium.envs.registration import register, registry
 
 from jims_mower.config import EnvConfig, load_config
-from jims_mower.env import MowerEnv
-from jims_mower.metrics import EpisodeScorecard, evaluate_episode
-from jims_mower.scenarios import Scenario, list_scenarios, load_scenario, load_source
-from jims_mower.kinematics import integrate_pose, sit_on_terrain
-from jims_mower.planning import TerrainPolicy, build_costmap, plan_coverage
-from jims_mower.geofence import GeofenceSpec
-from jims_mower.mission import load_mission, save_mission
-from jims_mower.profile import YardProfile, load_yard_profile, trail_to_polygon
-from jims_mower.planning.fusion import EkfPoseFilter
-from jims_mower.runtime.budget import OrinBudget
 from jims_mower.pack import GYM_STUB_CAPACITY_WH
-from jims_mower.safety import living_advice, terrain_hazards, trimmer_interlock
-from jims_mower.faults import FaultBus
-from jims_mower.radio import RadioSim
-from jims_mower.hardware_estop import HardwareEstop
-from jims_mower.safe_state import SafeStateMachine
 
 __version__ = "0.1.0"
 
 _ENV_ID = "jims_mower/Mower-v0"
+
+_LAZY = {
+    "EkfPoseFilter": "jims_mower.planning.fusion",
+    "EpisodeScorecard": "jims_mower.metrics",
+    "FaultBus": "jims_mower.faults",
+    "GeofenceSpec": "jims_mower.geofence",
+    "HardwareEstop": "jims_mower.hardware_estop",
+    "MowerEnv": "jims_mower.env",
+    "OrinBudget": "jims_mower.runtime.budget",
+    "RadioSim": "jims_mower.radio",
+    "SafeStateMachine": "jims_mower.safe_state",
+    "Scenario": "jims_mower.scenarios",
+    "TerrainPolicy": "jims_mower.planning.controller",
+    "YardProfile": "jims_mower.profile",
+    "build_costmap": "jims_mower.planning.costmap",
+    "evaluate_episode": "jims_mower.metrics",
+    "integrate_pose": "jims_mower.kinematics",
+    "list_scenarios": "jims_mower.scenarios",
+    "living_advice": "jims_mower.safety",
+    "load_mission": "jims_mower.mission",
+    "load_scenario": "jims_mower.scenarios",
+    "load_source": "jims_mower.scenarios",
+    "load_yard_profile": "jims_mower.profile",
+    "plan_coverage": "jims_mower.planning.coverage",
+    "save_mission": "jims_mower.mission",
+    "sit_on_terrain": "jims_mower.kinematics",
+    "terrain_hazards": "jims_mower.safety",
+    "trail_to_polygon": "jims_mower.profile",
+    "trimmer_interlock": "jims_mower.safety",
+}
 
 
 def _register() -> None:
@@ -37,6 +57,15 @@ def _register() -> None:
 
 
 _register()
+
+
+def __getattr__(name: str):
+    if name in _LAZY:
+        from importlib import import_module
+
+        return getattr(import_module(_LAZY[name]), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "EkfPoseFilter",

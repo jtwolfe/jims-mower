@@ -226,14 +226,19 @@ def test_detector_from_mode_default_is_mock() -> None:
     assert detector_from_mode("appearance").detect({}, PerceptionContext(Pose(0, 0, 0), [], [])) == []
 
 
-def test_appearance_backend_leaves_detections_empty_and_interlock_consumes_key() -> None:
-    cfg = {**_tiny_cfg(), "perception": {"detector_backend": "appearance", "terrain_mode": "heuristic"}}
+def test_appearance_backend_empty_rgb_keeps_detection_key() -> None:
+    """No painted blob → no dets. Mock default unchanged. map_claim stays null."""
+    cfg = {
+        **_tiny_cfg(),
+        "world": {**_tiny_cfg()["world"], "n_people": 0},
+        "perception": {"detector_backend": "appearance", "terrain_mode": "heuristic"},
+    }
     env = MowerEnv(config=cfg)
     obs, info = env.reset(seed=8)
     assert "detections" in obs
     assert "detections" in info
-    assert info["detections"] == []
-    assert int((obs["detections"][:, 0] > 0).sum()) == 0
+    assert isinstance(env.detector, AppearanceDetector)
+    assert env.detector.map_claim is None
     env.close()
     default = MowerEnv(config=_tiny_cfg())
     _obs, info = default.reset(seed=8)

@@ -61,9 +61,11 @@ from jims_mower.safety import (
     first_collision,
     in_yard,
     living_advice,
+    living_from_detections,
     nearest_living,
     terrain_hazards,
     trimmer_interlock,
+    trimmer_interlock_from_detections,
 )
 from jims_mower.faults import FaultBus
 from jims_mower.hardware_estop import HardwareEstop, is_hw_estop_kind, is_hw_reset_mode
@@ -295,6 +297,8 @@ class MowerEnv(gym.Env):
         self._trimmer_on = False
         self._last_images: dict[str, np.ndarray] = {}
         self._last_detections: list[Detection] = []
+        self._prefetch_images: Optional[dict[str, np.ndarray]] = None
+        self._prefetch_detections: Optional[list[Detection]] = None
         self._last_topdown: Optional[np.ndarray] = None
         self._prev_pose = self._pose
         self._prev_v = 0.0
@@ -545,6 +549,8 @@ class MowerEnv(gym.Env):
         if callable(reset_obs):
             reset_obs()
         self._tracklets.reset()
+        self._prefetch_images = None
+        self._prefetch_detections = None
         bb = options.get("blackbox")
         if bb:
             from jims_mower.blackbox import BlackBox
@@ -586,7 +592,7 @@ class MowerEnv(gym.Env):
         # / limp-home cannot soft-override a latched kill.
         left_n, right_n, requested = self.hw_estop.apply(left_n, right_n, requested)
         self.fault_bus.last_applied = (left_n, right_n, 1.0 if requested else 0.0)
-        vmax = self.cfg.robot.max_wheel_speed_mps
+        vmax = self.cfg.robot.wheel_speed_mps()
         self._prev_pose = self._pose
         self._prev_v = self._last_v
         self._pose = integrate_pose(
@@ -614,13 +620,27 @@ class MowerEnv(gym.Env):
         )
         self._signals.maybe_rotate(self._yard.obstacles, self.np_random)
 
-        decision = trimmer_interlock(
-            requested,
-            self._pose,
-            self._yard.obstacles,
-            offset_m=self.cfg.robot.trimmer.offset_m,
-            safety_radius_m=self.cfg.robot.trimmer.safety_radius_m,
-        )
+        if self._interlock_from_detections():
+            images = self._camera_images()
+            context = self._perception_context_for_detect()
+            detections = self.detector.detect(images, context)
+            self._prefetch_images = images
+            self._prefetch_detections = detections
+            decision = trimmer_interlock_from_detections(
+                requested,
+                detections,
+                safety_radius_m=self.cfg.robot.trimmer.safety_radius_m,
+            )
+        else:
+            self._prefetch_images = None
+            self._prefetch_detections = None
+            decision = trimmer_interlock(
+                requested,
+                self._pose,
+                self._yard.obstacles,
+                offset_m=self.cfg.robot.trimmer.offset_m,
+                safety_radius_m=self.cfg.robot.trimmer.safety_radius_m,
+            )
         self._trimmer_on = decision.trimmer_enabled
 
         newly = 0
@@ -831,6 +851,38 @@ class MowerEnv(gym.Env):
             terrain=self._terrain,
         )
 
+    def _interlock_from_detections(self) -> bool:
+        """True when living interlock must consume camera dets, not the oracle list."""
+        src = str(self.cfg.perception.interlock_source or "auto").strip().lower()
+        if src == "detections":
+            return True
+        if src == "obstacles":
+            return False
+        backend = str(self.cfg.perception.detector_backend or "mock").strip().lower()
+        return backend in {"appearance", "onnx", "blind"}
+
+    def _perception_context_for_detect(self) -> PerceptionContext:
+        """Minimal context for a mid-step detect. Appearance ignores obstacles."""
+        return PerceptionContext(
+            pose=self._pose,
+            cameras=self.cameras,
+            obstacles=list(self._yard.obstacles),
+            image_size=(self.cfg.sensors.width, self.cfg.sensors.height),
+            hand_signals_enabled=self.cfg.curriculum.hand_signals,
+            hand_signal_classifier=self.cfg.curriculum.hand_signal_classifier,
+            imu=self._last_imu,
+            gps=self._last_gps,
+            terrain=self._terrain,
+            map_shape=self._coverage.cut.shape,
+            resolution_m=self.cfg.world.resolution_m,
+            world_size=(self.cfg.world.width_m, self.cfg.world.height_m),
+            steep_slope_rad=self.cfg.robot.steep_slope_rad,
+            tof=self._last_tof,
+            length_m=self.cfg.robot.length_m,
+            track_m=self.cfg.robot.track_m,
+            chassis_hover_m=0.06,
+        )
+
     def _ensure_camera_adapter(self) -> None:
         """Build FakeGst / GstNvmm when ``runtime.cameras.adapter`` is set."""
         kind = adapter_kind(getattr(self.cfg.runtime.cameras, "adapter", ""))
@@ -963,7 +1015,11 @@ class MowerEnv(gym.Env):
         }
 
     def _observe(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        images = self._camera_images()
+        if self._prefetch_images is not None:
+            images = self._prefetch_images
+            self._prefetch_images = None
+        else:
+            images = self._camera_images()
         self._last_images = images
         imu_sample = simulate_imu(
             self._pose,
@@ -1036,7 +1092,11 @@ class MowerEnv(gym.Env):
             track_m=self.cfg.robot.track_m,
             chassis_hover_m=0.06,
         )
-        detections = self.detector.detect(images, context)
+        if self._prefetch_detections is not None:
+            detections = self._prefetch_detections
+            self._prefetch_detections = None
+        else:
+            detections = self.detector.detect(images, context)
         self._last_detections = detections
         tracklets = self._tracklets.update(detections)
         if self.cfg.perception.persistent_occupancy:
@@ -1133,14 +1193,24 @@ class MowerEnv(gym.Env):
             stop_m=self.cfg.planner.geofence_stop_m,
         )
         hub = trimmer_xy(self._pose, self.cfg.robot.trimmer.offset_m)
-        dist, living_obst = nearest_living(hub, self._yard.obstacles)
-        living = living_advice(
-            dist,
-            living_obst.kind if living_obst is not None else None,
-            slow_m=self.cfg.planner.living_slow_m,
-            reroute_m=self.cfg.planner.living_reroute_m,
-            stop_m=self.cfg.planner.living_stop_m,
-        )
+        if self._interlock_from_detections():
+            dist, living_det = living_from_detections(detections)
+            living = living_advice(
+                dist,
+                living_det.label if living_det is not None else None,
+                slow_m=self.cfg.planner.living_slow_m,
+                reroute_m=self.cfg.planner.living_reroute_m,
+                stop_m=self.cfg.planner.living_stop_m,
+            )
+        else:
+            dist, living_obst = nearest_living(hub, self._yard.obstacles)
+            living = living_advice(
+                dist,
+                living_obst.kind if living_obst is not None else None,
+                slow_m=self.cfg.planner.living_slow_m,
+                reroute_m=self.cfg.planner.living_reroute_m,
+                stop_m=self.cfg.planner.living_stop_m,
+            )
         obs = {
             "cameras": images,
             "coverage": self._coverage.as_float(),

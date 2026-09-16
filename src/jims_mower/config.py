@@ -12,6 +12,7 @@ import yaml
 from jims_mower.constants import (
     COVERAGE_SOURCES,
     DETECTOR_BACKENDS,
+    INTERLOCK_SOURCES,
     GRASS_MODES,
     MOTOR_KILL_MODES,
     MOVER_DENSITIES,
@@ -64,11 +65,30 @@ class ConfigError(ValueError):
 
 
 @dataclass
+class DriveConfig:
+    """Command → wheel m/s scale. ``measured: false`` until a tape / stopwatch bench.
+
+    Gym: a 1.0 wheel command moves at ``max_wheel_speed_mps * scale``.
+    Do not invent Kv. See ``docs/SCALE.md``.
+    """
+
+    scale: float = 1.0
+    measured: bool = False
+    measured_at: str = ""
+    notes: str = ""
+
+
+@dataclass
 class TrimmerConfig:
     offset_m: float = 0.32
     radius_m: float = 0.16
     safety_radius_m: float = 1.50
     height_m: float = 0.12
+    # Command → RPM scale. ``measured: false`` until a tach bench. No invented Kv.
+    scale: float = 1.0
+    measured: bool = False
+    measured_at: str = ""
+    notes: str = ""
 
 
 @dataclass
@@ -85,6 +105,11 @@ class RobotConfig:
     wheel_drop_m: float = 0.08
     steep_slope_rad: float = 0.30
     trimmer: TrimmerConfig = field(default_factory=TrimmerConfig)
+    drive: DriveConfig = field(default_factory=DriveConfig)
+
+    def wheel_speed_mps(self) -> float:
+        """1.0 command → m/s. Scale is 1.0 until a human measures it."""
+        return float(self.max_wheel_speed_mps) * float(self.drive.scale)
 
 
 @dataclass
@@ -286,6 +311,8 @@ class PerceptionConfig:
     loop_closure: bool = True
     detector_backend: str = "mock"  # mock | trt | onnx | appearance | blind
     engine_path: str = ""  # TensorRT .engine placeholder; unused in CI
+    # PLN-4: auto → detections when appearance/onnx/blind, obstacles when mock
+    interlock_source: str = "auto"
 
 
 @dataclass
@@ -641,6 +668,10 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("steep_slope_rad must be positive")
     if cfg.robot.max_wheel_speed_mps <= 0:
         raise ConfigError("max_wheel_speed_mps must be positive")
+    if float(cfg.robot.drive.scale) <= 0:
+        raise ConfigError("robot.drive.scale must be positive")
+    if float(cfg.robot.trimmer.scale) <= 0:
+        raise ConfigError("robot.trimmer.scale must be positive")
     if cfg.robot.length_m <= 0 or cfg.robot.width_m <= 0 or cfg.robot.height_m <= 0:
         raise ConfigError("robot body extents must be positive")
     if cfg.robot.trimmer.safety_radius_m <= 0:
@@ -786,6 +817,10 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     det_backend = str(cfg.perception.detector_backend or "mock").strip().lower()
     if det_backend not in DETECTOR_BACKENDS:
         raise ConfigError("perception.detector_backend must be mock|trt|onnx|appearance|blind")
+    interlock_src = str(cfg.perception.interlock_source or "auto").strip().lower()
+    if interlock_src not in INTERLOCK_SOURCES:
+        raise ConfigError("perception.interlock_source must be auto|detections|obstacles")
+    cfg.perception.interlock_source = interlock_src
     wd = cfg.runtime.watchdog
     if wd.imu_stall_s <= 0 or wd.vision_stall_s <= 0:
         raise ConfigError("runtime.watchdog stall windows must be positive")
