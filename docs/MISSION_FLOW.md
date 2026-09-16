@@ -87,12 +87,14 @@ Unknown cells are **not** mowable and **not** safe. The owner view must
 match that: a finished god-view `yard.glb` is the true height field
 used by physics, not what the robot has learned.
 
-Live mode draws an **opaque fog veil** over cells the cameras / body
-have not stamped. Observed holes show the mesh plus the growing
-`ObservedMap` (free / hazard / structure / frontiers). Toggle **true
-elev (god-view debug)** to lift the veil — that is evaluation, same
-idea as **observer vs true elev**. Control never reads the unfogged
-mesh.
+Live / owner mode **hides the true height-field mesh** and shows a dark
+unknown pad plus an **opaque fog veil** over cells the cameras / body
+have not stamped. Observed holes paint the growing `ObservedMap`
+(free / hazard / pond / shed / frontiers). Toggle **true elev
+(god-view debug)** to reveal the physics mesh — that is evaluation,
+same idea as **observer vs true elev**. Control never reads the
+unfogged mesh. The `yard.glb` on disk is still the true field so
+debug / replay can show it.
 
 Acre rasters (70×58 @ 0.50 m) are coarsened to ≤96 on a side before
 they hit the browser. Cameras are JPEG-throttled (~2.5 Hz). Full acre
