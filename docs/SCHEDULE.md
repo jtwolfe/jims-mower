@@ -28,7 +28,7 @@ order §1.
 | `start_local` | `09:00` | 24h `HH:MM` in `timezone` |
 | `duration_min` | `60` | Auto-stop only for jobs **this engine armed** |
 | `timezone` | `local` | `local` or IANA (`Australia/Sydney`, `UTC`) |
-| `min_soc` | `0.25` | Skip if `battery.soc` is below this |
+| `min_soc` | `0.25` | Skip if `battery.soc` is below this. SOC is a fraction of `runtime.battery.capacity_wh` (50 Wh gym stub unless `measured: true` — [`PACK_THERMAL.md`](PACK_THERMAL.md)). Not an acre-runtime claim. |
 | `skip_rain` | `true` | Skip when the rain / wet flag is set |
 | `arm_window_min` | `15` | Minutes after start still eligible |
 | `note` | engine blurb | Old `stub — not a scheduler` is rewritten on load |

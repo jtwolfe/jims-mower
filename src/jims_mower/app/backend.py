@@ -23,6 +23,7 @@ from jims_mower.geofence import allowed_xy
 from jims_mower.mesh import mesh_from_elevation, mesh_to_payload
 from jims_mower.profile import RadioPrefs
 from jims_mower.safe_state import SafeStateMachine
+from jims_mower.pack import GYM_STUB_CAPACITY_WH, battery_status_block
 from jims_mower.schedule import (
     Clock,
     ScheduleHook,
@@ -317,6 +318,8 @@ class MemoryBackend:
             faults=self.faults,
             mission=mission,
             machine=mode,
+            capacity_wh=GYM_STUB_CAPACITY_WH,
+            pack_measured=False,
         )
 
     def _arm_from_schedule(self) -> None:
@@ -373,11 +376,7 @@ class MemoryBackend:
         return {
             "schema": APP_STATUS_SCHEMA,
             "pose": _pose_dict(self.pose["x"], self.pose["y"], self.pose["theta"]),
-            "battery": {
-                "soc": float(self.soc),
-                "temp_c": float(self.temp_c),
-                "not_a_power_trace": True,
-            },
+            "battery": battery_status_block(soc=float(self.soc), temp_c=float(self.temp_c)),
             "state": {
                 "mission": mission,
                 "machine": mode,
@@ -608,6 +607,8 @@ class SimBackend:
             faults=_ux_b_faults(self._info, self.faults),
             mission=mission,
             machine=mode,
+            capacity_wh=self._info.get("capacity_wh", GYM_STUB_CAPACITY_WH),
+            pack_measured=bool(self._info.get("pack_measured", False)),
         )
 
     def _arm_from_schedule(self) -> None:
@@ -656,7 +657,7 @@ class SimBackend:
         return {
             "schema": APP_STATUS_SCHEMA,
             "pose": self._pose(),
-            "battery": {"soc": soc, "temp_c": temp, "not_a_power_trace": True},
+            "battery": battery_status_block(soc=soc, temp_c=temp, info=self._info),
             "state": {
                 "mission": mission,
                 "machine": mode,
@@ -797,6 +798,8 @@ class EpisodeBackend:
             faults=_ux_b_faults(blob, self.faults),
             mission=mission,
             machine=mode,
+            capacity_wh=blob.get("capacity_wh", GYM_STUB_CAPACITY_WH),
+            pack_measured=bool(blob.get("pack_measured", False)),
         )
 
     def _arm_from_schedule(self) -> None:
@@ -873,11 +876,11 @@ class EpisodeBackend:
         return {
             "schema": APP_STATUS_SCHEMA,
             "pose": _pose_dict(float(pose.get("x", 0.0)), float(pose.get("y", 0.0)), float(pose.get("theta", 0.0))),
-            "battery": {
-                "soc": float(info.get("battery_soc", 0.88)),
-                "temp_c": float(info.get("thermal_c", 41.0)),
-                "not_a_power_trace": True,
-            },
+            "battery": battery_status_block(
+                soc=float(info.get("battery_soc", 0.88)),
+                temp_c=float(info.get("thermal_c", 41.0)),
+                info=info,
+            ),
             "state": {
                 "mission": mission,
                 "machine": mode,

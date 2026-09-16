@@ -90,6 +90,8 @@ jims_mower = [
     "data/curriculum/*.yaml",
     "data/sequences/*.yaml",
     "data/orin/*.yaml",
+    "data/hardware/*.yaml",
+    "data/field/*.yaml",
     "data/surveys/*.json",
     "data/yards/*.json",
     "data/dem/*.npy",

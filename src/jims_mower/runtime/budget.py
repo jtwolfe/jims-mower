@@ -1,9 +1,10 @@
 """Orin-class battery / thermal *stub* — limp the policy when hot or empty.
 
 This is a first-order energy and heat budget for sim, not a measured
-Orin Nano power trace and not a claimed TDP. Numbers are class-scale
-(tens of watts, tens of watt-hours) so a laptop farm can exercise limp
-mode. Do not treat ``temp_c`` or ``soc`` as board telemetry.
+Orin Nano power trace and not a claimed TDP. Default capacity is the
+50 Wh gym stub. When ``runtime.battery.measured`` is true, SOC drain
+uses the configured bench Wh. Still not a BMS. Do not treat
+``temp_c`` or ``soc`` as board telemetry. No acre-runtime claim.
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ class OrinBudget:
     """Discrete-time SOC + first-order thermal RC toward ambient."""
 
     capacity_wh: float = 50.0
+    charge_time_h: Optional[float] = None
+    measured: bool = False
     soc: float = 1.0
     idle_w: float = 8.0
     drive_w: float = 25.0
@@ -107,13 +110,21 @@ class OrinBudget:
         return ",".join(parts) if parts else "ok"
 
     def as_info(self) -> dict[str, Any]:
+        from jims_mower.pack import remaining_wh
+
+        cap = float(self.capacity_wh) if self.capacity_wh else None
         return {
             "battery_soc": float(self.soc),
             "thermal_c": float(self.t_c),
+            "capacity_wh": cap,
+            "charge_time_h": None if self.charge_time_h is None else float(self.charge_time_h),
+            "remaining_wh": remaining_wh(self.soc, cap),
+            "pack_measured": bool(self.measured),
             "budget_advice": self.advice(),
             "budget_reason": self.reason(),
             "budget_enabled": bool(self.enabled),
             "not_a_power_trace": True,
+            "acre_runtime_h": None,
         }
 
 
@@ -131,8 +142,12 @@ def budget_from_config(cfg: Any) -> OrinBudget:
         return OrinBudget(enabled=False)
     batt = getattr(runtime, "battery", runtime)
     therm = getattr(runtime, "thermal", runtime)
+    cap = getattr(batt, "capacity_wh", 50.0)
+    charge = getattr(batt, "charge_time_h", None)
     return OrinBudget(
-        capacity_wh=float(getattr(batt, "capacity_wh", 50.0)),
+        capacity_wh=50.0 if cap is None else float(cap),
+        charge_time_h=None if charge is None else float(charge),
+        measured=bool(getattr(batt, "measured", False)),
         soc=float(getattr(batt, "soc", 1.0)),
         idle_w=float(getattr(batt, "idle_w", 8.0)),
         drive_w=float(getattr(batt, "drive_w", 25.0)),

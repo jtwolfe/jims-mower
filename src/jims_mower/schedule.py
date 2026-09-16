@@ -120,6 +120,10 @@ class ScheduleGates:
     fault: bool = False
     estop: bool = False
     running: bool = False
+    # Configured pack Wh (OrinBudget / runtime.battery). SOC gate is
+    # still a fraction of this capacity. Not an acre-runtime claim.
+    capacity_wh: Optional[float] = None
+    pack_measured: bool = False
 
 
 @dataclass
@@ -368,6 +372,7 @@ class ScheduleHook:
     engine: ScheduleEngine = field(default_factory=ScheduleEngine)
     last: ScheduleDecision = field(default_factory=ScheduleDecision)
     started_by_schedule: bool = False
+    last_gates: Optional[ScheduleGates] = None
 
     @classmethod
     def from_profile_schedule(
@@ -396,6 +401,7 @@ class ScheduleHook:
             self.sync(spec)
         decision = self.engine.evaluate(gates)
         self.last = decision
+        self.last_gates = gates
         if decision.action == "arm" and start is not None:
             start()
             self.started_by_schedule = True
@@ -416,6 +422,14 @@ class ScheduleHook:
             blob["next_run"] = nxt.isoformat() if nxt is not None else None
             blob["next_run_local"] = _format_local(nxt) if nxt is not None else None
         blob["started_by_schedule"] = bool(self.started_by_schedule)
+        gates = self.last_gates
+        if gates is not None:
+            from jims_mower.pack import remaining_wh
+
+            blob["soc"] = float(gates.soc)
+            blob["capacity_wh"] = None if gates.capacity_wh is None else float(gates.capacity_wh)
+            blob["pack_measured"] = bool(gates.pack_measured)
+            blob["remaining_wh"] = remaining_wh(gates.soc, gates.capacity_wh)
         return blob
 
 
@@ -426,6 +440,8 @@ def gates_from_owner_state(
     faults: Any,
     mission: str,
     machine: str,
+    capacity_wh: Optional[float] = None,
+    pack_measured: bool = False,
 ) -> ScheduleGates:
     blocking = False
     if isinstance(faults, list):
@@ -452,6 +468,8 @@ def gates_from_owner_state(
         fault=blocking and not estop,
         estop=estop,
         running=running and not estop,
+        capacity_wh=None if capacity_wh is None else float(capacity_wh),
+        pack_measured=bool(pack_measured),
     )
 
 

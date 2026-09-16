@@ -16,6 +16,21 @@ Construction math: [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md).
 ICD keys: [`../ICD.md`](../ICD.md). Sim-to-real swap:
 [`SIM_TO_REAL.md`](SIM_TO_REAL.md).
 
+**Software path is complete for fab + field.** Build-order §1–§17 are
+gym/bench hooks. §18–§20 in this PR are procedures + config hooks +
+docs — not measured Wh, not a fabbed chassis, not a run acre.
+
+Remaining work is **human**:
+
+- Fab the chassis — [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md)
+- Measure pack Wh / charge hours / board °C — [`PACK_THERMAL.md`](PACK_THERMAL.md)
+- Hang-measure mass / CG and revise HARDWARE_DESIGN math
+- Commit measured extrinsics — [`CALIBRATION.md`](CALIBRATION.md)
+- Collect real labels — [`DATASET.md`](DATASET.md)
+- Run the residential-acre scorecard — [`FIELD_TEST.md`](FIELD_TEST.md)
+
+Do **not** start another WAVE of gym stubs.
+
 ---
 
 ## Already solid (sim owner loop)
@@ -137,7 +152,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | SCH-1 | Arm / stop from `YardProfile.schedule` | **partial** (this PR) | Engine + Health toggle + SOC / rain / fault gates. Not a cloud calendar. Not a rain *service*. | Enable Mon 09:00 UTC on FrozenClock → mission `mowing`; SOC 0.10 → `soc_low`; rain flag → skip; duration expires → idle. See [`SCHEDULE.md`](SCHEDULE.md). | Owner app (done) |
 | SCH-2 | Timezone | **partial** | `local` or IANA. Orin must set a real zone (e.g. `Australia/Sydney`). | Job starts at 09:00 in that zone, not UTC-by-accident. | SCH-1 |
 | SCH-3 | Rain skip | **partial** | Uses env `weather.wet` or `status.weather.rain`. No BOM/radar. | Set rain flag; window is consumed as skip; next week can still run. | SCH-1 |
-| SCH-4 | SOC gate | **partial** | Compares `battery.soc` to `schedule.min_soc` (default 0.25). Gym SOC is the OrinBudget **stub**. | Real fuel gauge below min_soc skips. | RT-5 pack telemetry |
+| SCH-4 | SOC gate | **partial** | Compares `battery.soc` to `schedule.min_soc` (default 0.25). OrinBudget / `/status` read `runtime.battery.capacity_wh` (50 Wh gym stub unless `measured: true`). Remaining Wh = soc × capacity. **No acre-runtime claim.** | Real fuel gauge below min_soc skips. | RT-5 pack telemetry |
 | SCH-5 | Notifications | **partial** (in-app this PR) | `NotificationLog` + `/notifications`. Skip/finish reasons on the LAN list. Webhook is a **stub** (`delivered: false`). No SMS / vendor push. | Owner sees a skip reason on `/notifications` without a second SSE tab. Field SMS still missing. | SCH-1, UX-2 |
 
 ### 5. Runtime (Orin)
@@ -148,7 +163,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | RT-2 | IMU / GNSS / ToF drivers | **partial** (gym stubs this PR) | Fake I2C/UART publishers still copy gym vectors onto in-process queues. Level-rest IMU, GNSS `valid` toggle, and ToF board-under-wheel fixture are writable. Addresses in `drivers.py` remain documentation. | Gym: rest IMU ≈ `(0,0,9.81,0,0,0)`; `valid` bit toggles; ToF corner shortens when a board is slid under a wheel. Field: same ICD keys from real BMI/ICM + GNSS + VL53-class parts. | HD-place |
 | RT-3 | TensorRT load | **stub** | See CV-6. Software ONNX export exists; deserialize still needs an Orin engine you build. Fallback stays heuristic / mock if the path is missing (keep that). | Engine deserializes; fallback still mock if path missing (keep that). | CV-6 |
 | RT-4 | Watchdog | **partial** (bench config + gym stamp stall this PR) | Zeros wheels if IMU/vision **stamps** freeze (`runtime.watchdog.enabled`). Off in default gym tests. Bench overlay: [`configs/orin/bench.yaml`](../configs/orin/bench.yaml). Fake adapters — not real CSI/IMU. | Gym: freeze IMU or camera stamps → wheels zero within `vision_stall_s` / configured stall (`tests/test_hardware_estop.py`, `tests/test_wave4_ops.py`). Field: unplug a camera on the wired rig (needs RT-1). | RT-1, RT-2 |
-| RT-5 | Battery / thermal telemetry | **stub** | `OrinBudget` 50 Wh class-scale RC. Not a BMS. | SOC and board °C from hardware; limp/stop match measured limits. | HD-batt |
+| RT-5 | Battery / thermal telemetry | **partial** (procedure this PR) | `OrinBudget` still an RC. Default `capacity_wh: 50`, `measured: false`. Template: [`configs/orin/pack_measured.template.yaml`](../configs/orin/pack_measured.template.yaml). Procedure: [`PACK_THERMAL.md`](PACK_THERMAL.md). `measured: true` refuses the silent 50 Wh default. Numbers **null** until bench. Not a BMS. | SOC and board °C from hardware; limp/stop match measured limits. Software: `tests/test_pack.py`. | HD-batt |
 | RT-6 | Hardware ESTOP | **partial** (sim + doc this PR) | Gym `HardwareEstop` drops traction + trimmer **rails** underneath policy / `SafeStateMachine`. Wiring + reset: [`ESTOP.md`](ESTOP.md), [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §10. No physical paddle. | Gym: dummy load commanding wheels+trimmer; paddle latch zeros outputs; software clear does **not** restore; only `hw_reset` does (`tests/test_hardware_estop.py`). Field: hit a real paddle while a dummy load spins — **not claimed**. | HD-wire |
 | RT-7 | On-box loop (no renderer) | **partial** | Documented; not a shipped systemd unit. | Process runs without importing `jims_mower.renderer`. | RT-1…RT-4 |
 
@@ -320,39 +335,50 @@ Stop when only **fab + field test** remain.
     `/notifications` + `/yards` switch; webhook stub; no SMS.  
     *Test:* `pytest tests/test_session_ops.py tests/test_app_api.py`.
 
-18. **Measure thermal / pack (RT-5, HD-batt).** Replace the 50 Wh stub
-    with a measured Wh and charge time. **No claimed acre runtime** until
-    this row.
+18. **Measure thermal / pack (RT-5, HD-batt)** (procedure this PR).
+    How to measure Wh / charge hours / board °C:
+    [`PACK_THERMAL.md`](PACK_THERMAL.md). Config hooks:
+    `runtime.battery.capacity_wh`, `charge_time_h`, `measured: false`
+    by default. Gym keeps the 50 Wh stub when unmeasured. `measured:
+    true` requires a filled template. **Numbers null until bench. No
+    claimed acre runtime.**  
+    *Test:* `pytest tests/test_pack.py tests/test_budget.py tests/test_config.py`.
 
-19. **Fab the chassis per [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md)**
-    (or revise the math from measured mass / CG).
+19. **Fab the chassis** (checklist this PR) per
+    [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) (or revise the math from
+    measured mass / CG). [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md) +
+    [`configs/hardware/bom.yaml`](../configs/hardware/bom.yaml). Not a
+    pretend chassis.  
+    *Test:* `pytest tests/test_bom.py`.
 
-20. **Field test** on a taught residential acre: ESTOP, living interlock,
-    rain/SOC skip, return-to-home. Scorecard is tips / drain entries /
-    leftover uncut — not mAP.
+20. **Field test scorecard** (template this PR) on a taught residential
+    acre: ESTOP, living interlock, rain/SOC skip, return-to-home.
+    Score tips / drain entries / leftover uncut / ESTOP pulls — not
+    mAP. [`FIELD_TEST.md`](FIELD_TEST.md). Scorecard ready; field not
+    run.  
+    *Test:* `pytest tests/test_field_scorecard.py`.
 
-After row 20 the remaining work is **fab revisions + more field tests**,
+After row 20 the remaining work is **human fab, measure pack/CG,
+commit measured extrinsics, collect real labels, field scorecard** —
 not another WAVE of gym stubs.
 
 ---
 
 ## What this PR ships
 
-- Build-order **§14** (MAP-5 / MAP-4): surveyed-origin *model* on
-  `YardProfile.origin` + keep-in metres relative to the peg. ICD
-  `gps` is ENU + `valid`. `save_mission` / `restore_session` persist
-  ObservedMap fog + uncut + pose + yard across **process restart**.
-  Procedure: [`SURVEY_ORIGIN.md`](SURVEY_ORIGIN.md). **No WGS84 field
-  survey.** Tape-stop on a real RTK peg is still required.
-- Build-order **§15** (PLN-1…5 gym regression): explore → MAP READY →
-  mow → tip reverse → pause/resume on `mission_tiny` **observed** maps.
-  Gym tip thresholds were not retuned. MockDetector living interlock
-  still fires; BlindDetector gap is documented.
-- Build-order **§16** (focused): rotating `BlackBox` JSONL when a path
-  is passed; SOS retrieve of IMU + cmds. Self-test unchanged (gym
-  streams). SAF-4 OTA = documented no-op stub (`/ota`).
-- Build-order **§17** (focused): in-app `/notifications` + webhook
-  stub (not SMS). `/yards` + `POST /yards/select` with no fence bleed.
-- Honest leftover: real RTK/survey, field stereo matcher, field grass
-  strips, measured pack Wh. Do not start §18–§20 (claimed runtime,
-  fab, field scorecard).
+- Build-order **§18** (RT-5 / HD-batt): pack / thermal **procedure +
+  config hooks**. `runtime.battery.measured` defaults false; gym 50 Wh
+  stub stays. `measured: true` refuses silent defaults.
+  [`PACK_THERMAL.md`](PACK_THERMAL.md). `OrinBudget` and the schedule
+  SOC gate read configured `capacity_wh`. **No acre-runtime claim.**
+  Numbers null until bench.
+- Build-order **§19**: fab checklist + BOM freeze (part **classes**,
+  no SKUs / prices). [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md),
+  [`configs/hardware/bom.yaml`](../configs/hardware/bom.yaml). Hang-
+  measure → revise tip math in HARDWARE_DESIGN §2. Chassis not fabbed.
+- Build-order **§20**: residential-acre scorecard template (tips /
+  drains / leftover uncut / ESTOP — not mAP).
+  [`FIELD_TEST.md`](FIELD_TEST.md). Field not run.
+- Honest leftover: human fab, measure pack/CG, commit measured
+  extrinsics, collect real labels, run the scorecard. Do **not**
+  start another WAVE of gym stubs.

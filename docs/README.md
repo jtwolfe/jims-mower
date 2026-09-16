@@ -17,10 +17,13 @@ Wave notes and the on-box message contract live here.
 | [`UX_B.md`](UX_B.md) | FaultBus, dead-motor SOS, radio sim, `jims-mower-selftest` |
 | [`UX_C.md`](UX_C.md) | Thin owner app, YardProfile API, buy→mow (BT / optional Wi-Fi / LoRa) |
 | [`SCHEDULE.md`](SCHEDULE.md) | Weekly window actually arms / skips / stops jobs |
-| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order (§14 surveyed-origin + day-2 session; §15 PLN regression) |
+| [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) | Honest stub inventory + numbered build order. Software path complete for fab+field; §18–§20 are procedures |
 | [`SURVEY_ORIGIN.md`](SURVEY_ORIGIN.md) | MAP-5 peg + metre keep-in; MAP-4 cold session load. No WGS84 survey in this repo. |
 | [`CALIBRATION.md`](CALIBRATION.md) | Stereo / extrinsics bench: EXAMPLE vs MEASURED, tape procedure, gym lip / disparity checks |
 | [`DATASET.md`](DATASET.md) | CV-8 record + label protocol; FakeCsi → `jims_mower.dataset.v1` + train/val; real labels required before any IoU |
+| [`PACK_THERMAL.md`](PACK_THERMAL.md) | §18 pack Wh / charge hours / board °C procedure. 50 Wh gym stub; `measured: false` until bench |
+| [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md) | §19 chassis fab steps + BOM freeze (part classes, no SKUs). Hang-measure → revise tip math |
+| [`FIELD_TEST.md`](FIELD_TEST.md) | §20 residential-acre scorecard (tips / drains / leftover / ESTOP — not mAP). Field not run |
 | [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) | Construction math, BOM classes, forward stereo + ESTOP sketch (no claimed runtime) |
 | [`ESTOP.md`](ESTOP.md) | Hardware paddle → FET/contactor, fuse map, reset; gym `HardwareEstop` |
 | [`SIM_TO_REAL.md`](SIM_TO_REAL.md) | Same ICD keys on-box; no gym renderer |

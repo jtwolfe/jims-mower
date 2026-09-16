@@ -23,6 +23,7 @@ from jims_mower.live import (
     LiveSession,
     robot_status_for,
 )
+from jims_mower.pack import GYM_STUB_CAPACITY_WH, battery_status_block
 from jims_mower.schedule import (
     Clock,
     ScheduleHook,
@@ -187,6 +188,8 @@ class LiveBackend:
                     if snap.get("hw_estop")
                     else str(snap.get("safe_mode") or ("estop" if job_state == "estop" else "run"))
                 ),
+                capacity_wh=info.get("capacity_wh", GYM_STUB_CAPACITY_WH),
+                pack_measured=bool(info.get("pack_measured", False)),
             ),
             start=self._arm_from_schedule,
             stop=self._stop_from_schedule,
@@ -216,11 +219,11 @@ class LiveBackend:
                 float(pose.get("y", 0.0)),
                 float(pose.get("theta", 0.0)),
             ),
-            "battery": {
-                "soc": float(info.get("battery_soc", 0.9)),
-                "temp_c": float(info.get("thermal_c", 42.0)),
-                "not_a_power_trace": True,
-            },
+            "battery": battery_status_block(
+                soc=float(info.get("battery_soc", 0.9)),
+                temp_c=float(info.get("thermal_c", 42.0)),
+                info=info,
+            ),
             "state": {
                 "mission": mission,
                 "machine": (

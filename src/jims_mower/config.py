@@ -405,9 +405,20 @@ class MissionConfig:
 
 @dataclass
 class BatteryConfig:
-    """Orin-class pack stub (watt-hours / watts are class-scale, not measured)."""
+    """Orin-class pack stub unless ``measured: true`` with a filled bench.
 
-    capacity_wh: float = 50.0
+    Gym may keep 50 Wh when ``measured`` is false. Flipping measured
+    without ``capacity_wh`` / ``charge_time_h`` / ``measured_at`` from
+    ``docs/PACK_THERMAL.md`` is a ConfigError — the stub must not look
+    like a field claim. ``acre_runtime_h`` is never derived here.
+    """
+
+    capacity_wh: Optional[float] = 50.0
+    charge_time_h: Optional[float] = None
+    measured: bool = False
+    template: bool = False
+    measured_at: str = ""
+    notes: str = ""
     soc: float = 1.0
     idle_w: float = 8.0
     drive_w: float = 25.0
@@ -419,7 +430,11 @@ class BatteryConfig:
 
 @dataclass
 class ThermalConfig:
-    """First-order thermal RC. Not a board TDP claim."""
+    """First-order thermal RC. Not a board TDP claim.
+
+    ``board_load_c`` stays null until a bench log. ``measured: true``
+    requires that number (see ``docs/PACK_THERMAL.md``).
+    """
 
     t_c: float = 45.0
     t_ambient_c: float = 35.0
@@ -427,6 +442,8 @@ class ThermalConfig:
     t_crit_c: float = 85.0
     tau_s: float = 90.0
     heat_c_per_w: float = 0.35
+    board_load_c: Optional[float] = None
+    measured: bool = False
 
 
 @dataclass
@@ -710,8 +727,23 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
     rt = cfg.runtime
     batt = rt.battery
     therm = rt.thermal
-    if batt.capacity_wh <= 0:
+    if batt.capacity_wh is None:
+        if batt.measured and not batt.template:
+            raise ConfigError(
+                "runtime.battery.measured requires capacity_wh from the bench"
+            )
+        if not batt.template:
+            batt.capacity_wh = 50.0
+    elif float(batt.capacity_wh) <= 0:
         raise ConfigError("runtime.battery.capacity_wh must be positive")
+    if batt.charge_time_h is not None and float(batt.charge_time_h) <= 0:
+        raise ConfigError("runtime.battery.charge_time_h must be positive when set")
+    from jims_mower.pack import PackError, validate_pack_claim
+
+    try:
+        validate_pack_claim(batt)
+    except PackError as exc:
+        raise ConfigError(str(exc)) from exc
     if not 0.0 <= batt.soc <= 1.0:
         raise ConfigError("runtime.battery.soc must be in [0, 1]")
     for name in ("idle_w", "drive_w", "compute_w", "trimmer_w"):
@@ -723,6 +755,12 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("runtime.thermal tau_s must be > 0 and heat_c_per_w >= 0")
     if not (therm.t_ambient_c < therm.t_hot_c <= therm.t_crit_c):
         raise ConfigError("runtime.thermal t_ambient_c < t_hot_c <= t_crit_c")
+    if therm.board_load_c is not None and float(therm.board_load_c) < -40.0:
+        raise ConfigError("runtime.thermal.board_load_c looks unusable")
+    if therm.measured and therm.board_load_c is None:
+        raise ConfigError(
+            "runtime.thermal.measured requires board_load_c from the bench"
+        )
     mode = cfg.perception.terrain_mode
     if mode not in TERRAIN_MODES:
         raise ConfigError(

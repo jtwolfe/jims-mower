@@ -38,6 +38,10 @@ htmlcov/
 
 # Local measured extrinsics (commit only after a real tape bench)
 configs/orin/extrinsics_stereo_measured.yaml
+# Local measured pack (commit only after docs/PACK_THERMAL.md)
+configs/orin/pack_measured.yaml
+# Local filled field scorecard (commit only after a real acre)
+configs/field/scorecard.yaml
 
 # Demo / local artifacts (keep the package configs/)
 /artifacts/

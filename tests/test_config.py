@@ -295,6 +295,40 @@ def test_rejects_bad_battery_soc() -> None:
         load_config({"runtime": {"battery": {"soc": 1.5}}})
 
 
+def test_battery_defaults_unmeasured_stub() -> None:
+    cfg = load_config()
+    assert cfg.runtime.battery.measured is False
+    assert cfg.runtime.battery.template is False
+    assert cfg.runtime.battery.capacity_wh == pytest.approx(50.0)
+    assert cfg.runtime.battery.charge_time_h is None
+    assert cfg.runtime.thermal.board_load_c is None
+    assert cfg.runtime.thermal.measured is False
+
+
+def test_measured_true_refuses_silent_gym_stub() -> None:
+    with pytest.raises(ConfigError, match="measured"):
+        load_config({"runtime": {"battery": {"measured": True}}})
+
+
+def test_measured_pack_requires_bench_fields() -> None:
+    cfg = load_config(
+        {
+            "runtime": {
+                "battery": {
+                    "measured": True,
+                    "capacity_wh": 200.0,
+                    "charge_time_h": 2.5,
+                    "measured_at": "2026-09-16",
+                    "notes": "test fixture shunt, not a field pack",
+                }
+            }
+        }
+    )
+    assert cfg.runtime.battery.measured is True
+    assert cfg.runtime.battery.capacity_wh == pytest.approx(200.0)
+    assert cfg.runtime.battery.charge_time_h == pytest.approx(2.5)
+
+
 def test_rejects_bad_uncertainty_floor() -> None:
     with pytest.raises(ConfigError):
         load_config({"planner": {"uncertainty": {"confidence_floor": 1.5}}})

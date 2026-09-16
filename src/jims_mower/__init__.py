@@ -15,6 +15,7 @@ from jims_mower.mission import load_mission, save_mission
 from jims_mower.profile import YardProfile, load_yard_profile, trail_to_polygon
 from jims_mower.planning.fusion import EkfPoseFilter
 from jims_mower.runtime.budget import OrinBudget
+from jims_mower.pack import GYM_STUB_CAPACITY_WH
 from jims_mower.safety import living_advice, terrain_hazards, trimmer_interlock
 from jims_mower.faults import FaultBus
 from jims_mower.radio import RadioSim
@@ -42,6 +43,7 @@ __all__ = [
     "EnvConfig",
     "EpisodeScorecard",
     "FaultBus",
+    "GYM_STUB_CAPACITY_WH",
     "GeofenceSpec",
     "HardwareEstop",
     "MowerEnv",

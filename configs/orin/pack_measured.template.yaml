@@ -1,0 +1,24 @@
+# MEASURED TEMPLATE — placeholders, not a bench pack.
+# Copy to pack_measured.yaml after the procedure in docs/PACK_THERMAL.md.
+# Then: fill capacity_wh / charge_time_h / measured_at, set template: false.
+# Do not commit this file renamed until the numbers are measured.
+# Do not copy HARDWARE_DESIGN §5 model Wh (~1.3 kWh) and call it measured.
+# acre_runtime_h stays null. No claimed acre runtime.
+
+runtime:
+  enabled: true
+  battery:
+    measured: true
+    template: true
+    capacity_wh: null      # discharge Wh from coulomb / energy count
+    charge_time_h: null    # empty → charger terminate, hours
+    measured_at: ""        # ISO date after the bench, e.g. 2026-09-16
+    notes: "TEMPLATE. Replace with bench Wh / charge hours before MEASURED."
+    soc: 1.0
+    limp_soc: 0.15
+    stop_soc: 0.05
+  thermal:
+    measured: false
+    board_load_c: null     # peak board °C under the logged load
+    t_hot_c: 75.0
+    t_crit_c: 85.0
