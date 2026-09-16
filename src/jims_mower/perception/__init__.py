@@ -3,10 +3,15 @@
 from jims_mower.perception.base import BlindDetector, Detector, GrassObserver
 from jims_mower.perception.classify import HandSignalClassifier, appearance_features, refine_category
 from jims_mower.perception.grass import (
+    ClassAwareGrassObserver,
     ColorGrassObserver,
     FeatureGrassObserver,
+    classify_coverage_rgb,
+    coverage_error,
+    cut_grass_mask,
     grass_fraction,
     grass_observer_from_mode,
+    paint_lawn_strip_fixture,
     uncut_grass_mask,
 )
 from jims_mower.perception.hand_signals import HandSignalCurriculum
@@ -43,6 +48,13 @@ from jims_mower.perception.calibration import (
     validate_stereo_yaml,
 )
 from jims_mower.perception.grade import PlanarGradeModel, gradients_from_attitude, paint_planar_grade
+from jims_mower.perception.elev_fuse import (
+    ElevFuseResult,
+    MonoDepthPrior,
+    NullMonoDepthPrior,
+    apply_mono_prior,
+    fuse_elev_stereo_tof_imu,
+)
 from jims_mower.perception.fuse import fuse_camera_labels, fuse_stamps
 from jims_mower.perception.learn import TerrainMLP, load_weights, save_weights
 from jims_mower.perception.temporal import DetectionTracklets, HazardHysteresis
@@ -69,7 +81,9 @@ __all__ = [
     "AppearanceDetector",
     "BlindDetector",
     "BlindTerrainObserver",
+    "ClassAwareGrassObserver",
     "ColorGrassObserver",
+    "ElevFuseResult",
     "DetectionTracklets",
     "Detector",
     "FeatureGrassObserver",
@@ -80,6 +94,8 @@ __all__ = [
     "HeuristicTerrainObserver",
     "LearnedTerrainObserver",
     "MockDetector",
+    "MonoDepthPrior",
+    "NullMonoDepthPrior",
     "OnnxExportError",
     "OnnxMLP",
     "OnnxTerrainObserver",
@@ -90,8 +106,14 @@ __all__ = [
     "TerrainMLP",
     "TerrainObserver",
     "appearance_features",
+    "apply_mono_prior",
+    "classify_coverage_rgb",
     "classify_structure_rgb",
     "classify_terrain_rgb",
+    "coverage_error",
+    "cut_grass_mask",
+    "fuse_elev_stereo_tof_imu",
+    "paint_lawn_strip_fixture",
     "gradients_from_attitude",
     "PlanarGradeModel",
     "paint_planar_grade",

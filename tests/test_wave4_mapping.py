@@ -85,5 +85,7 @@ def test_env_emits_semantic_and_height() -> None:
     assert "semantic" in info
     assert info["semantic"].shape == obs["occupancy"].shape
     assert "height_fused" in info
+    assert info.get("height_fusion_stub") is False
+    assert info.get("height_fusion", {}).get("not_matcher") is True
     assert info.get("not_slam") is True
     env.close()

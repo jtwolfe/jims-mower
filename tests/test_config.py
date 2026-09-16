@@ -151,6 +151,8 @@ def test_default_has_terrain_and_imu() -> None:
     assert cfg.perception.terrain_mode == "heuristic"
     assert cfg.perception.onnx_path == ""
     assert cfg.perception.detector_backend == "mock"
+    assert cfg.perception.grass_mode == "color"
+    assert cfg.perception.coverage_source == "gym_grid"
     assert cfg.world.terrain.base_gradient.effective_slope_rad() > 0.0
     assert cfg.world.terrain.base_gradient.undulation_m > 0.0
 
@@ -302,3 +304,14 @@ def test_planner_yaml_override() -> None:
     cfg = load_config({"planner": {"drain_clearance_m": 0.55, "cruise_speed": 0.4}})
     assert cfg.planner.drain_clearance_m == pytest.approx(0.55)
     assert cfg.planner.cruise_speed == pytest.approx(0.4)
+
+
+def test_accepts_class_grass_mode_and_observer_source() -> None:
+    cfg = load_config({"perception": {"grass_mode": "class", "coverage_source": "observer"}})
+    assert cfg.perception.grass_mode == "class"
+    assert cfg.perception.coverage_source == "observer"
+
+
+def test_rejects_bad_coverage_source() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"perception": {"coverage_source": "mAP"}})

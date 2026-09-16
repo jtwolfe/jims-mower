@@ -238,6 +238,7 @@ class LiveBackend:
             "radio_path": snap.get("radio_path") or {},
             "faults": faults,
             "coverage_pct": 100.0 * float(snap.get("cut_pct") or 0.0),
+            "coverage_source": str(snap.get("coverage_source") or "gym_grid"),
             "map_pct": 100.0 * float(snap.get("map_pct") or 0.0),
             "cut_pct": 100.0 * float(snap.get("cut_pct") or 0.0),
             "hours_mowed": float(snap.get("duration_s") or 0.0) / 3600.0,

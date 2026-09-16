@@ -275,6 +275,44 @@ class ObservedMap:
         self.confidence[writable] = np.maximum(self.confidence[writable], 0.60)
         return int(np.count_nonzero(np.abs(self.elevation[writable] - before) > 1e-6))
 
+    def fuse_metric(
+        self,
+        result: Any,
+        *,
+        respect_lock: bool = True,
+    ) -> int:
+        """Write a gym stereo+ToF+IMU fuse onto observed cells.
+
+        Stereo / ToF hits use ``stamp_metric_elevation`` (locked cells stay).
+        IMU / prior fills only unset, unlocked cells.
+        """
+        ev = np.asarray(getattr(result, "elevation"), dtype=np.float32)
+        if ev.shape != self.elevation.shape:
+            raise ValueError("fuse elevation shape must match ObservedMap")
+        stereo = np.asarray(
+            getattr(result, "stereo_hits", np.zeros_like(self.observed)), dtype=bool
+        )
+        tof = np.asarray(getattr(result, "tof_hits", np.zeros_like(self.observed)), dtype=bool)
+        imu = np.asarray(getattr(result, "imu_hits", np.zeros_like(self.observed)), dtype=bool)
+        prior = np.asarray(
+            getattr(result, "prior_hits", np.zeros_like(self.observed)), dtype=bool
+        )
+        metric = (stereo | tof) & np.asarray(self.observed, dtype=bool)
+        n = self.stamp_metric_elevation(ev, metric, respect_lock=respect_lock)
+        fill = (
+            (imu | prior)
+            & np.asarray(self.observed, dtype=bool)
+            & ~np.asarray(self.elevation_set, dtype=bool)
+        )
+        if respect_lock:
+            fill = fill & ~np.asarray(self.locked, dtype=bool)
+        if np.any(fill):
+            self.elevation[fill] = ev[fill]
+            self.elevation_set[fill] = True
+            self.confidence[fill] = np.maximum(self.confidence[fill], 0.50)
+            n += int(fill.sum())
+        return n
+
     def refresh_free(self) -> None:
         """Known-free = observed, not a drain/steep-blocked hint, not hard structure."""
         hard = np.isin(

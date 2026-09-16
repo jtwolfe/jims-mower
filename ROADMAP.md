@@ -74,10 +74,13 @@ See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
 - [x] Person / animal / toy categories + appearance model on `MockDetector`
 - [x] Hand-signal classifier stub behind `curriculum.hand_signal_classifier`
 - [x] `FeatureGrassObserver` grass-coverage stub (numpy features)
+- [x] `ClassAwareGrassObserver` (CV-2 gym; terrain classes + strip fixture; not field mAP)
 - [x] Semantic layer raster (grass / non-grass / drain / bank / static)
 - [x] Persistent BEV occupancy (detections + ToF, not god-view)
 - [x] Height-map fusion stub (RGB back-proj + downward ToF)
+- [x] Gym MAP-2 elev fuse (ideal stereo + ToF + local IMU; lock holds; not a matcher)
 - [x] Loop-closure stub (revisit fingerprint, not SLAM)
+- [x] Sparse landmark revisit on taught fence vertices (`not_slam: true`)
 - [x] Wet-slope extra cost when `weather.wet`
 - [x] Energy / battery-aware strip order (`OrinBudget` SOC)
 - [x] Multi-yard sequence (`paddock` then `suburban`)

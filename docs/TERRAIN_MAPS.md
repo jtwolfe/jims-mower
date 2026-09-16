@@ -37,8 +37,10 @@ from instantaneous chassis tip.
    ridge. The growing edge must not reshape from a new attitude either.
 5. **Near-field stereo** (true 6–12 cm pair, or gym synthetic stereo)
    may overwrite unlocked cells with metric local elev in the 0.8–4 m
-   band. MAP READY `lock_observed()` then freezes the mow map. Not
-   COLMAP. Default gym look-arounds are not a pair.
+   band. Fused with ToF corners and a *local* IMU grade
+   (`fuse_elev_stereo_tof_imu`). A mono-depth prior may fill gaps only.
+   MAP READY `lock_observed()` then freezes the mow map. Not
+   COLMAP. Default gym look-arounds are not a pair. Not a field matcher.
 
 `elevation_prior` may still be a yard-scale raster so the costmap can
 floor a flattened CV slope. The **owner / control** mesh is

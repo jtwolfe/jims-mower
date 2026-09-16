@@ -14,6 +14,10 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
 - `FeatureGrassObserver` (`perception.grass_mode: feature`) is a six-stat
   linear mix. Optional `weights_path` `.npz` (`w`, `b`). Default stays
   `ColorGrassObserver`.
+- `ClassAwareGrassObserver` (`perception.grass_mode: class`) uses terrain
+  seg classes (grass vs drain/lip/bank) when labels exist, else the
+  palette heuristic. Gym painted-strip error is **not** field mAP.
+  Phone cut % default is `coverage_source: gym_grid`.
 - `info["semantic"]` — uint8 grass / non-grass / drain / bank / static
   (`perception.semantic`, default on).
 
@@ -21,10 +25,10 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
 
 - Persistent BEV occupancy from **detections + short ToF hits**, decaying
   (`perception.persistent_occupancy`). Not the god-view obstacle list.
-- Height-map fusion stub: RGB drain/bank back-projection + downward ToF
-  (`info["height_fused"]`).
-- Loop-closure **stub**: coarse occupancy fingerprint, `info["loop_closure"]`.
-  `not_slam: true`. No pose-graph.
+- Height-map fusion: gym ideal stereo + ToF corners + local IMU
+  (`info["height_fused"]`, `info["elev_fuse"]`). Not a field matcher.
+- Loop-closure **stub**: coarse occupancy fingerprint, optional taught
+  fence pull. `info["loop_closure"]`. `not_slam: true`. No pose-graph.
 
 ## Planning
 

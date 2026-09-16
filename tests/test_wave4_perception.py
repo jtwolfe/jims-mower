@@ -7,6 +7,7 @@ import pytest
 
 from jims_mower.constants import KIND_RGB, LONG_GRASS_RGB, SEMANTIC_DRAIN, SEMANTIC_GRASS, UNCUT_GRASS_RGB
 from jims_mower.perception import (
+    ClassAwareGrassObserver,
     FeatureGrassObserver,
     HandSignalClassifier,
     MockDetector,
@@ -56,6 +57,7 @@ def test_feature_grass_observer() -> None:
     assert out["front"] > 0.5
     assert out["rear"] < 0.35
     assert isinstance(grass_observer_from_mode("feature"), FeatureGrassObserver)
+    assert isinstance(grass_observer_from_mode("class"), ClassAwareGrassObserver)
 
 
 def test_semantic_raster_priority() -> None:

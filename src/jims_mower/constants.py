@@ -118,6 +118,18 @@ TERRAIN_CLASS_NAMES = ("grass", "bank", "lip", "drain")
 TERRAIN_MODES = frozenset({"oracle", "blind", "heuristic", "learned", "onnx", "trt"})
 TERRAIN_MODE_CLI = ("heuristic", "oracle", "blind", "learned", "onnx", "trt")
 
+# perception.grass_mode. color stays the gym default (phone cut % is gym_grid).
+GRASS_MODES = frozenset(
+    {"color", "feature", "learned", "net", "class", "terrain", "class_aware"}
+)
+# Owner / info cut % source. gym_grid is the live default; observer is opt-in.
+COVERAGE_SOURCES = frozenset({"gym_grid", "observer"})
+# Pixel coverage classes for CV-2 (not a published mAP head).
+COV_NON_GRASS = 0
+COV_UNCUT = 1
+COV_CUT = 2
+COV_CLASS_NAMES = ("non_grass", "uncut", "cut")
+
 # perception.detector_backend. mock stays the gym default (god-view projector).
 DETECTOR_BACKENDS = frozenset({"mock", "trt", "tensorrt", "onnx", "appearance", "blind"})
 DETECTOR_BACKEND_CLI = ("mock", "trt", "onnx", "appearance", "blind")

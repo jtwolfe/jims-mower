@@ -10,7 +10,9 @@ from typing import Any, Optional, Union
 import yaml
 
 from jims_mower.constants import (
+    COVERAGE_SOURCES,
     DETECTOR_BACKENDS,
+    GRASS_MODES,
     MOTOR_KILL_MODES,
     MOVER_DENSITIES,
     RADIO_CHANNELS,
@@ -275,7 +277,8 @@ class PerceptionConfig:
     weights_path: str = ""  # optional .npz for LearnedTerrainObserver
     onnx_path: str = ""  # optional sim_only terrain / detector ONNX; unused in CI
     temporal: bool = False  # hysteresis on heuristic; learned defaults on in factory
-    grass_mode: str = "color"  # color | feature
+    grass_mode: str = "color"  # color | feature | class
+    coverage_source: str = "gym_grid"  # gym_grid | observer
     semantic: bool = True
     persistent_occupancy: bool = True
     occupancy_decay: float = 0.55
@@ -728,10 +731,18 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
             f"got {mode!r}"
         )
     grass_mode = str(cfg.perception.grass_mode or "color").strip().lower()
-    if grass_mode not in {"color", "feature", "learned", "net"}:
+    if grass_mode not in GRASS_MODES:
         raise ConfigError(
-            f"perception.grass_mode must be color|feature; got {cfg.perception.grass_mode!r}"
+            "perception.grass_mode must be color|feature|class; "
+            f"got {cfg.perception.grass_mode!r}"
         )
+    cov_src = str(cfg.perception.coverage_source or "gym_grid").strip().lower()
+    if cov_src not in COVERAGE_SOURCES:
+        raise ConfigError(
+            "perception.coverage_source must be gym_grid|observer; "
+            f"got {cfg.perception.coverage_source!r}"
+        )
+    cfg.perception.coverage_source = cov_src
     if not 0.0 <= float(cfg.perception.occupancy_decay) <= 1.0:
         raise ConfigError("perception.occupancy_decay must be in [0, 1]")
     det_backend = str(cfg.perception.detector_backend or "mock").strip().lower()

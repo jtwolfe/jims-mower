@@ -336,6 +336,9 @@ flowchart LR
   `LearnedTerrainObserver` loads exporter-trained numpy weights.
   `OracleTerrainObserver` is the training god-view. `BlindDetector` /
   `BlindTerrainObserver` are working empty stubs.
+  `ClassAwareGrassObserver` (`grass_mode: class`) uses terrain classes
+  when available; phone cut % default is still the gym grass grid
+  (`coverage_source: gym_grid`). Not field mAP.
 - **Hand signals** — optional curriculum labels `stop`, `go`, `follow`,
   `back` on people. Off by default.
 
@@ -586,6 +589,7 @@ are laptop / overnight jobs.
 | BEV debugger | [`src/jims_mower/bev.py`](src/jims_mower/bev.py) → `bev_final.png` |
 | ICD / roadmap | [`ICD.md`](ICD.md), [`ROADMAP.md`](ROADMAP.md) |
 | WAVE 2B / §9 train → ONNX | [`docs/WAVE2B.md`](docs/WAVE2B.md), `jims-mower-train-terrain --onnx` |
+| §11 / §12 gym CV-2 + MAP-2 fuse | [`docs/PRODUCT_TO_HARDWARE.md`](docs/PRODUCT_TO_HARDWARE.md), `tests/test_grass_coverage.py`, `tests/test_elev_fuse.py` |
 
 Exporter labels are **oracle** height-field / grass rasters. The env
 observer can still be heuristic. Dataset folder layout is written to

@@ -54,6 +54,7 @@ from jims_mower.planning.coverage import (
 from jims_mower.planning.explore import ExplorePlan, explore_costmap, plan_explore
 from jims_mower.planning.fusion import make_pose_filter
 from jims_mower.planning.observed import ObservedMap, downsample_frontiers, frontiers
+from jims_mower.perception.elev_fuse import fuse_elev_stereo_tof_imu
 from jims_mower.perception.stereo import (
     find_stereo_pair,
     height_sampler_from_raster,
@@ -445,6 +446,7 @@ class MissionPolicy:
             "planned_coverage_fraction": plan.planned_coverage_fraction if plan else 0.0,
             "actual_coverage_fraction": actual,
             "world_coverage_fraction": world,
+            "coverage_source": str((info or {}).get("coverage_source") or "gym_grid"),
             "n_frontiers": len(self._frontier_xy),
             "n_waypoints": len(self.waypoints),
             "waypoint_index": self.index,
@@ -476,29 +478,22 @@ class MissionPolicy:
             pose=pose,
             grade_radius_m=max(float(self.settings.stamp_radius_m) * 1.6, 2.2),
         )
-        self._stamp_stereo(obs, info, pose)
+        self._stamp_metric_fuse(obs, info, pose)
         if self.keep_in_mask is None or self.keep_in_mask.shape != self.observed.observed.shape:
             self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
 
-    def _stamp_stereo(self, obs: dict[str, Any], info: dict[str, Any], pose: Pose) -> None:
-        """Near-field metric elev from a true stereo pair. No-op on look-arounds.
+    def _stamp_metric_fuse(self, obs: dict[str, Any], info: dict[str, Any], pose: Pose) -> None:
+        """Gym MAP-2: ideal stereo + ToF + local IMU onto ObservedMap.
 
         Default gym ``front_left`` / ``front_right`` (40° yaw, ~40 cm) are
         not a pair. ``configs/orin/extrinsics_stereo.yaml`` is. Gym uses
         ideal disparity from the observer height raster — not a matcher,
-        not COLMAP, ``fps_claim`` / ``map_claim`` stay null.
+        not COLMAP, ``fps_claim`` / ``map_claim`` stay null. Locked cells
+        stay frozen.
         """
         if self.observed is None:
             return
         pair = find_stereo_pair(self.cfg.resolved_cameras())
-        if pair is None:
-            return
-        elev = obs.get("elevation")
-        if elev is None:
-            return
-        ev = np.asarray(elev, dtype=np.float32)
-        if ev.shape != self.observed.elevation.shape:
-            return
         images = obs.get("cameras") or {}
         width = int(self.cfg.sensors.width)
         height = int(self.cfg.sensors.height)
@@ -507,28 +502,59 @@ class MissionPolicy:
             if sample is not None and getattr(sample, "ndim", 0) >= 2:
                 height = int(sample.shape[0])
                 width = int(sample.shape[1])
-        xs, ys, zs = synthetic_stereo_points(
-            pose,
-            pair,
-            width=width,
-            height=height,
-            height_at=height_sampler_from_raster(ev, resolution_m=self.observed.resolution_m),
-            pixel_stride=3 if height > 40 else 2,
-        )
-        raster, hits = rasterize_points(
-            xs,
-            ys,
-            zs,
+        stereo_elev = None
+        stereo_hits = None
+        n_points = 0
+        ev = obs.get("elevation")
+        if pair is not None and ev is not None:
+            raster_src = np.asarray(ev, dtype=np.float32)
+            if raster_src.shape == self.observed.elevation.shape:
+                xs, ys, zs = synthetic_stereo_points(
+                    pose,
+                    pair,
+                    width=width,
+                    height=height,
+                    height_at=height_sampler_from_raster(
+                        raster_src, resolution_m=self.observed.resolution_m
+                    ),
+                    pixel_stride=3 if height > 40 else 2,
+                )
+                stereo_elev, stereo_hits = rasterize_points(
+                    xs,
+                    ys,
+                    zs,
+                    shape=self.observed.elevation.shape,
+                    resolution_m=self.observed.resolution_m,
+                    width_m=self.observed.width_m,
+                    height_m=self.observed.height_m,
+                )
+                n_points = int(xs.size)
+        result = fuse_elev_stereo_tof_imu(
             shape=self.observed.elevation.shape,
             resolution_m=self.observed.resolution_m,
-            width_m=self.observed.width_m,
-            height_m=self.observed.height_m,
+            world_size=(self.observed.width_m, self.observed.height_m),
+            pose=pose,
+            stereo_elev=stereo_elev,
+            stereo_hits=stereo_hits,
+            tof=obs.get("tof"),
+            imu=obs.get("imu"),
+            length_m=self.cfg.robot.length_m,
+            track_m=self.cfg.robot.track_m,
+            hover_m=0.06,
+            elevation=self.observed.elevation,
+            locked=self.observed.locked,
+            elevation_set=self.observed.elevation_set,
+            rgb_prior=obs.get("elevation_prior"),
+            prior_weight=0.0,
         )
-        written = self.observed.stamp_metric_elevation(raster, hits, respect_lock=True)
-        blob = pair.as_info()
-        blob["cells_written"] = int(written)
-        blob["n_points"] = int(xs.size)
-        info["stereo"] = blob
+        written = self.observed.fuse_metric(result, respect_lock=True)
+        info["elev_fuse"] = result.as_info()
+        info["elev_fuse"]["cells_written"] = int(written)
+        if pair is not None:
+            blob = pair.as_info()
+            blob["cells_written"] = int(written)
+            blob["n_points"] = n_points
+            info["stereo"] = blob
 
     def _sense_advice(
         self,
@@ -1652,6 +1678,7 @@ def session_summary(
         "unreachable": int(status.get("unreachable_mowable_cells") or 0),
         "cut_pct": float(status["actual_coverage_fraction"]),
         "world_cut_pct": float(status.get("world_coverage_fraction") or 0.0),
+        "coverage_source": str(status.get("coverage_source") or "gym_grid"),
         "skips": int(status.get("skipped_global") or 0),
         "duration_s": float(sim_s),
         "wall_s": float(wall_s),

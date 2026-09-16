@@ -40,7 +40,11 @@ from jims_mower.mission import apply_mission, load_mission, save_mission
 from jims_mower.perception import HandSignalCurriculum
 from jims_mower.perception.base import Detector, GrassObserver
 from jims_mower.perception.detect import detector_from_mode
-from jims_mower.perception.grass import grass_observer_from_mode
+from jims_mower.perception.grass import (
+    ClassAwareGrassObserver,
+    grass_observer_from_mode,
+    observer_coverage_fraction,
+)
 from jims_mower.perception.semantic import semantic_raster
 from jims_mower.perception.temporal import DetectionTracklets
 from jims_mower.perception.terrain import TerrainObserver, terrain_observer_from_mode
@@ -313,6 +317,7 @@ class MowerEnv(gym.Env):
         self._occ_persist: Optional[PersistentOccupancy] = None
         self._loop = LoopClosureStub()
         self._fused_elev: Optional[np.ndarray] = None
+        self._observer_coverage: Optional[np.ndarray] = None
         self._last_semantic: Optional[np.ndarray] = None
         self._yard_profile = None
 
@@ -500,7 +505,11 @@ class MowerEnv(gym.Env):
             decay=self.cfg.perception.occupancy_decay,
         )
         self._loop.reset()
+        fence = self.geofence_spec()
+        if fence.keep_in:
+            self._loop.teach_vertices(fence.keep_in)
         self._fused_elev = np.zeros(shape, dtype=np.float32)
+        self._observer_coverage: Optional[np.ndarray] = None
         self._last_semantic = None
         self._signals.assign(self._yard.obstacles, self.np_random)
         reset_obs = getattr(self.terrain_observer, "reset", None)
@@ -971,11 +980,27 @@ class MowerEnv(gym.Env):
                 self.cfg.world.resolution_m,
             )
         vision = self.grass_observer.estimate(images)
+        observer_cut = None
+        if isinstance(self.grass_observer, ClassAwareGrassObserver):
+            self._observer_coverage = self.grass_observer.stamp_bev(
+                images,
+                self.cameras,
+                self._pose,
+                shape=self._coverage.cut.shape,
+                resolution_m=self.cfg.world.resolution_m,
+                world_size=(self.cfg.world.width_m, self.cfg.world.height_m),
+            )
+            observer_cut = observer_coverage_fraction(self._observer_coverage)
         terrain_est = self.terrain_observer.estimate(images, imu, gps, context)
         self._last_terrain_est = terrain_est
         if self.cfg.perception.height_fusion:
             if self._fused_elev is None or self._fused_elev.shape != self._coverage.cut.shape:
                 self._fused_elev = np.zeros(self._coverage.cut.shape, dtype=np.float32)
+            prior = (
+                terrain_est.elevation_prior
+                if terrain_est.elevation_prior is not None
+                else terrain_est.elevation
+            )
             self._fused_elev = fuse_height_rgb_tof(
                 images,
                 self.cameras,
@@ -987,9 +1012,8 @@ class MowerEnv(gym.Env):
                 length_m=self.cfg.robot.length_m,
                 track_m=self.cfg.robot.track_m,
                 elevation=self._fused_elev,
-                prior=terrain_est.elevation_prior
-                if terrain_est.elevation_prior is not None
-                else terrain_est.elevation,
+                prior=prior,
+                imu=imu,
             )
         if self.cfg.curriculum.hand_signal_classifier:
             signal_name = _nearest_detection_signal(detections, (self._pose.x, self._pose.y))
@@ -1076,6 +1100,8 @@ class MowerEnv(gym.Env):
                 "roll": self._pose.roll,
             },
             "coverage_fraction": self._coverage.coverage_fraction(),
+            "gym_coverage_fraction": self._coverage.coverage_fraction(),
+            "coverage_source": str(self.cfg.perception.coverage_source or "gym_grid"),
             "coverage_cut_cells": self._coverage.cut_cell_count(),
             "coverage_grass_cells": self._coverage.grass_cell_count(),
             "coverage_cut": (self._coverage.cut & self._coverage.grass),
@@ -1121,6 +1147,20 @@ class MowerEnv(gym.Env):
             "imu_stamp_s": float(self._imu_stamp_s),
             "vision_stamp_s": float(self._vision_stamp_s),
         }
+        gym_frac = float(self._coverage.coverage_fraction())
+        src = str(self.cfg.perception.coverage_source or "gym_grid").strip().lower()
+        info["gym_coverage_fraction"] = gym_frac
+        info["observer_coverage_fraction"] = observer_cut
+        if src == "observer" and observer_cut is not None:
+            info["coverage_fraction"] = float(observer_cut)
+            info["coverage_source"] = "observer"
+        else:
+            info["coverage_fraction"] = gym_frac
+            info["coverage_source"] = "gym_grid"
+            if src == "observer" and observer_cut is None:
+                info["coverage_source_note"] = (
+                    "observer requested but no class-aware BEV; using gym_grid"
+                )
         info["fault"] = self.fault_bus.as_info(
             self._pose, gnss_dropped=float(gps[3]) < 0.5
         )
@@ -1136,7 +1176,13 @@ class MowerEnv(gym.Env):
             info["semantic_names"] = SEMANTIC_NAMES
         if self.cfg.perception.height_fusion and self._fused_elev is not None:
             info["height_fused"] = self._fused_elev
-            info["height_fusion_stub"] = True
+            info["height_fusion_stub"] = False
+            info["height_fusion"] = {
+                "source": "gym_stereo_tof_imu",
+                "not_matcher": True,
+                "fps_claim": None,
+                "map_claim": None,
+            }
         if self.cfg.perception.loop_closure:
             self._loop.update(occupancy, self._pose, self.cfg.world.resolution_m)
             info.update(self._loop.as_info())
