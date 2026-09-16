@@ -42,16 +42,9 @@ from jims_mower.perception.stereo import (
     require_stereo_pair,
     synthetic_stereo_points,
 )
-from jims_mower.perception.calibration import (
-    CalibrationError,
-    ExtrinsicsBundle,
-    load_extrinsics,
-    report_baseline_cm,
-    run_gym_acceptance,
-    run_lip_fixture,
-    tape_vs_ideal_disparity,
-    validate_stereo_yaml,
-)
+# Do not import calibration here. It can need ObservedMap; planning.observed
+# imports perception.grade, which loads this package. Eager calibration
+# is the circular import that broke `jims-mower-mission inspect`.
 from jims_mower.perception.grade import PlanarGradeModel, gradients_from_attitude, paint_planar_grade
 from jims_mower.perception.elev_fuse import (
     ElevFuseResult,
@@ -162,3 +155,24 @@ __all__ = [
     "terrain_observer_from_mode",
     "uncut_grass_mask",
 ]
+
+_CALIB_EXPORTS = frozenset(
+    {
+        "CalibrationError",
+        "ExtrinsicsBundle",
+        "load_extrinsics",
+        "report_baseline_cm",
+        "run_gym_acceptance",
+        "run_lip_fixture",
+        "tape_vs_ideal_disparity",
+        "validate_stereo_yaml",
+    }
+)
+
+
+def __getattr__(name: str):
+    if name in _CALIB_EXPORTS:
+        from jims_mower.perception import calibration as _calibration
+
+        return getattr(_calibration, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
