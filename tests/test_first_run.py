@@ -150,8 +150,10 @@ def test_teach_paused_then_start_reaches_explore_not_idle_calibrate(tmp_path: Pa
         assert pill != "idle" or started["phase"] != "calibrate_boundary"
 
         session.control("pause")
+        session.policy.clear_owner_hold()
         maps = [float(started.get("map_pct") or 0.0)]
         last = started
+        pose0 = (started.get("pose") or {}).copy()
         for _ in range(10):
             last = session.step_once()
             maps.append(float(last.get("map_pct") or 0.0))
@@ -166,7 +168,11 @@ def test_teach_paused_then_start_reaches_explore_not_idle_calibrate(tmp_path: Pa
             )
             assert not (pill == "idle" and "calibrat" in copy.lower())
         assert last["phase"] in {"explore", "review", "mow"}
-        assert max(maps) >= maps[0]
+        pose1 = last.get("pose") or {}
+        moved = abs(float(pose1.get("x", 0.0)) - float(pose0.get("x", 0.0))) + abs(
+            float(pose1.get("y", 0.0)) - float(pose0.get("y", 0.0))
+        )
+        assert max(maps) > maps[0] or moved > 0.05 or last["phase"] in {"review", "mow"}
     finally:
         session.control("pause")
         session.close()
