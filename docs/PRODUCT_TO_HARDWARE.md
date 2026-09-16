@@ -28,6 +28,7 @@ Remaining work is **human**:
 - Commit measured extrinsics — [`CALIBRATION.md`](CALIBRATION.md)
 - Collect real labels — [`DATASET.md`](DATASET.md)
 - Run the residential-acre scorecard — [`FIELD_TEST.md`](FIELD_TEST.md)
+  (practice first: `jims-mower-field-dryrun`)
 
 Do **not** start another WAVE of gym stubs.
 
@@ -117,7 +118,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | CV-2 | Grass coverage observer | **partial** (gym this PR) | `ClassAwareGrassObserver` (`grass_mode: class`) uses terrain-seg classes (grass vs drain/lip/bank) when labels exist, else the palette heuristic. `ColorGrassObserver` / `FeatureGrassObserver` stay as fallbacks. Gym painted-strip error is in `tests/test_grass_coverage.py` — **not** field mAP. Phone cut % default is still the *gym grass grid* (`coverage_source: gym_grid`). Opt-in `coverage_source: observer` uses the class-aware BEV and sets `info["coverage_source"]`. Field strip test still needed. | Gym: coverage drift vs a painted cut/uncut/path fixture (report error in tests). Field: on-box vs painted/measured strips on one lawn, same day. No invented IoU. | CV-1, MAP-1 |
 | CV-3 | Person / animal / obstacle detect | **partial** (gym RGB this PR) | `MockDetector` still **projects** `context.obstacles` (gym default). `AppearanceDetector` (`detector_backend: appearance`) ignores that list and finds KIND_RGB **blobs in the camera image**. Gym living interlock can consume those dets (`interlock_source: detections` / `auto`). Not a field head. `map_claim` stays null. | Gym: painted person blob in the front camera trips trimmer-off; oracle person behind / out of view does not. Field: recorded walk-through. No fake mAP. | CV-8, RT-1 |
 | CV-4 | Tracking / tracklets | **partial** (IoU/centroid this PR) | Associate consecutive dets by world XY **or** bbox IoU / image centroid when `world_xy` is missing (appearance). Not MOT. No mAP. | Gym: overlapping boxes keep one id. Field: ID-switch on a 30 s clip. | CV-3 |
-| CV-5 | Hand signals | **stub** | Oracle person labels or crop brightness / red-bias classifier. | Confusion matrix on real stop/go/back clips, or **drop the feature** until CV-3 works. | CV-3 |
+| CV-5 | Hand signals | **partial** (gym this PR) | Optional red-bias stop/go on an **appearance** person crop fills ICD `hand_signal` and the policy hold when `curriculum.hand_signals` is on. KIND_RGB person is red → `stop`. Gym-only. Unreliable on real clips — drop it then. Classifier stub still exists. **No confusion matrix. No fake numbers.** | Gym: painted red-bias person blob → `obs["hand_signal"]=stop` → wheels hold (`tests/test_field_dryrun.py`). Field: confusion matrix on real stop/go/back clips, or drop. | CV-3 |
 | CV-6 | Train → ONNX → TensorRT | **partial** (software path this PR) | `jims-mower-train-terrain --onnx` writes a sim_only Gemm graph when the `onnx` extra is installed. `jims-mower-export-trt --dry-run` still prints `trtexec`. `TrtTerrainObserver` / `TrtDetector` load an engine **if you provide one**, else heuristic / mock. No production ONNX in git. | `trtexec` builds your engine on the Orin; `fps_claim` stays null until you measure. Software pipeline ≠ field head. | CV-1 or CV-3 weights |
 | CV-7 | Domain gap (wet / dawn / night) | **partial** | Renderer tints only. Not HDR, IR, or wet-lens. | Same route at noon vs dusk vs wet; hazard stamps must not invert drain vs grass. | CV-1, RT-1 |
 | CV-8 | Dataset (real) | **partial** (harness this PR) | Exporter writes `jims_mower.dataset.v1` (oracle PNG + COCO-like index) from renderer **or** FakeCsi/Gst (`--adapter`). Train/val is last-frac (`meta.split` / `split.json`). Label protocol: [`DATASET.md`](DATASET.md). Fake CSI is OK in CI — not real photos. No field bag yet. No published mAP. | N frames from the rig, labeled, versioned, train/val documented. CI: FakeCsi → v1 + split. | RT-1, HD-cam |
@@ -353,12 +354,13 @@ Stop when only **fab + field test** remain.
     pretend chassis.  
     *Test:* `pytest tests/test_bom.py`.
 
-20. **Field test scorecard** (template this PR) on a taught residential
-    acre: ESTOP, living interlock, rain/SOC skip, return-to-home.
-    Score tips / drain entries / leftover uncut / ESTOP pulls — not
-    mAP. [`FIELD_TEST.md`](FIELD_TEST.md). Scorecard ready; field not
-    run.  
-    *Test:* `pytest tests/test_field_scorecard.py`.
+20. **Field test scorecard** (template + gym dry-run this PR) on a
+    taught residential acre: ESTOP, living interlock, rain/SOC skip,
+    return-to-home. Score tips / drain entries / leftover uncut /
+    ESTOP pulls — not mAP. [`FIELD_TEST.md`](FIELD_TEST.md). Practice
+    first: `jims-mower-field-dryrun` (laptop, `domain: gym_dryrun`,
+    `field_ready: false`). Scorecard ready; field not run.  
+    *Test:* `pytest tests/test_field_scorecard.py tests/test_field_dryrun.py`.
 
 After row 20 the remaining work is **human fab, measure pack/CG,
 commit measured extrinsics, collect real labels, field scorecard** —
@@ -375,6 +377,8 @@ field numbers.
 | --- | --- | --- |
 | On-box unit (RT-7) | `jims-mower-onbox` + systemd example + [`ONBOX.md`](ONBOX.md). No renderer. | Real CSI, real IMU, flashed image |
 | Appearance gym (CV-3/4, PLN-4) | RGB blob dets + dets-from-camera interlock + IoU tracklets | Real dets, real CSI, field mAP (never invent) |
+| Hand signals (CV-5) | Gym red-bias stop/go on an appearance person crop → ICD / policy. No confusion matrix. | Real clips, or drop the feature |
+| Field-scorecard gym dry-run | `jims-mower-field-dryrun` fills `field_scorecard` (`domain: gym_dryrun`, `field_ready: false`) | The real acre — [`FIELD_TEST.md`](FIELD_TEST.md) |
 | Scale cal (S2R-4) | YAML + gym × scale + [`SCALE.md`](SCALE.md) | Tape m/s + tach RPM on the rig |
 | Bring-up | `jims-mower-bringup` PASS/FAIL/SKIP | Physical paddle, JetPack CSI |
 | Field RF / OTA / IoU | Honest stubs (UX-4, SAF-4). Do not claim SIL | BT/LoRa, A/B OTA, held-out IoU |
@@ -383,17 +387,16 @@ field numbers.
 
 ## What this PR ships
 
-- **RT-7:** `jims-mower-onbox` runs the control loop on Fake* / Gst
-  adapters with watchdog, HW ESTOP, and a black-box path. Import
-  guard + test: `jims_mower.renderer` stays out. Systemd example
-  under `deploy/` / `configs/orin/`. [`ONBOX.md`](ONBOX.md).
-- **Bring-up:** `jims-mower-bringup` walks selftest, HW ESTOP sim,
-  watchdog freeze, calibrate YAML, pack `measured` flag, survey
-  origin. Prints PASS/FAIL/SKIP. Never invents measurements.
-- **CV-3 / PLN-4:** `AppearanceDetector` finds gym person / animal /
-  obstacle **from RGB**. Living interlock has a dets-from-camera
-  mode. `MockDetector` stays the default. `map_claim` stays null.
-- **S2R-4:** `drive.scale` / `trimmer.scale` (`measured: false`).
-  Gym 1.0 command × scale. [`SCALE.md`](SCALE.md). No invented Kv.
-- Honest leftover: real CSI, real dets, field RF / OTA / IoU. Do
-  **not** claim SIL or acre runtime.
+- **FIELD_TEST gym dry-run:** `jims-mower-field-dryrun` runs a short
+  `mission_tiny` fixture and writes a filled scorecard
+  (`domain: gym_dryrun`, `field_ready: false`). Preflight via
+  bring-up, teach/load + origin flag, explore → MAP READY → mow →
+  return-home (capped OK), appearance living interlock, tip inject,
+  rain/SOC schedule skips, day-2 new-process restore, HW ESTOP sim
+  latch. Scores tips / drains / leftover / ESTOP pulls — not mAP.
+  [`FIELD_TEST.md`](FIELD_TEST.md). **Not a field test.**
+- **CV-5 gym:** red-bias stop/go on an appearance person crop fills
+  ICD `hand_signal` and the policy hold. Gym-only. No confusion
+  matrix. Drop on real clips if it is unreliable.
+- Honest leftover: the real acre, real CSI, real dets, field RF /
+  OTA / IoU. Do **not** claim SIL or acre runtime.

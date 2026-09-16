@@ -21,6 +21,7 @@ from jims_mower.perception.detect import (
     AppearanceDetector,
     detect_palette_blobs,
     detector_from_mode,
+    gym_red_bias_signal,
     paint_kind_blob,
 )
 from jims_mower.perception.trt import TrtDetector, TrtTerrainObserver, tensorrt_available
@@ -118,6 +119,7 @@ __all__ = [
     "detection_from_obstacle",
     "detect_palette_blobs",
     "detector_from_mode",
+    "gym_red_bias_signal",
     "paint_kind_blob",
     "drain_pixel_fraction",
     "export_terrain_onnx",

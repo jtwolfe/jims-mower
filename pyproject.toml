@@ -74,6 +74,7 @@ jims-mower-selftest = "jims_mower.selftest:main"
 jims-mower-calibrate = "jims_mower.calibrate_cli:main"
 jims-mower-onbox = "jims_mower.onbox:main"
 jims-mower-bringup = "jims_mower.bringup:main"
+jims-mower-field-dryrun = "jims_mower.field_dryrun:main"
 jims-mower-app = "jims_mower.app.cli:main"
 
 [project.urls]

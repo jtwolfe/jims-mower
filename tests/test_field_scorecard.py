@@ -11,9 +11,11 @@ from jims_mower.field_scorecard import (
     FIELD_SCORECARD_SCHEMA,
     FieldScorecardError,
     empty_scorecard,
+    gym_dryrun_scorecard,
     load_scorecard,
     scorecard_template_path,
     validate_scorecard,
+    write_scorecard,
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +38,8 @@ def test_empty_scorecard_has_null_claims() -> None:
         "estop_pulls",
     }
     assert all(v is None for v in blank["score"].values())
+    assert blank["domain"] == ""
+    assert blank["field_ready"] is False
 
 
 def test_template_loads_unrun() -> None:
@@ -78,3 +82,21 @@ def test_packaged_template_matches_repo() -> None:
     assert repo["schema"] == packaged["schema"]
     assert repo["field_run"] is False
     assert packaged["field_run"] is False
+
+
+def test_write_scorecard_roundtrip(tmp_path: Path) -> None:
+    raw = gym_dryrun_scorecard()
+    raw["score"] = {
+        "tips": 1,
+        "drain_entries": 0,
+        "leftover_uncut_cells": 12,
+        "leftover_uncut_m2": 0.48,
+        "estop_pulls": 1,
+    }
+    dest = tmp_path / "gym.yaml"
+    write_scorecard(dest, raw)
+    card = load_scorecard(dest)
+    assert card.domain == "gym_dryrun"
+    assert card.field_ready is False
+    assert card.score["tips"] == 1
+    assert card.score["leftover_uncut_cells"] == 12

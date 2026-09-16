@@ -160,7 +160,9 @@ See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
 - [x] Recovery behaviours — reverse off a lip, pivot, then call-for-help
       when tip / wheel-in-channel advice fires repeatedly
 - [x] Hand-signal policy hooks — `stop` / `go` / `follow` / `back` override
-      the controller when `curriculum.hand_signals` is on (mock / oracle labels)
+      the controller when `curriculum.hand_signals` is on (mock / oracle labels).
+      Appearance gym (CV-5): red-bias person crop → ICD `hand_signal` (no field
+      confusion matrix)
 - [x] Multi-session resume — `jims-mower-mission` + demo
       `--save-mission` / `--load-mission` (map + uncut + pose)
 - [x] ROADMAP checkboxes for the items above
@@ -189,6 +191,7 @@ See [`docs/UX.md`](docs/UX.md). No claimed mAP / FPS.
 - [x] Multi-camera BEV fuse for hazard stamps + person/dog tracklets stub — WAVE 2B (not published MOT / NMS scores)
 - [x] Person / animal / toy categories beyond `MockDetector` blobs — WAVE 4 appearance model (not mAP)
 - [x] Hand-signal classifier behind `HandSignalCurriculum` (optional) — WAVE 4 numpy crop stub
+- [x] Appearance red-bias `hand_signal` (CV-5 gym) + `jims-mower-field-dryrun` scorecard practice
 - [x] Grass coverage net behind `GrassObserver` (replace color heuristic) — WAVE 4 `FeatureGrassObserver` stub
 - [x] Domain-randomised lighting / wet / dawn from scenario flags — WAVE 1C renderer + WAVE 2B `--domain-rand` export note
 - [x] Uncertainty maps on `TerrainEstimate` (relative merge weights, not published scores) — WAVE 1B costmap + WAVE 2B BEV fuse

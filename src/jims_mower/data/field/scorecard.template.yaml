@@ -7,6 +7,8 @@
 
 schema: jims_mower.field_scorecard.v1
 field_run: false
+field_ready: false
+domain: ""                 # gym_dryrun from jims-mower-field-dryrun — not a field test
 pack_measured: false
 yard: ""
 date: ""

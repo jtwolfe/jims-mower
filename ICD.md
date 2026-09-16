@@ -142,7 +142,9 @@ not the height field:
    + IMU tilt → slow / reroute / stop. Repeated tip / channel advice runs
    reverse → pivot → call-for-help. With `curriculum.hand_signals`, obs
    `hand_signal` (`stop` / `go` / `follow` / `back`) overrides wheels even
-   when the detector is the mock / oracle.
+   when the detector is the mock / oracle. Appearance gym (CV-5): a
+   red-biased person crop can fill `hand_signal` without `world_xy`.
+   Gym-only. No field confusion matrix.
 
 `ComplementaryPoseFilter` is a GPS+IMU stub for planner start / attitude, not
 a published EKF. The controller wraps wheel commands in

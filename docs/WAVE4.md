@@ -11,6 +11,11 @@ one deep unfinished feature. **No claimed mAP / FPS / IoU / SLAM quality.**
 - `HandSignalClassifier` sits behind `curriculum.hand_signals` **and**
   `curriculum.hand_signal_classifier` (crop brightness / aspect / red bias).
   Default curriculum still uses oracle person labels.
+- **CV-5 gym:** when `detector_backend: appearance` and
+  `curriculum.hand_signals` is on, a red-biased person crop fills ICD
+  `hand_signal` (`stop` / optional `go`) even without `world_xy`. KIND_RGB
+  person is already red → `stop`. Gym-only. No confusion matrix. Drop on
+  real clips if unreliable.
 - `FeatureGrassObserver` (`perception.grass_mode: feature`) is a six-stat
   linear mix. Optional `weights_path` `.npz` (`w`, `b`). Default stays
   `ColorGrassObserver`.
