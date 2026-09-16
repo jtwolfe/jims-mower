@@ -54,12 +54,95 @@ body {
   background: #000;
   border-radius: 12px;
 }
-#batt-pill {
-  background: #1d2a1d;
-  color: #b7f0c0;
+.pills { display: flex; gap: 6px; align-items: center; }
+#batt-pill, #robot-pill {
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#batt-pill {
+  background: #1d2a1d;
+  color: #b7f0c0;
+}
+#robot-pill.idle { background: #222; color: #c8c8c8; }
+#robot-pill.pairing { background: #2a2618; color: #ecd48a; }
+#robot-pill.live { background: #1d2a1d; color: #b7f0c0; }
+#robot-pill.fault { background: #3a1414; color: #ffd0d0; }
+
+.radio-chips {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+.radio-chips span {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 4px;
+  border-radius: 999px;
+  background: #161916;
+  color: #6d7568;
+  border: 1px solid var(--line);
+}
+.radio-chips span.on {
+  background: #243024;
+  color: #c8f0cc;
+  border-color: #3dbe5a55;
+}
+
+.live-preview {
+  position: relative;
+  height: 210px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #08110a;
+  margin-bottom: 12px;
+}
+.live-preview img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.live-preview img.fog { mix-blend-mode: multiply; pointer-events: none; }
+
+.speed-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 8px 0;
+}
+.speed-row button {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 0;
+  background: #1b1f1b;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+.speed-row button.on { background: var(--green); color: #06210c; }
+
+.owner-copy {
+  font-size: 16px;
+  font-weight: 650;
+  margin: 0 0 10px;
+  line-height: 1.35;
+}
+
+.session-card {
+  background: #142018;
+  border: 1px solid #2a4a30;
+  border-radius: 16px;
+  padding: 14px;
+  margin: 12px 0;
+  white-space: pre-line;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 main {
@@ -118,6 +201,7 @@ p.lead, .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin: 
 .btn.warn { background: var(--gold); color: #2a2208; }
 .btn.danger { background: var(--danger); color: #fff; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn[hidden], [hidden] { display: none !important; }
 
 .hero {
   height: 168px;

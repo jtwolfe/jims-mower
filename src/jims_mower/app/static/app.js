@@ -6,6 +6,7 @@
     status: null,
     yard: null,
     coverage: null,
+    live: null,
     pairing: { bt: true, wifi: false, lora: true },
     teachPts: [],
   };
@@ -16,7 +17,7 @@
   function route() {
     const hash = location.hash || "";
     if (hash.startsWith("#/onboard/")) return hash.slice(2);
-    if (hash === "#/map") return "map";
+    if (hash === "#/map" || hash === "#/live") return "map";
     if (hash === "#/health") return "health";
     if (hash === "#/fault") return "fault";
     if (localStorage.getItem(KEY)) return "map";
@@ -27,11 +28,24 @@
     location.hash = `#/${name}`;
   }
 
+  function isLive() {
+    const st = state.status || {};
+    return st.backend === "live" || st.live === true || !!state.live;
+  }
+
   async function api(path, opts) {
     const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts || {}));
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || res.statusText);
     return data;
+  }
+
+  function setRobotPill(status) {
+    const pill = $("#robot-pill");
+    if (!pill) return;
+    const robot = (status && status.robot) || ((status && status.state && status.state.mission) || "idle");
+    pill.textContent = robot;
+    pill.className = ["idle", "pairing", "live", "fault"].includes(robot) ? robot : "idle";
   }
 
   async function refresh() {
@@ -45,13 +59,28 @@
     state.coverage = coverage;
     const soc = Math.round(100 * Number((status.battery || {}).soc || 0));
     $("#batt-pill").textContent = `${soc}%`;
+    setRobotPill(status);
     return status;
   }
 
   async function command(cmd, reason) {
+    if (isLive() && cmd !== "pair") {
+      await liveControl(cmd === "stop" ? "pause" : cmd, reason ? { reason } : {});
+      return;
+    }
     await api("/command", { method: "POST", body: JSON.stringify({ cmd, reason }) });
     await refresh();
     render();
+  }
+
+  async function liveControl(cmd, extra) {
+    const body = Object.assign({ cmd }, extra || {});
+    const data = await api("/api/live/control", { method: "POST", body: JSON.stringify(body) });
+    state.live = data;
+    if (data && data.ok === false) throw new Error(data.error || "live control failed");
+    await refresh();
+    render();
+    return data;
   }
 
   async function saveYard(patch) {
@@ -102,7 +131,7 @@
       screen().innerHTML = onboardFrame(
         "pair",
         "Pair radios",
-        `<p class="lead">Bluetooth is required for first contact. Wi-Fi is optional. LoRa is the long-range command link.</p>
+        `<p class="lead">Bluetooth is required for first contact. Wi-Fi is optional. LoRa is the long-range command link. Stub only — no RF hardware.</p>
          <div class="card radio-list">
            <label>Bluetooth <span class="tag">required</span></label>
            <label>Wi-Fi <span class="tag opt">optional</span></label>
@@ -114,13 +143,14 @@
       );
       $("#next").onclick = async () => {
         if (!state.yard) await refresh();
-        const radio = Object.assign({}, state.yard.radio, {
+        const radio = Object.assign({}, (state.yard && state.yard.radio) || {}, {
           bluetooth: true,
           primary: "lora",
-          lora: { enabled: true, channel: (state.yard.radio.lora || {}).channel || 1 },
-          wifi: state.yard.radio.wifi || { enabled: false, ssid: "" },
+          lora: { enabled: true, channel: ((state.yard && state.yard.radio && state.yard.radio.lora) || {}).channel || 1 },
+          wifi: (state.yard && state.yard.radio && state.yard.radio.wifi) || { enabled: false, ssid: "" },
         });
-        await saveYard({ radio });
+        if (state.yard) await saveYard({ radio });
+        try { await command("pair"); } catch (_err) { /* memory backend has no pair */ }
         go("onboard/home");
       };
       return;
@@ -183,12 +213,15 @@
        <div class="card"><strong>Radios</strong>BT paired · LoRa long-range · Wi-Fi optional</div>`,
       "Start first mow",
       null,
-      `<button class="btn ghost" id="skip">Skip to map</button>`
+      `<button class="btn ghost" id="skip">Skip to layout</button>`
     );
     $("#next").onclick = async () => {
       localStorage.setItem(KEY, "1");
-      await command("start");
-      go("map");
+      if (isLive()) go("map");
+      else {
+        await command("start");
+        go("map");
+      }
     };
     $("#skip").onclick = () => {
       localStorage.setItem(KEY, "1");
@@ -196,7 +229,114 @@
     };
   }
 
+  function radioChipsHtml(path) {
+    const chips = (path && path.chips) || [
+      { id: "bt", label: "BT teach", active: true },
+      { id: "wifi", label: "Wi-Fi map", active: false },
+      { id: "lora", label: "LoRa sparse", active: false },
+    ];
+    return `<div class="radio-chips" aria-label="radio path">${chips
+      .map((c) => `<span class="${c.active ? "on" : ""}">${c.label}</span>`)
+      .join("")}</div>`;
+  }
+
+  function sessionCardHtml(st, live) {
+    const card = (live && live.session_summary) || st.session_summary || {};
+    const done = !!(st.done || (live && (live.done || live.phase === "complete" || live.phase === "return_home")));
+    if (!done || !card || !card.schema) return "";
+    const reach = card.reachable || 0;
+    const unreach = card.unreachable || 0;
+    const denom = reach + unreach;
+    const reachPct = denom ? (100 * reach) / denom : 0;
+    return `<div class="session-card" id="session-card"><strong>Session</strong>
+map ${((card.map_pct || 0) * 100).toFixed(1)}% · planned ${((card.planned_pct || 0) * 100).toFixed(1)}%
+reachable ${reachPct.toFixed(1)}% · cut ${((card.cut_pct || 0) * 100).toFixed(1)}%
+skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall_s ? ` · ${card.wall_s.toFixed(1)}s wall` : ""}</div>`;
+  }
+
+  function renderPairingStub() {
+    screen().innerHTML = `
+      <h1>Pair Bluetooth</h1>
+      <p class="lead">Hold the phone next to the mower for first contact. Stub only — no real RF.</p>
+      <div class="card radio-list">
+        <label>Bluetooth <span class="tag">required</span></label>
+        <label>Wi-Fi <span class="tag opt">optional</span></label>
+        <label>LoRa <span class="tag">long-range after pair</span></label>
+      </div>
+      <button class="btn primary" id="pair-bt">Pair over Bluetooth</button>`;
+    $("#pair-bt").onclick = () => command("pair");
+  }
+
+  function renderLiveJob() {
+    const st = state.status || {};
+    const live = state.live || {};
+    const paired = st.paired === true || live.paired === true;
+    if (!paired) {
+      renderPairingStub();
+      return;
+    }
+    const job = live.job_state || (st.state || {}).job_state || "idle";
+    const copy = st.owner_copy || live.owner_copy || "Yard unknown — start a job when ready.";
+    const mapPct = Number(st.map_pct != null ? st.map_pct : 100 * (live.map_pct || 0));
+    const cutPct = Number(st.cut_pct != null ? st.cut_pct : 100 * (live.cut_pct || 0));
+    const speed = String(st.speed_label || live.speed_label || "5");
+    const canMow = !!(st.can_start_mow || live.can_start_mow);
+    const fog = live.fog_url || st.fog_url || "/api/live/fog.png";
+    const observed = live.observed_url || st.observed_url || "/api/live/observed.png";
+    const path = st.radio_path || live.radio_path || {};
+    screen().innerHTML = `
+      <h1>Live job</h1>
+      ${radioChipsHtml(path)}
+      <p class="owner-copy" id="owner-copy">${copy}</p>
+      <div class="live-preview">
+        <img class="obs" id="obs-img" alt="observed terrain" src="${observed}"/>
+        <img class="fog" id="fog-img" alt="fog of war" src="${fog}"/>
+      </div>
+      <div class="row">
+        <div class="chip">Map<b id="map-pct">${mapPct.toFixed(1)}%</b></div>
+        <div class="chip">Cut<b id="cut-pct">${cutPct.toFixed(1)}%</b></div>
+      </div>
+      <div class="speed-row" id="speed-row">
+        <button type="button" data-speed="1">1×</button>
+        <button type="button" data-speed="2">2×</button>
+        <button type="button" data-speed="5">5×</button>
+        <button type="button" data-speed="max">max</button>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="start" ${job === "running" ? "disabled" : ""}>Start job</button>
+        <button class="btn ghost" id="pause" ${job !== "running" ? "disabled" : ""}>Pause</button>
+      </div>
+      <button class="btn ghost" id="resume" ${job !== "paused" && job !== "hold" ? "disabled" : ""}>Resume</button>
+      ${canMow ? `<button class="btn warn" id="start-mow">Start mow</button>` : ""}
+      <button class="btn danger" id="estop">ESTOP</button>
+      ${sessionCardHtml(st, live)}
+      <div class="row">
+        <button class="btn ghost" id="inj-stuck">Inject stuck</button>
+        <button class="btn ghost" id="inj-sos">Inject SOS</button>
+      </div>
+      <p style="margin-top:10px"><a class="linkish" href="/viewer">Open live fog viewer</a></p>`;
+    document.querySelectorAll("#speed-row button").forEach((btn) => {
+      btn.classList.toggle("on", btn.dataset.speed === speed);
+      btn.onclick = () => liveControl("speed", { speed: btn.dataset.speed });
+    });
+    $("#start").onclick = () => liveControl("start");
+    $("#pause").onclick = () => liveControl("pause");
+    $("#resume").onclick = () => liveControl("resume");
+    const mow = $("#start-mow");
+    if (mow) mow.onclick = () => liveControl("start_mow");
+    $("#estop").onclick = () => liveControl("estop");
+    $("#inj-stuck").onclick = () => liveControl("inject", { kind: "stuck" });
+    $("#inj-sos").onclick = async () => {
+      await liveControl("inject", { kind: "sos" });
+      go("fault");
+    };
+  }
+
   function renderMap() {
+    if (isLive()) {
+      renderLiveJob();
+      return;
+    }
     const st = state.status || {};
     const mission = ((st.state || {}).mission) || "idle";
     screen().innerHTML = `
@@ -224,9 +364,11 @@
     const bat = st.battery || {};
     const radio = st.radio || {};
     const sch = (state.yard && state.yard.schedule) || {};
+    const path = st.radio_path || (state.live && state.live.radio_path) || {};
     screen().innerHTML = `
       <h1>Health</h1>
       <p class="lead">Maintenance and radio prefs. Schedule is a stub.</p>
+      ${radioChipsHtml(path)}
       <div class="row">
         <div class="chip">Battery<b>${Math.round(100 * Number(bat.soc || 0))}%</b></div>
         <div class="chip">Thermal<b>${Number(bat.temp_c || 0).toFixed(0)}°C</b></div>
@@ -236,7 +378,8 @@
         ${radio.link || "none"} · RSSI ${radio.rssi || "—"}
         <div class="sub">BT ${radio.bluetooth && radio.bluetooth.paired ? "paired" : "no"} ·
           Wi-Fi ${radio.wifi && radio.wifi.enabled ? "on" : "optional / off"} ·
-          LoRa ${radio.lora && radio.lora.enabled ? "long-range" : "off"}</div>
+          LoRa ${radio.lora && radio.lora.enabled ? "long-range" : "off"}
+          ${(path && path.simulated) ? " · simulated path" : ""}</div>
       </div>
       <div class="card">
         <strong>Hours mowed</strong>${Number(st.hours_mowed || 0).toFixed(2)}
@@ -256,18 +399,36 @@
 
   function renderFault() {
     const st = state.status || {};
-    const faults = st.faults || [];
+    const live = state.live || {};
+    const faults = st.faults || live.faults || [];
+    const sos = faults.some((f) => f.retrieve || f.code === "FAULT_IMMOBILISED");
+    const stuck = faults.some((f) => f.code === "STUCK");
+    const banner = sos
+      ? `<div class="fault-banner"><strong>SOS — immobilised</strong><span>Dead motor. Retrieve the mower. Wheels and trimmer are held.</span></div>`
+      : stuck
+        ? `<div class="fault-banner"><strong>Stuck</strong><span>Recovery reverse / pivot / help still runs. Not a retrieve.</span></div>`
+        : "";
     const list = faults.length
       ? faults.map((f) => `<div class="fault-banner"><strong>${f.code}</strong><span>${f.detail || ""}</span></div>`).join("")
       : `<div class="card"><strong>All clear</strong>No latched owner faults.</div>`;
     screen().innerHTML = `
       <h1>SOS</h1>
+      ${banner}
       ${list}
+      <p class="owner-copy">${st.owner_copy || live.owner_copy || ""}</p>
       <button class="big-sos" id="estop">ESTOP</button>
       <p class="sub" style="text-align:center">Software latch · zeros wheels and trimmer until you Start again</p>
-      <button class="btn ghost" id="resume">Resume (start)</button>`;
+      <button class="btn ghost" id="resume">Resume (start)</button>
+      ${isLive() ? `<div class="row">
+        <button class="btn ghost" id="inj-stuck">Inject stuck</button>
+        <button class="btn ghost" id="inj-sos">Inject dead-motor SOS</button>
+      </div>` : ""}`;
     $("#estop").onclick = () => command("estop", "sos");
     $("#resume").onclick = () => command("start");
+    if (isLive()) {
+      $("#inj-stuck").onclick = () => liveControl("inject", { kind: "stuck" });
+      $("#inj-sos").onclick = () => liveControl("inject", { kind: "sos" });
+    }
   }
 
   function render() {
@@ -277,6 +438,26 @@
     else if (r === "health") renderHealth();
     else if (r === "fault") renderFault();
     else renderMap();
+  }
+
+  function patchLiveChrome(frame) {
+    if (!frame || frame.live === false) return;
+    state.live = frame;
+    const copy = $("#owner-copy");
+    if (copy && frame.owner_copy) copy.textContent = frame.owner_copy;
+    const mapEl = $("#map-pct");
+    if (mapEl && frame.map_pct != null) mapEl.textContent = `${(100 * Number(frame.map_pct)).toFixed(1)}%`;
+    const cutEl = $("#cut-pct");
+    if (cutEl && frame.cut_pct != null) cutEl.textContent = `${(100 * Number(frame.cut_pct)).toFixed(1)}%`;
+    const fog = $("#fog-img");
+    if (fog && frame.fog_url) fog.src = frame.fog_url;
+    const obs = $("#obs-img");
+    if (obs && frame.observed_url) obs.src = frame.observed_url;
+    if (state.status) {
+      state.status.owner_copy = frame.owner_copy;
+      state.status.can_start_mow = frame.can_start_mow;
+      state.status.robot = state.status.robot;
+    }
   }
 
   $("#tabbar").addEventListener("click", (ev) => {
@@ -304,12 +485,25 @@
         state.status = JSON.parse(ev.data);
         const soc = Math.round(100 * Number((state.status.battery || {}).soc || 0));
         $("#batt-pill").textContent = `${soc}%`;
+        setRobotPill(state.status);
         const r = route();
-        if (r === "map" && $("#yard-svg") && window.JimsViewer && state.yard) {
+        if (r === "map" && $("#yard-svg") && window.JimsViewer && state.yard && !isLive()) {
           window.JimsViewer.drawYard($("#yard-svg"), state);
         }
       } catch (_err) {
         /* ignore parse errors */
+      }
+    };
+    const live = new EventSource("/api/live");
+    live.onmessage = (ev) => {
+      try {
+        const frame = JSON.parse(ev.data);
+        if (frame && frame.live) {
+          patchLiveChrome(frame);
+          setRobotPill(state.status || {});
+        }
+      } catch (_err) {
+        /* ignore */
       }
     };
   }

@@ -297,7 +297,18 @@ jims-mower-demo --profile teach_out/profile.json --steps 4 --out demo_taught
 # WAVE UX-C
 jims-mower-app --help
 jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
+jims-mower-owner --live
 ```
+
+## WAVE UX-C slice 4 — phone owns the live job
+
+- [x] `jims-mower-app --live` wraps `LiveSession` (same `POST /api/live/control` + SSE)
+- [x] Phone chrome: status pill, Start / Pause / ESTOP, speed, phase copy, map/cut %, session card
+- [x] One command: `jims-mower-owner --live` (port 8766, `acre_yard_demo`)
+- [x] Desktop `jims-mower-live` unchanged
+- [x] Radio path chips (BT teach / Wi-Fi map / LoRa sparse, simulated)
+- [x] Pairing stub before Start; stuck vs dead-motor SOS inject
+- [x] App live control contract smoke + existing live tests
 
 ## WAVE UX-B — faults + radio sim (append)
 
