@@ -65,7 +65,10 @@ When `curriculum.hand_signals` is on, `obs["hand_signal"]` overrides wheels:
 | follow | track nearest person `world_xy` (mock/oracle is enough) |
 | back | reverse |
 
-This is a policy hook, not a trained classifier.
+This is a policy hook, not a trained classifier. With
+`detector_backend: appearance`, a gym red-bias on the person crop can
+fill `hand_signal` (KIND_RGB person → `stop`). That is **not** a field
+gesture model and has **no** confusion matrix.
 
 ## Multi-session resume
 

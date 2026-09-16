@@ -38,6 +38,9 @@ jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
 jims-mower-mission-demo --config golf_rough --out mission_out
 jims-mower-mission-demo --config acre_yard --out mission_acre
 jims-mower-mission-demo --fast --out mission_fast
+
+# Laptop practice of the FIELD_TEST scorecard (not a field test):
+jims-mower-field-dryrun --out artifacts/field_dryrun/scorecard.yaml
 jims-mower-viewer --episode mission_out
 ```
 

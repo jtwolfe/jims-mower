@@ -861,6 +861,18 @@ class MowerEnv(gym.Env):
         backend = str(self.cfg.perception.detector_backend or "mock").strip().lower()
         return backend in {"appearance", "onnx", "blind"}
 
+    def _use_detection_hand_signals(self) -> bool:
+        """Fill ICD ``hand_signal`` from camera dets (appearance crop or classifier).
+
+        Appearance dets have no ``world_xy``. The crop red-bias is gym-only.
+        """
+        if self.cfg.curriculum.hand_signal_classifier:
+            return True
+        if not self.cfg.curriculum.hand_signals:
+            return False
+        backend = str(self.cfg.perception.detector_backend or "mock").strip().lower()
+        return backend in {"appearance", "onnx"}
+
     def _perception_context_for_detect(self) -> PerceptionContext:
         """Minimal context for a mid-step detect. Appearance ignores obstacles."""
         return PerceptionContext(
@@ -1155,12 +1167,20 @@ class MowerEnv(gym.Env):
                 prior=prior,
                 imu=imu,
             )
-        if self.cfg.curriculum.hand_signal_classifier:
+        if self._use_detection_hand_signals():
             signal_name = _nearest_detection_signal(detections, (self._pose.x, self._pose.y))
+            backend = str(self.cfg.perception.detector_backend or "mock").strip().lower()
+            if self.cfg.curriculum.hand_signal_classifier:
+                signal_source = "classifier"
+            elif backend in {"appearance", "onnx"}:
+                signal_source = "appearance_crop"
+            else:
+                signal_source = "detections"
         else:
             signal_name = self._signals.nearest_person_signal(
                 self._yard.obstacles, (self._pose.x, self._pose.y)
             )
+            signal_source = "oracle"
         signal_id = SIGNAL_TO_ID.get(signal_name or "", 0)
         structure = _merge_structure(self._structure.grid, terrain_est.structure)
         self._last_topdown = self._topdown()
@@ -1267,6 +1287,8 @@ class MowerEnv(gym.Env):
                 _cam_pose_dict(self._pose, cam) for cam in self.cameras
             ],
             "hand_signals_enabled": self.cfg.curriculum.hand_signals,
+            "hand_signal_name": signal_name,
+            "hand_signal_source": signal_source if signal_name else None,
             "steps": self._steps,
             "imu": imu.tolist(),
             "gps": gps.tolist(),
@@ -1369,16 +1391,27 @@ def _inject_kwargs(item: Any) -> dict[str, Any]:
 def _nearest_detection_signal(
     detections: list[Detection], xy: tuple[float, float]
 ) -> Optional[str]:
+    """Nearest person signal. Appearance crops have no world_xy — prefer front cam."""
     best = None
     best_d = float("inf")
+    front = None
+    fallback = None
     for det in detections:
-        if det.label != "person" or not det.hand_signal or det.world_xy is None:
+        if det.label != "person" or not det.hand_signal:
             continue
-        d = (det.world_xy[0] - xy[0]) ** 2 + (det.world_xy[1] - xy[1]) ** 2
-        if d < best_d:
-            best_d = d
-            best = det.hand_signal
-    return best
+        if det.world_xy is not None:
+            d = (det.world_xy[0] - xy[0]) ** 2 + (det.world_xy[1] - xy[1]) ** 2
+            if d < best_d:
+                best_d = d
+                best = det.hand_signal
+            continue
+        cam = str(det.camera or "").lower()
+        if cam.startswith("front") or cam in {"stereo_left", "stereo_right"}:
+            if front is None:
+                front = det.hand_signal
+        elif fallback is None:
+            fallback = det.hand_signal
+    return best or front or fallback
 
 
 def _weather_dict(scenario: Optional[Scenario]) -> dict[str, Any]:

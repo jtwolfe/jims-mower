@@ -106,4 +106,8 @@ jobs:
           jims-mower-bringup --help
           jims-mower-onbox --config configs/orin/bench.yaml --steps 3 --blackbox /tmp/jims-mower-ci-onbox.jsonl
           jims-mower-bringup --config configs/orin/bench.yaml --json --out /tmp/jims-mower-ci-bringup.json
+          jims-mower-field-dryrun --help
+          jims-mower-field-dryrun --scenario mission_tiny --steps 80 --out /tmp/jims-mower-ci-scorecard.yaml
+          test -f /tmp/jims-mower-ci-scorecard.yaml
+          python -c "from jims_mower.field_scorecard import load_scorecard; c=load_scorecard('/tmp/jims-mower-ci-scorecard.yaml'); assert c.domain=='gym_dryrun' and c.field_ready is False and c.acre_runtime_h is None"
 

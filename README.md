@@ -117,6 +117,9 @@ jims-mower-selftest
 jims-mower-onbox --config configs/orin/bench.yaml --steps 8 --blackbox /tmp/bb.jsonl
 jims-mower-bringup --config configs/orin/bench.yaml
 
+# Gym field-scorecard dry-run (laptop practice — not a field test)
+jims-mower-field-dryrun --out artifacts/field_dryrun/scorecard.yaml
+
 # WAVE UX-C — phone owns the live job (one command)
 jims-mower-owner --live
 # open http://127.0.0.1:8766/  Pair → Teach boundary → Save yard → Start
@@ -670,7 +673,8 @@ jims-mower-export-trt --dry-run
 | Stereo bench | `jims-mower-calibrate` — EXAMPLE YAML + gym lip / tape (not a field measure) |
 | On-box | `jims-mower-onbox` — control loop without `jims_mower.renderer` |
 | Bring-up | `jims-mower-bringup` — PASS/FAIL/SKIP first-boot checks (no invented numbers) |
-| Notes | [`docs/UX_B.md`](docs/UX_B.md), [`docs/CALIBRATION.md`](docs/CALIBRATION.md) |
+| Field dry-run | `jims-mower-field-dryrun` — gym scorecard practice (`domain: gym_dryrun`, not a field test) |
+| Notes | [`docs/UX_B.md`](docs/UX_B.md), [`docs/CALIBRATION.md`](docs/CALIBRATION.md), [`docs/FIELD_TEST.md`](docs/FIELD_TEST.md) |
 
 ```bash
 jims-mower-selftest

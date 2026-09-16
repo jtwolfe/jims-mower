@@ -200,7 +200,7 @@ class AppearanceDetector:
                     if use_cls:
                         signal = self._signals.classify(frame, det.bbox)
                     else:
-                        signal = _gym_red_bias_signal(frame, det.bbox)
+                        signal = gym_red_bias_signal(frame, det.bbox)
                 signed.append(
                     Detection(
                         label=det.label,
@@ -217,8 +217,13 @@ class AppearanceDetector:
         return out
 
 
-def _gym_red_bias_signal(image: np.ndarray, bbox: tuple[int, int, int, int]) -> Optional[str]:
-    """Gym-only stop/go from red vs green bias on a person crop. Not a gesture model."""
+def gym_red_bias_signal(image: np.ndarray, bbox: tuple[int, int, int, int]) -> Optional[str]:
+    """Gym-only stop/go from red vs green bias on a person crop.
+
+    KIND_RGB person is already red-biased, so a painted person blob reads
+    ``stop``. Green-biased crops may read ``go``. This is **not** a gesture
+    model. No confusion matrix. Drop it on real clips if it is unreliable.
+    """
     crop = crop_bbox(image, bbox)
     if crop.size == 0:
         return None
@@ -226,9 +231,9 @@ def _gym_red_bias_signal(image: np.ndarray, bbox: tuple[int, int, int, int]) -> 
     r, g, b = float(mean[0]), float(mean[1]), float(mean[2])
     if r > g + 12.0 and r > b:
         return "stop"
-    if g > r + 8.0:
+    if g > r + 8.0 and g > b:
         return "go"
-    return "go"
+    return None
 
 
 def detector_from_mode(

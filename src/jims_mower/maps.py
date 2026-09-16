@@ -84,6 +84,11 @@ class GrassCoverageMap:
     def cut_cell_count(self) -> int:
         return int((self.cut & self.grass).sum())
 
+    def leftover_uncut(self) -> tuple[int, float]:
+        """Uncut grass cells and area (m²). Gym leftover, not a field leftover."""
+        cells = self.grass_cell_count() - self.cut_cell_count()
+        return cells, float(cells) * (self.resolution_m ** 2)
+
     def coverage_fraction(self) -> float:
         total = self.grass_cell_count()
         if total == 0:

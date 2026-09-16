@@ -7,6 +7,21 @@ IoU, or FPS.
 This repo has **not** run that acre. `field_run: false` on the
 template. Do not invent counts.
 
+**Practice on a laptop before the real acre:**
+
+```bash
+jims-mower-field-dryrun --out artifacts/field_dryrun/scorecard.yaml
+```
+
+That command walks bring-up, a short `mission_tiny` teach → explore →
+MAP READY → mow → return-home (capped steps are OK), appearance living
+interlock, gym red-bias hand-signal stop, tip inject, rain/SOC schedule
+skips, day-2 new-process restore, and a sim HW ESTOP paddle. It writes
+the same scorecard schema with `domain: gym_dryrun` and
+`field_ready: false`. **Honest: not a field test.** No mAP / FPS / acre
+runtime. Optional `--scenario acre_yard_demo` is the same gym walk on
+the acre fixture — still not the lawn.
+
 Artifact schema: `jims_mower.field_scorecard.v1`
 ([`configs/field/scorecard.template.yaml`](../configs/field/scorecard.template.yaml)).
 
@@ -80,6 +95,8 @@ from HARDWARE_DESIGN §5.
 ```yaml
 schema: jims_mower.field_scorecard.v1
 field_run: false          # true only after this acre was run
+field_ready: false
+domain: ""                # gym_dryrun from jims-mower-field-dryrun — not a field test
 pack_measured: false
 preflight: {self_test: null, hw_estop_paddle: null, soc: null, rain_flag: null}
 mission: {teach_boundary: null, surveyed_origin: null, explore: null,
@@ -113,7 +130,9 @@ FPS claims and refuses `acre_runtime_h` unless `field_run` and
 ## Honesty
 
 - Scorecard **ready**. Field **not** run.
-- No leftover-uncut, tip, or ESTOP numbers in this repo.
+- `jims-mower-field-dryrun` may write gym leftover / injected-tip /
+  sim-ESTOP numbers. Those are **gym_dryrun**. They are not the acre.
+- No leftover-uncut, tip, or ESTOP numbers from a **field** run in this repo.
 - After the first acre, revise gym constants only if the **machine**
   needs it. Do not “fix” physics to match a tall CG
   ([`FAB_CHECKLIST.md`](FAB_CHECKLIST.md)).

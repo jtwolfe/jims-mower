@@ -1,18 +1,20 @@
 """Residential-acre field scorecard — tips / drains / leftover / ESTOP.
 
 Not mAP, IoU, or FPS. The template is empty; a field run is a human
-fill. See ``docs/FIELD_TEST.md``.
+fill. ``jims-mower-field-dryrun`` writes a gym practice card with
+``domain: gym_dryrun`` and ``field_ready: false``. See ``docs/FIELD_TEST.md``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import yaml
 
-FIELD_SCORECARD_SCHEMA = "jims_mower.field_scorecard.v1"
+from jims_mower.constants import FIELD_DRYRUN_DOMAIN, FIELD_SCORECARD_SCHEMA
+
 FORBIDDEN_CLAIM_KEYS = frozenset(
     {
         "map",
@@ -49,6 +51,7 @@ CHECK_KEYS = (
     "soc_skip",
     "day2_resume",
 )
+SCORECARD_DOMAINS = frozenset({"", "field", FIELD_DRYRUN_DOMAIN})
 
 
 class FieldScorecardError(ValueError):
@@ -66,6 +69,8 @@ class FieldScorecard:
     checks: dict[str, Any]
     score: dict[str, Any]
     acre_runtime_h: Optional[float] = None
+    domain: str = ""
+    field_ready: bool = False
     path: Optional[Path] = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -74,6 +79,8 @@ class FieldScorecard:
             "schema": self.schema,
             "field_run": self.field_run,
             "pack_measured": self.pack_measured,
+            "domain": self.domain,
+            "field_ready": self.field_ready,
             "preflight": dict(self.preflight),
             "mission": dict(self.mission),
             "checks": dict(self.checks),
@@ -101,6 +108,8 @@ def empty_scorecard() -> dict[str, Any]:
         "schema": FIELD_SCORECARD_SCHEMA,
         "field_run": False,
         "pack_measured": False,
+        "domain": "",
+        "field_ready": False,
         "preflight": {k: None for k in PREFLIGHT_KEYS},
         "mission": {k: None for k in MISSION_KEYS},
         "checks": {k: None for k in CHECK_KEYS},
@@ -111,6 +120,16 @@ def empty_scorecard() -> dict[str, Any]:
         "fps_claim": None,
         "notes": "",
     }
+
+
+def gym_dryrun_scorecard() -> dict[str, Any]:
+    """Practice card from ``jims-mower-field-dryrun``. Not a field test."""
+    blank = empty_scorecard()
+    blank["domain"] = FIELD_DRYRUN_DOMAIN
+    blank["field_ready"] = False
+    blank["field_run"] = False
+    blank["operator"] = "gym_dryrun"
+    return blank
 
 
 def _claim_forbidden(node: Any, *, where: str) -> None:
@@ -138,12 +157,28 @@ def validate_scorecard(raw: dict[str, Any]) -> FieldScorecard:
         )
     field_run = bool(raw.get("field_run", False))
     pack_measured = bool(raw.get("pack_measured", False))
+    domain = str(raw.get("domain") or "").strip()
+    if domain not in SCORECARD_DOMAINS:
+        raise FieldScorecardError(
+            f"scorecard.domain must be empty, 'field', or {FIELD_DRYRUN_DOMAIN!r}"
+        )
+    field_ready = bool(raw.get("field_ready", False))
+    if domain == FIELD_DRYRUN_DOMAIN:
+        if field_run or field_ready:
+            raise FieldScorecardError(
+                "gym_dryrun scorecard is laptop practice — field_run and "
+                "field_ready must stay false"
+            )
+    if field_ready and not field_run:
+        raise FieldScorecardError("field_ready requires field_run")
     acre = raw.get("acre_runtime_h")
     if acre is not None and not (field_run and pack_measured):
         raise FieldScorecardError(
             "acre_runtime_h must stay null until a field run *and* a "
             "measured pack (docs/PACK_THERMAL.md)"
         )
+    if domain == FIELD_DRYRUN_DOMAIN and acre is not None:
+        raise FieldScorecardError("gym_dryrun must not invent acre_runtime_h")
     score = raw.get("score") or {}
     if not isinstance(score, dict):
         raise FieldScorecardError("score must be a mapping")
@@ -161,6 +196,8 @@ def validate_scorecard(raw: dict[str, Any]) -> FieldScorecard:
         "schema",
         "field_run",
         "pack_measured",
+        "domain",
+        "field_ready",
         "preflight",
         "mission",
         "checks",
@@ -185,6 +222,8 @@ def validate_scorecard(raw: dict[str, Any]) -> FieldScorecard:
         checks=dict(checks),
         score=dict(score),
         acre_runtime_h=None if acre is None else float(acre),
+        domain=domain,
+        field_ready=field_ready,
         extra=extra,
     )
 
@@ -197,3 +236,15 @@ def load_scorecard(path: Optional[Path] = None) -> FieldScorecard:
     card = validate_scorecard(data)
     card.path = target
     return card
+
+
+def write_scorecard(path: Union[str, Path], raw: Union[dict[str, Any], FieldScorecard]) -> Path:
+    """Validate and write a scorecard YAML. Refuses mAP / invented acre runtime."""
+    payload = raw.as_dict() if isinstance(raw, FieldScorecard) else dict(raw)
+    card = validate_scorecard(payload)
+    dest = Path(path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dumped = yaml.safe_dump(card.as_dict(), sort_keys=False, allow_unicode=True)
+    dest.write_text(dumped, encoding="utf-8")
+    card.path = dest
+    return dest

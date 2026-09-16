@@ -25,7 +25,7 @@ Wave notes and the on-box message contract live here.
 | [`DATASET.md`](DATASET.md) | CV-8 record + label protocol; FakeCsi → `jims_mower.dataset.v1` + train/val; real labels required before any IoU |
 | [`PACK_THERMAL.md`](PACK_THERMAL.md) | §18 pack Wh / charge hours / board °C procedure. 50 Wh gym stub; `measured: false` until bench |
 | [`FAB_CHECKLIST.md`](FAB_CHECKLIST.md) | §19 chassis fab steps + BOM freeze (part classes, no SKUs). Hang-measure → revise tip math |
-| [`FIELD_TEST.md`](FIELD_TEST.md) | §20 residential-acre scorecard (tips / drains / leftover / ESTOP — not mAP). Field not run |
+| [`FIELD_TEST.md`](FIELD_TEST.md) | §20 residential-acre scorecard (tips / drains / leftover / ESTOP — not mAP). Practice: `jims-mower-field-dryrun`. Field not run |
 | [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) | Construction math, BOM classes, forward stereo + ESTOP sketch (no claimed runtime) |
 | [`ESTOP.md`](ESTOP.md) | Hardware paddle → FET/contactor, fuse map, reset; gym `HardwareEstop` |
 | [`SIM_TO_REAL.md`](SIM_TO_REAL.md) | Same ICD keys on-box; no gym renderer |

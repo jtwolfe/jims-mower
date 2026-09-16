@@ -198,6 +198,7 @@ SCHEDULE_SCHEMA = "jims_mower.schedule.v1"
 PACK_SCHEMA = "jims_mower.pack.v1"
 BOM_SCHEMA = "jims_mower.bom.v1"
 FIELD_SCORECARD_SCHEMA = "jims_mower.field_scorecard.v1"
+FIELD_DRYRUN_DOMAIN = "gym_dryrun"
 SCHEDULE_SKIP_REASONS = (
     "disabled",
     "no_days",

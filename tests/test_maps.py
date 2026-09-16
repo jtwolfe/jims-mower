@@ -20,6 +20,9 @@ def test_new_map_is_uncut() -> None:
     assert m.coverage_fraction() == pytest.approx(0.0)
     assert m.grass_cell_count() == 64
     assert m.cut_cell_count() == 0
+    leftover_cells, leftover_m2 = m.leftover_uncut()
+    assert leftover_cells == 64
+    assert leftover_m2 == pytest.approx(16.0)
 
 
 def test_mark_circle_counts_new_cells_once() -> None:
