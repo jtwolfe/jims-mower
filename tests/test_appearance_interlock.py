@@ -117,9 +117,20 @@ def test_gym_appearance_painted_front_blob_kills_trimmer() -> None:
 
 def test_gym_appearance_oracle_person_behind_does_not_trip() -> None:
     """God-view list has a person behind; front RGB does not. Trimmer stays on."""
+    import math
+
     env = MowerEnv(config=_tiny_appearance())
     obs, info = env.reset(seed=4)
-    behind = Obstacle("person", env._pose.x - 2.0, env._pose.y, 0.25, z=0.9)
+    pose = env._pose
+    # Inside the 1.5 m god-view radius (hub is 0.32 m forward) but behind
+    # the body — out of the front camera.
+    behind = Obstacle(
+        "person",
+        pose.x - 1.05 * math.cos(pose.theta),
+        pose.y - 1.05 * math.sin(pose.theta),
+        0.25,
+        z=0.9,
+    )
     env._yard.obstacles.append(behind)
     god = trimmer_interlock(
         True,

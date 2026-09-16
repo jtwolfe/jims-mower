@@ -23,9 +23,13 @@ from jims_mower.perception.classify import HandSignalClassifier, crop_bbox
 from jims_mower.perception.mock import MockDetector, category_for
 from jims_mower.types import Detection, PerceptionContext
 
-# Palette match in RGB. Renderer shade can darken KIND_RGB; keep this
-# loose enough for gym disks, tight enough that grass does not trip.
-_PALETTE_MAX_DIST = 72.0
+# Palette match in RGB. Obstacle disks are unshaded KIND_RGB. Assign
+# each pixel to the nearest kind so dog ≠ person (those centroids are
+# ~70 apart). Cord is near-black — use a tight ball so empty frames
+# and grass do not become a yard-sized "cord".
+_PALETTE_MAX_DIST = 55.0
+_DARK_MAX_DIST = 16.0
+_DARK_KINDS = frozenset({"cord"})
 _MIN_BLOB_PIXELS = 8
 _DETECT_KINDS = (
     "person",
@@ -58,13 +62,6 @@ def paint_kind_blob(
     if y1 > y0 and x1 > x0:
         out[y0:y1, x0:x1, :3] = np.asarray(rgb, dtype=np.uint8)
     return out
-
-
-def _color_mask(image: np.ndarray, rgb: tuple[int, int, int], max_dist: float) -> np.ndarray:
-    arr = np.asarray(image, dtype=np.float32)
-    target = np.asarray(rgb, dtype=np.float32).reshape(1, 1, 3)
-    dist = np.linalg.norm(arr[..., :3] - target, axis=2)
-    return dist <= float(max_dist)
 
 
 def _connected_bboxes(mask: np.ndarray, min_pixels: int) -> list[tuple[int, int, int, int]]:
@@ -115,16 +112,20 @@ def detect_palette_blobs(
     frame = np.asarray(image)
     if frame.ndim != 3 or frame.shape[2] < 3:
         return []
-    used = np.zeros(frame.shape[:2], dtype=bool)
+    kinds = [(k, KIND_RGB[k]) for k in _DETECT_KINDS if k in KIND_RGB]
+    if not kinds:
+        return []
+    arr = np.asarray(frame[..., :3], dtype=np.float32)
+    targets = np.asarray([rgb for _, rgb in kinds], dtype=np.float32)
+    dist = np.linalg.norm(arr[:, :, None, :] - targets.reshape(1, 1, -1, 3), axis=3)
+    nearest = dist.argmin(axis=2)
+    min_d = dist.min(axis=2)
     out: list[Detection] = []
-    for kind in _DETECT_KINDS:
-        rgb = KIND_RGB.get(kind)
-        if rgb is None:
-            continue
-        mask = _color_mask(frame, rgb, max_dist) & ~used
+    for i, (kind, _rgb) in enumerate(kinds):
+        limit = _DARK_MAX_DIST if kind in _DARK_KINDS else float(max_dist)
+        mask = (nearest == i) & (min_d <= limit)
         for bbox in _connected_bboxes(mask, min_pixels):
             x, y, w, h = bbox
-            used[y : y + h, x : x + w] = True
             area = float(w * h)
             conf = float(np.clip(0.35 + 0.01 * area, 0.20, 0.85))
             out.append(
