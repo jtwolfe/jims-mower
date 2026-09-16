@@ -260,7 +260,9 @@ def test_low_soc_inject_return_charge_resume() -> None:
         if terminated or truncated or policy.done:
             break
     env.close()
-    assert "return_home" in seen or MissionPhase.RETURN_HOME.value in seen
+    events = {e.event for e in policy.events}
+    assert "battery_return" in events
+    assert "return_home" in seen or "charging" in seen or MissionPhase.CHARGING.value in seen
     assert charged
     assert resumed
     assert policy.global_plan is not None

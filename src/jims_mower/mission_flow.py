@@ -911,19 +911,33 @@ class MissionPolicy:
                 completion, info, n_frontiers=len(thin), code=code
             )
             give_up = max(8, int(getattr(self.settings, "min_explore_steps", 8) or 8))
-            if (
-                not blocked
+            demo_exit = (
+                not bool(self.settings.full_explore)
                 and self.phase_step >= give_up
                 and (
                     completion >= float(self.settings.explore_no_frontier)
                     or self.phase_step > give_up + 8
                 )
-            ):
+            )
+            full_clear = (
+                bool(self.settings.full_explore)
+                and not blocked
+                and self.phase_step >= give_up
+                and completion >= float(self.settings.explore_no_frontier)
+            )
+            # Look around a few ticks so a real stall can unstick, then
+            # demo may still MAP READY with leftover frontiers.
+            if self._explore_blocked <= 6:
+                if self._explore_blocked % 3 == 1:
+                    return self._look_around(pose)
+                if thin and self._explore_blocked % 3 == 2:
+                    return self._nudge_toward_frontier(pose, thin[0])
+                return self._hold()
+            if demo_exit or full_clear:
                 if self._keep_in_too_small():
                     self.fence_unusable = True
                 self._transition(MissionPhase.REVIEW)
                 return self._hold()
-            # Stall fix: look around so cameras grow known-safe, then retry.
             if self._explore_blocked % 3 == 1:
                 return self._look_around(pose)
             if thin and self._explore_blocked % 3 == 2:
