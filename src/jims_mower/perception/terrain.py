@@ -610,7 +610,6 @@ class OnnxTerrainObserver:
             OnnxMLP,
             load_onnx_session,
             onnxruntime_available,
-            resolve_onnx_path,
         )
 
         self.onnx_path = str(onnx_path) if onnx_path else ""
@@ -618,7 +617,7 @@ class OnnxTerrainObserver:
         self.iou_claim = None
         self.map_claim = None
         self.fps_claim = None
-        resolved = resolve_onnx_path(onnx_path)
+        resolved = Path(onnx_path) if onnx_path and Path(onnx_path).is_file() else None
         session = None
         if resolved is not None and onnxruntime_available():
             session = load_onnx_session(resolved)
