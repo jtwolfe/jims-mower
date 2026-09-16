@@ -7,7 +7,9 @@ from pathlib import Path
 from jims_mower.env import MowerEnv
 from jims_mower.profile import (
     YardProfile,
+    keep_in_usable,
     load_yard_profile,
+    repair_keep_in,
     trail_to_polygon,
     write_yard_profile,
 )
@@ -39,6 +41,29 @@ def test_trail_falls_back_when_short() -> None:
     fallback = [(0.5, 0.5), (4.0, 0.5), (4.0, 4.0), (0.5, 4.0)]
     poly = trail_to_polygon([(1.0, 1.0)], fallback=fallback)
     assert poly == fallback
+
+
+def test_scribble_trail_uses_fallback_not_raw_points() -> None:
+    fallback = [(4.2, 5.2), (65.8, 5.2), (65.8, 52.8), (4.2, 52.8)]
+    scribble = [(35.0 + 0.04 * i, 29.0 + 0.03 * ((-1) ** i)) for i in range(97)]
+    poly = trail_to_polygon(scribble, fallback=fallback, width_m=70.0, height_m=58.0)
+    assert poly == fallback
+    assert keep_in_usable(poly, 70.0, 58.0)
+    assert not keep_in_usable(scribble, 70.0, 58.0)
+
+
+def test_tiny_box_usable_on_mission_tiny_not_acre() -> None:
+    box = [(0.8, 0.8), (4.8, 0.8), (4.8, 3.8), (0.8, 3.8)]
+    assert keep_in_usable(box, 6.0, 5.0)
+    assert not keep_in_usable(box, 70.0, 58.0)
+    repaired, source = repair_keep_in(
+        box,
+        width_m=70.0,
+        height_m=58.0,
+        fallback=[(4.2, 5.2), (65.8, 5.2), (65.8, 52.8), (4.2, 52.8)],
+    )
+    assert source == "fallback"
+    assert keep_in_usable(repaired, 70.0, 58.0)
 
 
 def test_teach_policy_records_trail() -> None:

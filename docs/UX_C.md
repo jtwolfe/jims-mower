@@ -142,8 +142,11 @@ jims-mower-owner --live
 yard**. That writes `live_out/profile.json` (`jims_mower.yard.v1`) — the
 same UX-A `YardProfile` as `jims-mower-teach`. Idle then shows that yard
 selected. **Start job** uses the taught keep-in / home as the geofence
-and **skips** authored `calibrate_confirm_m`. Explore fog → MAP READY →
-mow is unchanged.
+and **skips** authored `calibrate_confirm_m`. A short Teach drive is not
+a yard fence — Save rejects or repairs scribble keep-ins (min area /
+bbox vs the world; authored acre rectangle is the editable starter).
+Explore fog → MAP READY → mow. MAP READY copy is “Map ready — start
+mow?”, never “Hold — safe.” 0 mowable cells offers Re-teach.
 
 **Demo confirm fence (no teach):** Start on `acre_yard_demo` still
 confirms the authored keep-in after ~28 m of trail, then explores. That

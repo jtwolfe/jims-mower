@@ -206,19 +206,163 @@ def _dedupe_trail(
     return out
 
 
+def keep_in_metrics(keep_in: Iterable[tuple[float, float]]) -> dict[str, float]:
+    """BBox / area / edge stats for a keep-in ring (open or closed)."""
+    pts = [(float(p[0]), float(p[1])) for p in keep_in]
+    if len(pts) >= 2 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= 1e-6:
+        pts = pts[:-1]
+    if not pts:
+        return {
+            "span_x": 0.0,
+            "span_y": 0.0,
+            "area": 0.0,
+            "min_edge": 0.0,
+            "n": 0.0,
+            "unique": 0.0,
+        }
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    area = 0.0
+    min_edge = float("inf")
+    unique = 1
+    for i, (x, y) in enumerate(pts):
+        nx, ny = pts[(i + 1) % len(pts)]
+        area += x * ny - nx * y
+        edge = math.hypot(nx - x, ny - y)
+        if edge > 1e-6:
+            min_edge = min(min_edge, edge)
+        if i > 0 and math.hypot(x - pts[i - 1][0], y - pts[i - 1][1]) >= 0.25:
+            unique += 1
+    if min_edge == float("inf"):
+        min_edge = 0.0
+    return {
+        "span_x": float(max(xs) - min(xs)),
+        "span_y": float(max(ys) - min(ys)),
+        "area": abs(area) * 0.5,
+        "min_edge": float(min_edge),
+        "n": float(len(pts)),
+        "unique": float(unique),
+    }
+
+
+def keep_in_usable(
+    keep_in: Iterable[tuple[float, float]],
+    width_m: float,
+    height_m: float,
+    *,
+    min_span_frac: float = 0.18,
+    min_area_frac: float = 0.05,
+    min_span_m: float = 1.5,
+    min_area_m2: float = 2.0,
+    min_edge_m: float = 0.20,
+) -> bool:
+    """True when the ring is a yard-scale fence, not a centre scribble.
+
+    Thresholds are relative to the physics world so ``mission_tiny`` (6×5 m)
+    still accepts a 4×3 m teach box while ``acre_yard_demo`` (70×58 m)
+    rejects a 4 m trail near the lot centre.
+    """
+    pts = [(float(p[0]), float(p[1])) for p in keep_in]
+    if len(pts) < 3:
+        return False
+    stats = keep_in_metrics(pts)
+    world_short = min(max(float(width_m), 0.5), max(float(height_m), 0.5))
+    need_span = max(float(min_span_m), float(min_span_frac) * world_short)
+    need_area = max(float(min_area_m2), float(min_area_frac) * float(width_m) * float(height_m))
+    if stats["span_x"] < need_span * 0.35 or stats["span_y"] < need_span * 0.35:
+        return False
+    if max(stats["span_x"], stats["span_y"]) < need_span:
+        return False
+    if stats["area"] < need_area:
+        return False
+    if stats["min_edge"] < float(min_edge_m) and stats["n"] > 8:
+        return False
+    return True
+
+
+def inflate_keep_in(
+    keep_in: Iterable[tuple[float, float]],
+    inflate_m: float,
+) -> list[tuple[float, float]]:
+    """Push vertices outward from the centroid. Open ring stays open."""
+    pts = [(float(p[0]), float(p[1])) for p in keep_in]
+    if len(pts) < 3 or inflate_m <= 0.0:
+        return pts
+    cx = sum(p[0] for p in pts) / float(len(pts))
+    cy = sum(p[1] for p in pts) / float(len(pts))
+    out: list[tuple[float, float]] = []
+    for x, y in pts:
+        dx, dy = x - cx, y - cy
+        dist = math.hypot(dx, dy)
+        if dist < 1e-6:
+            out.append((x + float(inflate_m), y))
+            continue
+        out.append((x + float(inflate_m) * dx / dist, y + float(inflate_m) * dy / dist))
+    return out
+
+
+def starter_keep_in(
+    width_m: float,
+    height_m: float,
+    *,
+    margin_m: float = 0.80,
+) -> list[tuple[float, float]]:
+    """Inset rectangle — the editable first-run starter fence."""
+    ring = perimeter_waypoints(width_m, height_m, margin_m=margin_m)
+    if len(ring) >= 2 and math.hypot(ring[0][0] - ring[-1][0], ring[0][1] - ring[-1][1]) < 1e-6:
+        ring = ring[:-1]
+    return ring
+
+
+def repair_keep_in(
+    keep_in: Iterable[tuple[float, float]],
+    *,
+    width_m: float,
+    height_m: float,
+    fallback: Optional[list[tuple[float, float]]] = None,
+    inflate_m: float = 0.0,
+) -> tuple[list[tuple[float, float]], str]:
+    """Return a usable ring plus how it was obtained.
+
+    ``source`` is ``taught``, ``inflated``, ``fallback``, ``starter``, or
+    ``unusable``.
+    """
+    ring = [(float(p[0]), float(p[1])) for p in keep_in]
+    if keep_in_usable(ring, width_m, height_m):
+        return ring, "taught"
+    if inflate_m > 0.0 and len(ring) >= 3:
+        grown = inflate_keep_in(ring, inflate_m)
+        if keep_in_usable(grown, width_m, height_m):
+            return grown, "inflated"
+    if fallback is not None:
+        fb = [(float(p[0]), float(p[1])) for p in fallback]
+        if keep_in_usable(fb, width_m, height_m):
+            return fb, "fallback"
+    starter = starter_keep_in(width_m, height_m)
+    if keep_in_usable(starter, width_m, height_m):
+        return starter, "starter"
+    return ring, "unusable"
+
+
 def trail_to_polygon(
     trail: Iterable[tuple[float, float]],
     *,
     epsilon_m: float = 0.35,
     min_vertices: int = 3,
     fallback: Optional[list[tuple[float, float]]] = None,
+    width_m: Optional[float] = None,
+    height_m: Optional[float] = None,
 ) -> list[tuple[float, float]]:
     """Smooth a pose trail into an open keep-in ring.
 
     Closes the loop before RDP when the last point is near the first, then
     drops the repeated closer so ``keep_in`` stays an open ring.
+
+    A short drive that RDP-collapses (or stays a centre scribble) uses
+    ``fallback`` — the raw 90-point trail is not a yard fence.
     """
     pts = _dedupe_trail(trail)
+    simple: list[tuple[float, float]] = []
     if len(pts) >= 3:
         closed = list(pts)
         if math.hypot(closed[0][0] - closed[-1][0], closed[0][1] - closed[-1][1]) > epsilon_m:
@@ -229,11 +373,15 @@ def trail_to_polygon(
         ) <= max(epsilon_m, 1e-6):
             simple = simple[:-1]
         if len(simple) >= min_vertices:
-            return [(float(x), float(y)) for x, y in simple]
-        if len(pts) >= min_vertices:
-            return [(float(x), float(y)) for x, y in pts]
+            ring = [(float(x), float(y)) for x, y in simple]
+            if width_m is None or height_m is None or keep_in_usable(ring, width_m, height_m):
+                return ring
     if fallback is not None and len(fallback) >= min_vertices:
         return [(float(x), float(y)) for x, y in fallback]
+    if len(simple) >= min_vertices:
+        return [(float(x), float(y)) for x, y in simple]
+    if len(pts) >= min_vertices and (width_m is None or height_m is None):
+        return [(float(x), float(y)) for x, y in pts]
     return []
 
 

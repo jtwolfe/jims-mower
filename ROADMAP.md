@@ -27,6 +27,7 @@ Later items stay unchecked until they land. No claimed mAP / FPS.
 - [x] Acre-scale physics world stays (`acre_yard_demo`); `--fast` is CI
 - [x] Tests: teach → profile → live start smoke (no full-acre mow)
 - [x] Docs: first-run vs demo confirm fence; `acre_yard` vs `acre_yard_demo`
+- [x] Teach Save rejects/repairs scribble keep-ins; Start actually explores; empty mow plan ≠ Hold-safe
 
 ## WAVE UX-C — owner app shell + YardProfile API (done, on main)
 

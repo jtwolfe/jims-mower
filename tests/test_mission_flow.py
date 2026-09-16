@@ -13,7 +13,9 @@ from jims_mower.constants import (
     STRUCTURE_PATH,
 )
 from jims_mower.env import MowerEnv
+from jims_mower.live import owner_copy_for
 from jims_mower.mission_flow import MissionPhase, MissionPolicy
+from jims_mower.profile import YardProfile
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import plan_coverage
 from jims_mower.planning.explore import plan_explore
@@ -330,6 +332,44 @@ def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
     assert policy.step < 1000
     # Ridge recovery must leave a first paint, not park on tip-stop.
     assert cut > 0.0
+
+
+def test_scribble_keep_in_review_is_reteach_not_safe() -> None:
+    """Tiny centre fence must not sit on Hold-safe after an empty mow plan."""
+    env = _tiny_env()
+    profile = YardProfile(
+        name="scribble",
+        width_m=env.cfg.world.width_m,
+        height_m=env.cfg.world.height_m,
+        resolution_m=env.cfg.world.resolution_m,
+        keep_in=[(2.0, 2.0), (2.25, 2.0), (2.25, 2.18), (2.0, 2.18)],
+        home={"x": 2.08, "y": 2.06, "theta": 0.0},
+    )
+    obs, info = env.reset(seed=3, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info, profile=profile)
+    assert policy.phase == MissionPhase.EXPLORE
+    for _ in range(40):
+        action = policy.act(obs, info)
+        obs, _reward, terminated, truncated, info = env.step(action)
+        assert policy.phase != MissionPhase.SAFE
+        copy = owner_copy_for("running", policy.phase.value, fence_unusable=policy.fence_unusable)
+        assert "hold — safe" not in copy.lower()
+        if policy.phase == MissionPhase.REVIEW:
+            break
+        if terminated or truncated or policy.done:
+            break
+    assert policy.phase == MissionPhase.REVIEW
+    for _ in range(3):
+        action = policy.act(obs, info)
+        obs, _reward, _term, _trunc, info = env.step(action)
+        assert policy.phase == MissionPhase.REVIEW
+        assert policy.phase != MissionPhase.SAFE
+    assert policy.fence_unusable is True
+    assert policy.request_start_mow() is False
+    copy = owner_copy_for("running", policy.phase.value, fence_unusable=True)
+    assert "re-teach" in copy.lower()
+    env.close()
 
 
 def test_review_hold_waits_until_start_mow() -> None:

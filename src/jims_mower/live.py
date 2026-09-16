@@ -42,7 +42,9 @@ from jims_mower.planning.observed import fog_rgba
 from jims_mower.profile import (
     YardProfile,
     apply_profile_to_scenario,
+    keep_in_usable,
     load_yard_profile,
+    repair_keep_in,
     write_yard_profile,
 )
 from jims_mower.scenarios import load_source
@@ -81,6 +83,7 @@ OWNER_COPY = {
     "calibrate_boundary": "Calibrating boundary…",
     "explore": "Exploring unknown yard…",
     "review": "Map ready — start mow?",
+    "reteach": "Fence too small — re-teach the keep-in.",
     "mow": "Mowing…",
     "return_home": "Heading home…",
     "complete": "Done.",
@@ -146,6 +149,7 @@ def owner_copy_for(
     fault: Optional[dict[str, Any]] = None,
     *,
     taught: bool = False,
+    fence_unusable: bool = False,
 ) -> str:
     if job_state == "estop":
         return OWNER_COPY["estop"]
@@ -158,6 +162,13 @@ def owner_copy_for(
             return OWNER_COPY["stuck"]
     if job_state == "teach" or phase == "teach":
         return OWNER_COPY["teach"]
+    if fence_unusable:
+        return OWNER_COPY["reteach"]
+    # MAP READY is a review beat, not SafeState / ESTOP.
+    if phase == "review":
+        return OWNER_COPY["review"]
+    if phase == "safe":
+        return OWNER_COPY["safe"]
     if job_state in OWNER_COPY and job_state in {"idle", "paused", "hold"}:
         if job_state == "idle" and taught:
             return OWNER_COPY["taught_idle"]
@@ -416,6 +427,7 @@ class LiveSession:
         self._refresh_cameras(force=True)
         self._record_pose()
         self._write_bundle()
+        self._capture_summary()
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
@@ -729,6 +741,7 @@ class LiveSession:
         """Rebuild the env/policy so Start uses the saved YardProfile as fence."""
         if not self.owner_taught or self.yard_profile is None:
             return
+        self._apply_usable_keep_in(self.yard_profile)
         self._snap_home_inside_keep_in(self.yard_profile)
         paired = self.paired
         taught = self.owner_taught
@@ -858,6 +871,36 @@ class LiveSession:
             }
         return profile
 
+    def _authored_keep_in(self) -> list[tuple[float, float]]:
+        env = self.env
+        if env is not None:
+            spec = env.geofence_spec()
+            ring = list(spec.keep_in or [])
+            if len(ring) >= 3:
+                return [(float(x), float(y)) for x, y in ring]
+        if self.teach_policy is not None:
+            planned = self.teach_policy.planned_ring()
+            if len(planned) >= 3:
+                return list(planned)
+        return []
+
+    def _apply_usable_keep_in(self, profile: YardProfile) -> str:
+        """Reject scribble fences; inflate or fall back to the authored yard."""
+        env = self.env
+        width = float(env.cfg.world.width_m) if env is not None else float(profile.width_m or 16.0)
+        height = float(env.cfg.world.height_m) if env is not None else float(profile.height_m or 12.0)
+        profile.width_m = width
+        profile.height_m = height
+        ring, source = repair_keep_in(
+            list(profile.keep_in),
+            width_m=width,
+            height_m=height,
+            fallback=self._authored_keep_in(),
+            inflate_m=2.5,
+        )
+        profile.keep_in = ring
+        return source
+
     def _persist_yard(self, profile: YardProfile, dest: Optional[Union[str, Path]] = None) -> Path:
         path = Path(dest) if dest is not None else (self.yard_path or (self.out_dir / "profile.json"))
         write_yard_profile(path, profile)
@@ -877,15 +920,35 @@ class LiveSession:
             profile = self._draft_profile_from_teach()
         if len(profile.keep_in) < 3:
             return {"ok": False, "error": "keep_in needs at least 3 vertices", **self.snapshot()}
+        source = self._apply_usable_keep_in(profile)
+        if source == "unusable" or not keep_in_usable(
+            profile.keep_in,
+            float(profile.width_m),
+            float(profile.height_m),
+        ):
+            return {
+                "ok": False,
+                "error": "keep-in is a scribble — drive the perimeter or edit the starter rectangle",
+                "needs_reteach": True,
+                **self.snapshot(),
+            }
         dest = kwargs.get("path")
         self._snap_home_inside_keep_in(profile)
         path = self._persist_yard(profile, dest)
         self.yard_profile = profile
         self.owner_taught = True
         self.done = False
+        self.session_card = {}
         self.job_state = "idle"
         self.stop()
-        return {"ok": True, "cmd": "save_yard", "path": str(path), **self.snapshot()}
+        return {
+            "ok": True,
+            "cmd": "save_yard",
+            "path": str(path),
+            "keep_in_source": source,
+            "keep_in_repaired": source != "taught",
+            **self.snapshot(),
+        }
 
     def _load_yard(self, **kwargs: Any) -> dict[str, Any]:
         dest = Path(kwargs.get("path") or self.yard_path or (self.out_dir / "profile.json"))
@@ -894,13 +957,33 @@ class LiveSession:
         profile = load_yard_profile(dest)
         if len(profile.keep_in) < 3:
             return {"ok": False, "error": "saved yard missing keep_in", **self.snapshot()}
+        source = self._apply_usable_keep_in(profile)
+        if source == "unusable" or not keep_in_usable(
+            profile.keep_in,
+            float(profile.width_m),
+            float(profile.height_m),
+        ):
+            return {
+                "ok": False,
+                "error": "saved keep-in is too small — re-teach the yard",
+                "needs_reteach": True,
+                **self.snapshot(),
+            }
         self.yard_profile = profile
         self.owner_taught = True
         self.yard_path = dest
         self._snap_home_inside_keep_in(profile)
         self.done = False
+        self.session_card = {}
         self.job_state = "idle"
-        return {"ok": True, "cmd": "load_yard", "path": str(dest), **self.snapshot()}
+        return {
+            "ok": True,
+            "cmd": "load_yard",
+            "path": str(dest),
+            "keep_in_source": source,
+            "keep_in_repaired": source != "taught",
+            **self.snapshot(),
+        }
 
     def _step_teach(self) -> dict[str, Any]:
         assert self.env is not None
@@ -935,24 +1018,33 @@ class LiveSession:
             return
         if self.policy.phase.value != "review":
             return
+        if getattr(self.policy, "fence_unusable", False):
+            return
+        if getattr(self.policy, "_empty_mow_plan", lambda: False)():
+            return
         if self._review_wall0 is None:
             self._review_wall0 = time.perf_counter()
             return
         if (time.perf_counter() - self._review_wall0) >= REVIEW_HOLD_WALL_S:
             self.policy.request_start_mow()
 
-    def _capture_summary(self) -> None:
+    def _live_session_card(self) -> dict[str, Any]:
         if self.policy is None:
-            return
+            return dict(self.session_card)
         wall = 0.0
         if self._t0_wall:
             wall = time.perf_counter() - self._t0_wall
-        self.session_card = session_summary(
+        return session_summary(
             self.policy,
             actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
             yard=str(self.config_name),
             wall_s=wall,
         )
+
+    def _capture_summary(self) -> None:
+        if self.policy is None:
+            return
+        self.session_card = self._live_session_card()
         dest = self.out_dir / "session_summary.json"
         dest.write_text(json.dumps(self.session_card, indent=2), encoding="utf-8")
 
@@ -1079,15 +1171,25 @@ class LiveSession:
         n_obs = self._n_observed
         if policy.observed is not None:
             n_obs = int(policy.observed.observed.sum())
-        wall = 0.0
-        if self._t0_wall:
-            wall = time.perf_counter() - self._t0_wall
-        card = self.session_card or session_summary(
-            policy,
-            actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
-            yard=str(self.config_name),
-            wall_s=wall,
-        )
+        live_card = self._live_session_card()
+        card = self.session_card if (self.done and self.session_card) else live_card
+        fence_unusable = bool(getattr(policy, "fence_unusable", False))
+        if status["phase"] == "review":
+            if getattr(policy, "_keep_in_too_small", lambda: False)():
+                fence_unusable = True
+            if int(status.get("n_waypoints") or 0) < 2 and int(status.get("planned_mowable_cells") or 0) <= 0:
+                fence_unusable = True
+        if (
+            self.job_state == "idle"
+            and self.owner_taught
+            and self.yard_profile is not None
+            and keep_in_usable(
+                self.yard_profile.keep_in,
+                float(self.yard_profile.width_m),
+                float(self.yard_profile.height_m),
+            )
+        ):
+            fence_unusable = False
         return {
             "schema": LIVE_SCHEMA,
             "live": True,
@@ -1099,7 +1201,11 @@ class LiveSession:
             "phase_label": phase_label,
             "job_state": self.job_state,
             "owner_copy": owner_copy_for(
-                self.job_state, phase, fault, taught=self.owner_taught
+                self.job_state,
+                phase,
+                fault,
+                taught=self.owner_taught,
+                fence_unusable=fence_unusable,
             ),
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
@@ -1113,8 +1219,10 @@ class LiveSession:
             "yard": str(self.config_name),
             "width_m": float(self.env.cfg.world.width_m) if self.env is not None else 16.0,
             "height_m": float(self.env.cfg.world.height_m) if self.env is not None else 12.0,
-            "can_start_mow": status["phase"] == "review",
+            "can_start_mow": status["phase"] == "review" and not fence_unusable,
             "can_reexplore": status["phase"] == "review",
+            "needs_reteach": fence_unusable,
+            "fence_unusable": fence_unusable,
             "pose": pose,
             "map_pct": float(status["map_completion"]),
             "cut_pct": float(status["actual_coverage_fraction"]),
@@ -1225,17 +1333,20 @@ class LiveSession:
             (maps_dir / "observed_mesh.json").write_bytes(observed_mesh_json)
         if coverage_png:
             (maps_dir / "coverage.png").write_bytes(coverage_png)
-        if (final or self.done) and not card:
-            self._capture_summary()
-            card = dict(self.session_card)
+        live_card = self._live_session_card()
+        if self.done:
+            if not card:
+                self.session_card = live_card
+            card = dict(self.session_card or live_card)
+        else:
+            card = live_card
         timeline = mission_timeline(
             self.policy,
             actual_coverage=float((self.info or {}).get("coverage_fraction") or 0.0),
         )
-        if card:
-            card.setdefault("yard", str(self.config_name))
-            timeline["session_summary"] = card
-            (dest / "session_summary.json").write_text(json.dumps(card, indent=2), encoding="utf-8")
+        card.setdefault("yard", str(self.config_name))
+        timeline["session_summary"] = card
+        (dest / "session_summary.json").write_text(json.dumps(card, indent=2), encoding="utf-8")
         (dest / "mission.json").write_text(json.dumps(timeline, indent=2), encoding="utf-8")
         if self.policy.profile is not None:
             if not self.policy.profile.keep_out and self.env is not None:

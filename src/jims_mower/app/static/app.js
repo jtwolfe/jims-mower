@@ -182,11 +182,16 @@
       return;
     }
     if (step === "teach") {
+      const yw = Number((state.yard && state.yard.width_m) || 16);
+      const yh = Number((state.yard && state.yard.height_m) || 12);
+      if (!state.teachPts.length && state.yard && (state.yard.keep_in || []).length >= 3) {
+        state.teachPts = state.yard.keep_in.map((p) => [Number(p[0]), Number(p[1])]);
+      }
       screen().innerHTML = onboardFrame(
         "teach",
         "Teach the yard",
-        `<p class="lead">Drive the perimeter in sim, or tap the map to edit keep-in vertices. This writes a YardProfile — the same fence UX-A teach uses.</p>
-         <svg id="yard-svg" viewBox="0 0 16 12"></svg>
+        `<p class="lead">Drive the perimeter, or tap to edit the starter keep-in (authored yard rectangle). A short drive is not a fence — Save keeps or repairs a yard-scale ring.</p>
+         <svg id="yard-svg" viewBox="0 0 ${yw} ${yh}"></svg>
          <button class="btn ghost" id="teach-cmd">Drive perimeter</button>
          <button class="btn ghost" id="load-yard" ${!(state.status && state.status.yard_saved) ? "hidden" : ""}>Load saved yard</button>`,
         "Save yard",
@@ -213,13 +218,18 @@
         go("onboard/mow");
       };
       $("#next").onclick = async () => {
-        if (isLive()) {
-          const extra = state.teachPts.length >= 3 ? { keep_in: state.teachPts } : {};
-          await liveControl("save_yard", extra);
-        } else if (state.teachPts.length >= 3) {
-          await saveYard({ keep_in: state.teachPts });
+        try {
+          if (isLive()) {
+            const extra = state.teachPts.length >= 3 ? { keep_in: state.teachPts } : {};
+            await liveControl("save_yard", extra);
+          } else if (state.teachPts.length >= 3) {
+            await saveYard({ keep_in: state.teachPts });
+          }
+          go("onboard/mow");
+        } catch (err) {
+          const lead = document.querySelector(".lead");
+          if (lead) lead.textContent = err.message || "Fence too small — edit the starter rectangle.";
         }
-        go("onboard/mow");
       };
       return;
     }
@@ -308,7 +318,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const mapPct = Number(st.map_pct != null ? st.map_pct : 100 * (live.map_pct || 0));
     const cutPct = Number(st.cut_pct != null ? st.cut_pct : 100 * (live.cut_pct || 0));
     const speed = String(st.speed_label || live.speed_label || "5");
-    const canMow = !!(st.can_start_mow || live.can_start_mow);
+    const needsReteach = !!(st.needs_reteach || live.needs_reteach || st.fence_unusable || live.fence_unusable);
+    const canMow = !!(st.can_start_mow || live.can_start_mow) && !needsReteach;
     const fog = live.fog_url || st.fog_url || "/api/live/fog.png";
     const observed = live.observed_url || st.observed_url || "/api/live/observed.png";
     const path = st.radio_path || live.radio_path || {};
@@ -341,10 +352,11 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       </div>
       <button class="btn ghost" id="load-yard" ${saved ? "" : "hidden"}>Load saved yard</button>
       <div class="row">
-        <button class="btn primary" id="start" ${job === "running" || job === "teach" ? "disabled" : ""}>Start job</button>
+        <button class="btn primary" id="start" ${job === "running" || job === "teach" || needsReteach ? "disabled" : ""}>Start job</button>
         <button class="btn ghost" id="pause" ${job !== "running" && job !== "teach" ? "disabled" : ""}>Pause</button>
       </div>
       <button class="btn ghost" id="resume" ${job !== "paused" && job !== "hold" ? "disabled" : ""}>Resume</button>
+      ${needsReteach ? `<button class="btn warn" id="reteach-cmd">Re-teach fence</button>` : ""}
       ${canMow ? `<button class="btn warn" id="start-mow">Start mow</button>` : ""}
       <button class="btn danger" id="estop">ESTOP</button>
       ${sessionCardHtml(st, live)}
@@ -359,6 +371,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     });
     $("#teach-cmd").onclick = () => liveControl("teach");
     $("#save-yard").onclick = () => liveControl("save_yard");
+    const reteach = $("#reteach-cmd");
+    if (reteach) reteach.onclick = () => liveControl("teach");
     const loadBtn = $("#load-yard");
     if (loadBtn) loadBtn.onclick = () => liveControl("load_yard");
     $("#start").onclick = () => liveControl("start");
