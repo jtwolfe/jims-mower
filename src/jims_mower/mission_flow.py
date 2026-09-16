@@ -544,7 +544,7 @@ class MissionPolicy:
             elevation=self.observed.elevation,
             locked=self.observed.locked,
             elevation_set=self.observed.elevation_set,
-            rgb_prior=obs.get("elevation_prior"),
+            rgb_prior=None,
             prior_weight=0.0,
         )
         written = self.observed.fuse_metric(result, respect_lock=True)

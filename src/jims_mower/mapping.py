@@ -20,10 +20,7 @@ from jims_mower.constants import DEFAULT_RADII
 from jims_mower.maps import OccupancyMap
 from jims_mower.perception.cv_terrain import classify_terrain_rgb
 from jims_mower.perception.elev_fuse import (
-    ElevFuseResult,
     MonoDepthPrior,
-    NullMonoDepthPrior,
-    apply_mono_prior,
     fuse_elev_stereo_tof_imu,
 )
 from jims_mower.perception.stereo import (

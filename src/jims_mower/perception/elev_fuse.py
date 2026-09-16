@@ -279,7 +279,12 @@ def fuse_elev_stereo_tof_imu(
     if rgb_prior is not None:
         prior = np.asarray(rgb_prior, dtype=np.float32)
         if prior.shape == elev.shape:
-            take = ~locked_m & ~already & ~written
+            # Local gap fill only — never hinge the whole observed sheet
+            # to the current grade prior (that flopped MAP READY plans).
+            local = local_disk_mask(
+                elev.shape, (pose.x, pose.y), max(float(imu_radius_m), resolution_m), resolution_m
+            )
+            take = local & ~locked_m & ~already & ~written
             if np.any(take):
                 w = float(np.clip(prior_weight, 0.0, 1.0))
                 if w > 0.0:
