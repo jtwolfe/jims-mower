@@ -233,6 +233,7 @@ class MissionPolicy:
         self._demo_max_explore: Optional[int] = None
         self._demo_mow_frac: Optional[float] = None
         self._demo_max_mow: Optional[int] = None
+        self._leftover_replans = 0
 
     @property
     def waypoints(self) -> list[tuple[float, float]]:
@@ -370,6 +371,7 @@ class MissionPolicy:
         self.phase_step = 0
         self._skipped_global = []
         self._frontier_xy = []
+        self._leftover_replans = 0
         self._review_hold = False
         self._mow_requested = False
         self._return_kind = ""
@@ -647,6 +649,7 @@ class MissionPolicy:
         self._resume_copy_steps = 0
         self._last_info = {}
         self._last_pose = None
+        self._leftover_replans = 0
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self._wet = bool((info.get("weather") or {}).get("wet", False))
@@ -786,6 +789,7 @@ class MissionPolicy:
             "waypoint_index": self.index,
             "replans": self.replans,
             "skipped_global": len(self._skipped_global),
+            "leftover_replans": int(self._leftover_replans),
             "closed": bool(self.snapshot.closed) if self.snapshot else False,
             "fence_unusable": bool(self.fence_unusable),
             "explore_reason": dict(self.explore_reason or self._build_explore_reason(completion, info)),
@@ -993,13 +997,16 @@ class MissionPolicy:
             advice = combine_advice(env_advice, sensed, chassis, living, fence, power)
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
-        # IMU spike on a climbable face → contour. Do not rewrite a physics
-        # stop (drain / pond / true tipover).
+        # Climbable / look-ahead face → contour. Env look-ahead may say
+        # "stop" so we do not drive *into* a shed lip; that is not a
+        # seated tip. Skipping the coverage plan here left CI jobs at
+        # ~50% cut. True tipover / KIND_TIP still stop.
         if (
             advice == "stop"
             and self.last_tilt_kind == KIND_GRADE
-            and env_advice != "stop"
             and not bool(info.get("tipover"))
+            and not bool(info.get("chassis_tipped"))
+            and not self._chassis_tipped
         ):
             advice = "reroute"
         return advice
@@ -1331,6 +1338,8 @@ class MissionPolicy:
         advice: str,
     ) -> np.ndarray:
         if self.global_plan is None or not self.global_plan.waypoints:
+            if self._replan_leftover_uncut(pose, info):
+                return self._hold()
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
         if self.phase_step + 1 >= int(self.settings.max_mow_steps):
@@ -1350,6 +1359,9 @@ class MissionPolicy:
             )
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
+        if advice == "stop" and self.last_tilt_kind == KIND_GRADE:
+            if not bool((info or {}).get("tipover")) and not self._chassis_tipped:
+                advice = "reroute"
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
         if self._mow_no_progress(pose, info, advice):
             self._stamp_learned_blockage(pose, info, reason="mow_no_progress")
@@ -1408,6 +1420,8 @@ class MissionPolicy:
             if skipped_now:
                 # Skip landed — drive the next waypoint this step.
                 if self.index >= len(self.global_plan.waypoints):
+                    if self._replan_leftover_uncut(pose, info):
+                        return self._hold()
                     self._emit("mow_complete", self.global_plan.as_metrics())
                     self._transition(MissionPhase.RETURN_HOME)
                     return self._hold()
@@ -1421,6 +1435,8 @@ class MissionPolicy:
             return self._hold()
         self._calibrate_stall = 0
         if self.index >= len(self.global_plan.waypoints):
+            if self._replan_leftover_uncut(pose, info):
+                return self._hold()
             self._emit("mow_complete", self.global_plan.as_metrics())
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
@@ -1450,6 +1466,8 @@ class MissionPolicy:
             trimmer=1.0 if advice in {"ok", "slow"} or self.last_tilt_kind == KIND_GRADE else 0.0,
         )
         if self.index >= len(self.global_plan.waypoints):
+            if self._replan_leftover_uncut(pose, info):
+                return action
             self._emit("mow_complete", self.global_plan.as_metrics())
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
@@ -1887,7 +1905,7 @@ class MissionPolicy:
             notes=notes,
         )
 
-    def _plan_global_mow(self, pose: Pose) -> CoveragePlan:
+    def _plan_global_mow(self, pose: Pose, *, leftover: bool = False) -> CoveragePlan:
         assert self.observed is not None
         snap = self.snapshot
         keep = snap.keep_in_mask if snap is not None else self.keep_in_mask
@@ -1939,16 +1957,28 @@ class MissionPolicy:
                 known = known & np.asarray(keep, dtype=bool)
             hardscape = self.observed.structure != 0
             mowable = known & ~hardscape
+        if leftover:
+            cut = self._keep_in_cut_mask(self._last_info)
+            if cut is not None and cut.shape == mowable.shape:
+                mowable = mowable & ~cut
         heading = choose_strip_orientation(
             elevation,
             mowable,
             resolution_m=self.cfg.world.resolution_m,
         )
+        res = max(float(self.cfg.world.resolution_m), 1e-6)
+        spacing = float(self.cfg.planner.strip_spacing_m)
+        stride = float(self.cfg.planner.waypoint_stride_m)
+        if leftover:
+            # Inter-strip cells the first pass never visited. Drive every
+            # leftover cell so cut% is of planned mowable, not of lanes.
+            spacing = min(spacing, res)
+            stride = min(stride, max(res, 0.24))
         return plan_coverage(
             costmap,
             (pose.x, pose.y),
-            strip_spacing_m=self.cfg.planner.strip_spacing_m,
-            waypoint_stride_m=self.cfg.planner.waypoint_stride_m,
+            strip_spacing_m=spacing,
+            waypoint_stride_m=stride,
             mowable=mowable,
             orientation_rad=heading,
             elevation=elevation,
@@ -2089,8 +2119,13 @@ class MissionPolicy:
         painted = 0
         if raster is not None and keep is not None:
             cut = np.asarray(raster)
-            if cut.shape == keep.shape:
-                painted = int((cut.astype(bool) & np.asarray(keep, dtype=bool)).sum())
+            mask = np.asarray(keep, dtype=bool)
+            if cut.shape == mask.shape:
+                if self.observed is not None:
+                    mow = self.observed.mowable_mask(keep)
+                    if mow.shape == mask.shape:
+                        mask = mask & mow
+                painted = int((cut.astype(bool) & mask).sum())
         cut_cells = int(blob.get("coverage_cut_cells") or 0)
         n = max(painted, cut_cells)
         if n > 0:
@@ -2103,6 +2138,57 @@ class MissionPolicy:
             return False
         world = float((info or {}).get("coverage_fraction") or 0.0)
         return self._job_cut_fraction(info, self.global_plan, world) >= target
+
+    def _keep_in_cut_mask(self, info: Optional[dict[str, Any]]) -> Optional[np.ndarray]:
+        blob = info or {}
+        raster = blob.get("coverage_cut")
+        if raster is None:
+            return None
+        cut = np.asarray(raster, dtype=bool)
+        keep = self.keep_in_mask
+        if keep is not None and cut.shape == np.asarray(keep).shape:
+            return cut & np.asarray(keep, dtype=bool)
+        return cut
+
+    def _replan_leftover_uncut(self, pose: Pose, info: Optional[dict[str, Any]]) -> bool:
+        """When the strip list ends, sweep leftover uncut keep-in cells.
+
+        Boustrophedon spacing wider than the trimmer (and IMU/grade skips)
+        can exhaust waypoints at ~50% cut. That is not job complete.
+        """
+        if self.observed is None or self.global_plan is None:
+            return False
+        if self._leftover_replans >= 4:
+            return False
+        world = float((info or {}).get("coverage_fraction") or 0.0)
+        cut_frac = self._job_cut_fraction(info, self.global_plan, world)
+        if cut_frac >= 0.95:
+            return False
+        leftover = self._plan_global_mow(pose, leftover=True)
+        if leftover is None or len(leftover.waypoints) < 2:
+            return False
+        orig = self.global_plan
+        leftover.planned_mowable_cells = int(orig.planned_mowable_cells)
+        leftover.reachable_mowable_cells = int(orig.reachable_mowable_cells)
+        leftover.unreachable_mowable_cells = int(orig.unreachable_mowable_cells)
+        leftover.unmapped_mowable_cells = int(orig.unmapped_mowable_cells)
+        leftover.planned_coverage_fraction = float(orig.planned_coverage_fraction)
+        self.global_plan = leftover
+        self.plan = leftover
+        self.index = 0
+        self._detour = []
+        self._detour_index = 0
+        self._leftover_replans += 1
+        self._reset_explore_progress(pose, 0.0)
+        self._emit(
+            "mow_leftover",
+            {
+                "pass": int(self._leftover_replans),
+                "cut_pct": float(cut_frac),
+                "n_waypoints": len(leftover.waypoints),
+            },
+        )
+        return True
 
     def _mow_skip_count(self) -> int:
         n = max(1, int(self.settings.mow_skip_cluster or 4))
@@ -2470,7 +2556,7 @@ def apply_full_explore(settings: MissionConfig, *, world_width_m: float = 70.0) 
         settings.explore_complete = max(float(settings.explore_complete), 0.95)
         settings.max_explore_steps = max(int(settings.max_explore_steps), 360)
         settings.mow_complete_frac = 0.0
-        settings.max_mow_steps = max(int(settings.max_mow_steps), 280)
+        settings.max_mow_steps = max(int(settings.max_mow_steps), 1400)
     else:
         settings.explore_complete = max(
             float(settings.explore_complete),

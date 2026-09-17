@@ -215,8 +215,22 @@ rotated toward the contour when a mean grade is present.
 IMU tip-stop on a ridge during `mow` reverses, pivot-reverses, then
 skips a short waypoint cluster and local-replans. Ridge IMU is treated
 as `slow` for the limp machine so the job does not park. Abort-to-home
-needs 48 skips **and** 80 mow steps — leftover: long ridges can still
-chew strips; a contour-following skip is follow-up.
+needs 48 skips **and** 80 mow steps.
+
+A **climbable / look-ahead face** (`tilt_kind=grade`) is contour /
+reroute. It must not skip the coverage plan. When the strip list ends
+but cut of planned reachable is still under 0.95, mow **replans leftover
+uncut keep-in cells** at cell resolution (the first pass can be wider
+than the 0.16 m trimmer). That is how a taught pocket reaches ~100%
+cut instead of homing at ~50%.
+
+CI proof is `tests/test_full_fence_job.py` on a taught `mission_tiny`
+keep-in (map / planned ≥ 0.99, **cut ≥ 0.95**, then `return_home` /
+`complete`). Full acre is still a local long-run, not CI:
+
+```bash
+jims-mower-live --config acre_yard --speed max --prepare-only --steps 20000 --out live_acre_full
+```
 
 Structures (path / building / bunker / bed / green) stay no-mow or
 blocked exactly as in `docs/TERRAIN_MAPS.md`. Physics and evaluation

@@ -37,9 +37,11 @@ fixes that without moving the physics tip.
    ~0.10 rad in one physics step, so we do not wait for `imu_stop_frac`.
    Owner line: *Tip risk — reversing*. Explore stamps a learned no-go
    only on this path (same #46 blockage disk), not on a climbable hill.
-   Sit look-ahead that would **exceed tip** is a hard stop — do not
-   keep driving into that face. A single non-urgent IMU spike still
-   holds (see Filter).
+   Sit look-ahead that would **exceed tip** is a hard stop on the
+   physics command (do not drive *into* that face). During `mow` that
+   is **contour / reroute**, not a waypoint-cluster skip — skipping
+   here left a tiny keep-in at ~50% cut. A single non-urgent IMU spike
+   still holds (see Filter).
 4. **Past-tip / immobilise** — seated `|roll|` or `|pitch|` ≥
    `tip_roll_rad` / `tip_pitch_rad`, or env `tipover`. Latch. Owner
    line: *SOS — immobilised. Retrieve the mower.* `tilt_kind=tip`.
