@@ -141,6 +141,25 @@ def test_mow_grade_stop_does_not_skip_plan() -> None:
     assert policy._skipped_global == []
 
 
+def test_mow_blockage_stamp_does_not_reset_coverage_index() -> None:
+    env, profile = _tiny_job_env()
+    obs, info = env.reset(seed=4, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg)
+    policy.reset(obs, info, profile=profile)
+    policy.phase = MissionPhase.MOW
+    policy.global_plan = CoveragePlan(
+        waypoints=[(2.0, 2.0), (3.0, 2.0), (4.0, 2.0), (5.0, 2.0)],
+        planned_mowable_cells=20,
+        reachable_mowable_cells=20,
+    )
+    policy.index = 2
+    pose = Pose(3.0, 2.0, 0.0)
+    policy._stamp_learned_blockage(pose, info, reason="mow_no_progress")
+    env.close()
+    assert policy.index == 2
+    assert policy.phase == MissionPhase.MOW
+
+
 def test_mow_leftover_replans_when_waypoints_done() -> None:
     env, profile = _tiny_job_env()
     obs, info = env.reset(seed=4, options={"yard_profile": profile, "resize_world": False})
