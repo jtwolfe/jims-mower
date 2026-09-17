@@ -18,7 +18,7 @@ jims-mower-demo --config configs/scenarios/playground.yaml --policy scripted --o
 | `suburban.yaml` | Backyard furniture, hose, mild drain, mild yard grade |
 | `gradient_yard.yaml` | Whole-yard planar slope + a drain crossing it |
 | `golf_rough.yaml` / `golf_fairway_snip.yaml` | Undulating golf snips + cart path / bunker |
-| `acre_yard.yaml` | ~1-acre (70×58 m @ 0.50 m) trees / beds / sand / paths / sheds / pond |
+| `acre_yard.yaml` | ~1-acre (70×58 m @ 0.25 m) trees / beds / sand / paths / sheds / pond |
 | `rural_paddock.yaml` | Larger sparse paddock |
 | `playground.yaml` | Many toys |
 | `orchard.yaml` | Tree rows |

@@ -38,6 +38,10 @@ from jims_mower.planning.grade_tip import (
     KIND_TIP,
     TipHoldFilter,
     classify_tilt,
+    grade_aware_cruise,
+    look_ahead_advice,
+    look_ahead_from_elevation,
+    merge_look_ahead_kind,
     read_tilt,
     tip_lethal_slope_rad,
 )
@@ -902,6 +906,24 @@ class MissionPolicy:
         sensed = combine_advice(sensed, filtered.advice)
         chassis = combine_advice(chassis, filtered.advice)
         self.last_tilt_kind = filtered.kind
+        ahead = look_ahead_from_elevation(
+            pose_hint,
+            obs.get("elevation"),
+            resolution_m=self.cfg.world.resolution_m,
+            length_m=self.cfg.robot.length_m,
+            track_m=self.cfg.robot.track_m,
+            look_ahead_m=self.cfg.planner.grade_look_ahead_m,
+            n_samples=self.cfg.planner.grade_look_ahead_samples,
+            tip_roll_rad=self.cfg.robot.tip_roll_rad,
+            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+            slow_frac=self.cfg.planner.imu_slow_frac,
+            stop_frac=self.cfg.planner.imu_stop_frac,
+            max_climb_slope_rad=climb,
+            tip_lethal_frac=lethal_frac,
+        )
+        sensed = combine_advice(sensed, look_ahead_advice(ahead))
+        chassis = combine_advice(chassis, look_ahead_advice(ahead))
+        self.last_tilt_kind = merge_look_ahead_kind(self.last_tilt_kind, ahead)
         if env_advice == "stop" and bool(info.get("tipover")):
             self.last_tilt_kind = KIND_TIP
         living = str(info.get("living_advice") or "ok")
@@ -2082,8 +2104,13 @@ class MissionPolicy:
         setattr(self, index_attr, idx)
         if idx >= len(waypoints):
             return self._hold()
-        if advice == "slow":
-            cruise *= self.cfg.planner.slow_speed_factor
+        cruise = grade_aware_cruise(
+            cruise,
+            advice=advice,
+            tilt_kind=self.last_tilt_kind,
+            slow_speed_factor=self.cfg.planner.slow_speed_factor,
+            grade_speed_factor=self.cfg.planner.grade_speed_factor,
+        )
         wheels, _dist, _err = tracking_action(
             pose,
             waypoints[idx],

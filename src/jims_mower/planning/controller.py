@@ -22,6 +22,10 @@ from jims_mower.planning.fusion import make_pose_filter
 from jims_mower.planning.grade_tip import (
     TipHoldFilter,
     classify_tilt,
+    grade_aware_cruise,
+    look_ahead_advice,
+    look_ahead_from_elevation,
+    merge_look_ahead_kind,
     read_tilt,
     tip_lethal_slope_rad,
 )
@@ -284,6 +288,24 @@ class TerrainPolicy:
         sensed = combine_advice(sensed, filtered.advice)
         chassis = combine_advice(chassis, filtered.advice)
         self.last_tilt_kind = filtered.kind
+        ahead = look_ahead_from_elevation(
+            pose,
+            obs.get("elevation"),
+            resolution_m=self._resolution_m,
+            length_m=self.cfg.robot.length_m,
+            track_m=self.cfg.robot.track_m,
+            look_ahead_m=self.cfg.planner.grade_look_ahead_m,
+            n_samples=self.cfg.planner.grade_look_ahead_samples,
+            tip_roll_rad=self.cfg.robot.tip_roll_rad,
+            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+            slow_frac=self.cfg.planner.imu_slow_frac,
+            stop_frac=self.cfg.planner.imu_stop_frac,
+            max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
+        )
+        sensed = combine_advice(sensed, look_ahead_advice(ahead))
+        chassis = combine_advice(chassis, look_ahead_advice(ahead))
+        self.last_tilt_kind = merge_look_ahead_kind(self.last_tilt_kind, ahead)
         self._geofence = geofence_from_info(info, self.cfg)
         living = str(info.get("living_advice") or "ok")
         fence = str(info.get("geofence_advice") or "ok")
@@ -367,9 +389,13 @@ class TerrainPolicy:
                 return self._finish_action(np.array([0.0, 0.0, 0.0], dtype=np.float32), advice, info)
 
         target = waypoints[self.index]
-        cruise = self.cfg.planner.cruise_speed
-        if advice == "slow":
-            cruise *= self.cfg.planner.slow_speed_factor
+        cruise = grade_aware_cruise(
+            self.cfg.planner.cruise_speed,
+            advice=advice,
+            tilt_kind=self.last_tilt_kind,
+            slow_speed_factor=self.cfg.planner.slow_speed_factor,
+            grade_speed_factor=self.cfg.planner.grade_speed_factor,
+        )
         wheels, _dist, _err = tracking_action(
             pose,
             target,

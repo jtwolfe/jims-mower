@@ -45,7 +45,7 @@ image.
 | Live fog map | Unknown cells stay dark; observed terrain grows as the robot looks | `ObservedMap`, `jims-mower-live`, `#/map` |
 | Observed elevation freeze | Explore stamps a local elev estimate (observer + optional gym stereo); MAP READY locks cells so they do not flop; mow plans on the frozen map, not god-view | `docs/MISSION_FLOW.md`, `docs/TERRAIN_MAPS.md`, `perception/stereo.py` |
 | teach → explore → mow → home → done on phone | Pair stub → teach keep-in → Start → MAP READY → mow → return → idle; cut % rises | `jims-mower-owner --live`, `acre_yard_demo` |
-| Acre world | `acre_yard` / `acre_yard_demo` ~70×58 m @ 0.50 m; physics grade / drains / banks | `configs/scenarios/acre_yard*.yaml` |
+| Acre world | `acre_yard` / `acre_yard_demo` ~70×58 m @ 0.25 m; physics grade / drains / banks | `configs/scenarios/acre_yard*.yaml` |
 | Faults / SOS UX | Immobilised (dead motor, retrieve) vs stuck (reverse / pivot / help); software ESTOP vs hardware paddle latch (sim) | `FaultBus`, `HardwareEstop`, `#/fault` |
 | ICD action / obs contract | `Box(3,)` wheels + trimmer; dict obs keys listed in the ICD | [`ICD.md`](../ICD.md), `docs/runtime_contract.md` |
 | YardProfile geofence / home | Taught keep-in / keep-out / home persist as `jims_mower.yard.v1` | `profile.py`, `/yard` |

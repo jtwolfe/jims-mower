@@ -681,6 +681,9 @@ class MowerEnv(gym.Env):
             tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
             wheel_drop_m=self.cfg.robot.wheel_drop_m,
             steep_slope_rad=self.cfg.robot.steep_slope_rad,
+            look_ahead_m=self.cfg.planner.grade_look_ahead_m,
+            look_ahead_samples=self.cfg.planner.grade_look_ahead_samples,
+            max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
         )
         breakdown = compute_reward(
             self.cfg.reward,
@@ -1218,6 +1221,9 @@ class MowerEnv(gym.Env):
             tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
             wheel_drop_m=self.cfg.robot.wheel_drop_m,
             steep_slope_rad=self.cfg.robot.steep_slope_rad,
+            look_ahead_m=self.cfg.planner.grade_look_ahead_m,
+            look_ahead_samples=self.cfg.planner.grade_look_ahead_samples,
+            max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
         )
         spec = self.geofence_spec()
         origin_info = self._origin_info()

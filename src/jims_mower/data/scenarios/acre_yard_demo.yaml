@@ -1,5 +1,5 @@
 # DEMO PROFILE — not a coverage benchmark and not a physics cheat.
-# Same ~1 acre world (70×58 m @ 0.50 m) and the same pond / sheds /
+# Same ~1 acre world (70×58 m @ 0.25 m) and the same pond / sheds /
 # paths / drains as acre_yard. Calibrate closes after a short
 # confirmation drive on the authored keep-in (~28 m), then EXPLORE.
 # Demo explore finishes around 0.30 map or ~420 steps even with leftover
@@ -30,7 +30,7 @@ world:
   layout: acre_yard
   width_m: 70.0
   height_m: 58.0
-  resolution_m: 0.50
+  resolution_m: 0.25
   n_people: 0
   n_dogs: 0
   n_cats: 0
@@ -161,7 +161,9 @@ perception:
 planner:
   strip_spacing_m: 1.20
   waypoint_stride_m: 1.20
-  cruise_speed: 0.75
+  cruise_speed: 0.50
+  grade_speed_factor: 0.50
+  grade_look_ahead_m: 1.10
   drain_clearance_m: 0.80
   max_climb_slope_rad: 0.34
   blend_elevation_prior: true
@@ -183,8 +185,9 @@ mission:
   # live laptop window can reach MAP READY. Not a coverage benchmark.
   explore_complete: 0.30
   explore_no_frontier: 0.22
-  explore_cruise: 0.98
-  mow_cruise: 0.92
+  # Wheel-command fraction. 0.45 × 1.2 m/s ≈ 0.54 m/s explore cap.
+  explore_cruise: 0.45
+  mow_cruise: 0.50
   mow_complete_frac: 0.10
   cover_radius_m: 0.70
   mow_skip_cluster: 8

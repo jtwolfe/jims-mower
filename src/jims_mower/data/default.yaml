@@ -129,6 +129,9 @@ planner:
   max_climb_slope_rad: 0.32
   drain_clearance_m: 0.40
   slow_speed_factor: 0.35
+  grade_speed_factor: 0.50
+  grade_look_ahead_m: 1.10
+  grade_look_ahead_samples: 4
   strip_spacing_m: 0.28
   waypoint_stride_m: 0.32
   cruise_speed: 0.55
@@ -176,6 +179,8 @@ mission:
   max_mow_steps: 5500
   max_return_steps: 500
   snapshot_stride: 25
+  explore_cruise: 0.45
+  mow_cruise: 0.55
 
 # Bench watchdog: set runtime.watchdog.enabled true (configs/orin/bench.yaml).
 # CSI adapter: "" / renderer (gym), fake_csi / fake_gst (CI), gst (raises

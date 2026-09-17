@@ -215,6 +215,10 @@ def test_default_has_planner_knobs() -> None:
     assert cfg.planner.max_climb_slope_rad > 0
     assert cfg.planner.drain_clearance_m >= 0
     assert 0.0 < cfg.planner.slow_speed_factor <= 1.0
+    assert 0.0 < cfg.planner.grade_speed_factor <= 1.0
+    assert cfg.planner.grade_look_ahead_m >= 0.80
+    assert cfg.planner.grade_look_ahead_samples >= 1
+    assert cfg.mission.explore_cruise == pytest.approx(0.45)
     assert cfg.planner.pose_filter == "ekf"
     assert cfg.planner.ekf.r_gps_xy > 0
     assert cfg.planner.uncertainty.inflate >= 0
@@ -225,6 +229,15 @@ def test_rejects_bad_slow_speed_factor() -> None:
         load_config({"planner": {"slow_speed_factor": 0.0}})
     with pytest.raises(ConfigError):
         load_config({"planner": {"slow_speed_factor": 1.5}})
+
+
+def test_rejects_bad_grade_speed_and_look_ahead() -> None:
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"grade_speed_factor": 0.0}})
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"grade_look_ahead_m": -0.1}})
+    with pytest.raises(ConfigError):
+        load_config({"planner": {"grade_look_ahead_samples": 0}})
 
 
 def test_rejects_bad_max_climb() -> None:

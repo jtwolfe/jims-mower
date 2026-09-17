@@ -43,8 +43,12 @@ def test_acre_yard_is_about_one_acre() -> None:
     n_cells = int(round(cfg.world.width_m / cfg.world.resolution_m)) * int(
         round(cfg.world.height_m / cfg.world.resolution_m)
     )
-    assert n_cells <= 20_000
-    assert cfg.world.resolution_m >= 0.40
+    # Finer than the old 0.50 m one-cell-across-chassis grid; not 0.10.
+    assert 0.15 <= cfg.world.resolution_m <= 0.30
+    assert cfg.world.resolution_m < 0.50
+    assert n_cells <= 80_000
+    assert cfg.mission.explore_cruise <= 0.60
+    assert cfg.mission.explore_cruise * cfg.robot.max_wheel_speed_mps <= 0.72
 
 
 def test_acre_yard_authors_property_mix() -> None:
@@ -105,7 +109,12 @@ def test_acre_yard_demo_is_same_acre_with_faster_calibrate() -> None:
     assert scn is not None
     assert cfg.world.width_m == full.world.width_m
     assert cfg.world.height_m == full.world.height_m
+    assert cfg.world.resolution_m == full.world.resolution_m
+    assert cfg.world.resolution_m < 0.50
     assert cfg.world.layout == "acre_yard"
+    assert cfg.mission.explore_cruise <= 0.60
+    assert cfg.planner.grade_look_ahead_m >= 0.80
+    assert cfg.planner.grade_speed_factor <= 0.60
     assert scn.ponds and scn.buildings
     assert cfg.mission.calibrate_confirm_m >= 20.0
     assert cfg.mission.max_calibrate_steps < full.mission.max_calibrate_steps
