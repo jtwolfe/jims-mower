@@ -337,8 +337,8 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
         def _serve_viewer_index(self) -> None:
             dest = viewer_static_dir() / "index.html"
             html = dest.read_text(encoding="utf-8")
-            html = html.replace('href="/style.css"', 'href="/viewer/style.css"')
-            html = html.replace('src="/app.js"', 'src="/viewer/app.js"')
+            html = html.replace('href="/style.css', 'href="/viewer/style.css')
+            html = html.replace('src="/app.js', 'src="/viewer/app.js')
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
         def _serve_viewer_asset(self, rel: str) -> None:

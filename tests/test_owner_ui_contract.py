@@ -184,6 +184,15 @@ def test_status_and_live_frame_expose_owner_ui_flags(tmp_path: Path) -> None:
         assert "no-store" in html_cc
         assert "must-revalidate" in html_cc
 
+        conn = HTTPConnection(host, port, timeout=6.0)
+        conn.request("GET", "/viewer")
+        viewer_resp = conn.getresponse()
+        viewer = viewer_resp.read().decode("utf-8")
+        conn.close()
+        assert f"/viewer/app.js?v={UI_BUILD}" in viewer
+        assert f"/viewer/style.css?v={UI_BUILD}" in viewer
+        assert 'src="/app.js' not in viewer
+
         code, unpaired = _json(host, port, "GET", "/status")
         assert code == 200
         assert unpaired["schema"] == APP_STATUS_SCHEMA
