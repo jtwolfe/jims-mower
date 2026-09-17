@@ -1,5 +1,5 @@
 (() => {
-  window.JIMS_UI_BUILD = "owner-ui-4";
+  window.JIMS_UI_BUILD = "owner-ui-5";
   const ONBOARD = ["unbox", "pair", "home", "teach", "mow"];
   const KEY = "jims_mower_onboarded";
 
@@ -354,6 +354,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     return_home: { label: "Returning home", tone: "home", kind: "mowing" },
     complete: { label: "Done", tone: "done", kind: "done" },
     safe: { label: "Hold — safe", tone: "idle", kind: "idle" },
+    tip_risk: { label: "Tip risk — reversing", tone: "home", kind: "mowing" },
+    steep_grade: { label: "Steep grade — contouring", tone: "map", kind: "mapping" },
   };
 
   function asXYList(raw) {
@@ -542,6 +544,11 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     setBtn("#cmd-explore", g.canExplore, g.exploreWhy);
     setBtn("#cmd-mow", g.canMow, g.mowWhy);
     setBtn("#cmd-return", g.canReturn, g.returnWhy);
+    const resetBtn = $("#cmd-reset");
+    if (resetBtn) {
+      resetBtn.disabled = false;
+      resetBtn.setAttribute("title", "Stop the job, clear tip cool-down, keep the fence.");
+    }
     const hint = $("#phase-hint");
     if (hint) {
       hint.textContent = g.mowWhy || g.exploreWhy || "Explore, mow, or return without waiting for auto MAP READY.";
@@ -558,6 +565,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <button class="btn primary" id="cmd-explore" ${g.canExplore ? "" : "disabled"} ${g.exploreWhy ? `title="${g.exploreWhy}"` : ""}>Explore</button>
         <button class="btn warn" id="cmd-mow" ${g.canMow ? "" : "disabled"} ${g.mowWhy ? `title="${g.mowWhy}"` : ""}>Mow</button>
         <button class="btn ghost" id="cmd-return" ${g.canReturn ? "" : "disabled"} ${g.returnWhy ? `title="${g.returnWhy}"` : ""}>Return home</button>
+        <button class="btn ghost" id="cmd-reset" title="Stop the job, clear tip cool-down, keep the fence.">Reset</button>
       </div>
       <p class="sub phase-hint" id="phase-hint">${hint}</p>
     </div>`;
@@ -595,6 +603,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (mowBtn) mowBtn.onclick = () => liveControl("mow");
     const returnBtn = $("#cmd-return");
     if (returnBtn) returnBtn.onclick = () => liveControl("return");
+    const resetBtn = $("#cmd-reset");
+    if (resetBtn) resetBtn.onclick = () => liveControl("reset");
     const fullBtn = $("#full-explore");
     if (fullBtn) {
       fullBtn.onclick = () => liveControl("full_explore", { enabled: !fullBtn.classList.contains("on") });
@@ -689,8 +699,13 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       ${needsReteach ? `<button class="btn warn" id="reteach-cmd">Re-teach fence</button>` : ""}
       <button class="btn danger" id="estop">ESTOP</button>
       ${sessionCardHtml(st, live)}
-      ${injectRowHtml()}
-      <p style="margin-top:10px"><a class="linkish" href="/viewer">Open live fog viewer</a></p>`;
+      <details class="advanced-card" id="advanced-card">
+        <summary>Advanced</summary>
+        <p class="sub">Gym injects and a standalone 3D tab. Casual use stays on Explore / Mow / Return / Reset.</p>
+        ${injectRowHtml()}
+        <p class="sub reset-note">Reset stops the job and clears tip cool-down. Learned blockages stay unless you reset with clear_blockages. Fence is not re-taught.</p>
+        <p style="margin-top:10px"><a class="linkish" href="/viewer" target="_blank" rel="noopener">Open 3D map in a tab</a></p>
+      </details>`;
     document.querySelectorAll("#speed-row button").forEach((btn) => {
       btn.classList.toggle("on", btn.dataset.speed === speed);
       btn.onclick = () => liveControl("speed", { speed: btn.dataset.speed });

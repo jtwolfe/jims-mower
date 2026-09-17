@@ -43,6 +43,8 @@ def test_viewer_static_assets_present() -> None:
     assert "owner-bar" in html
     assert "btn-job-start" in html
     assert "btn-estop" in html
+    assert "btn-reset" in html
+    assert "advanced-layers" in html
     assert "btn-start-mow" in html
     assert "owner-copy" in html
     assert "EventSource" in js

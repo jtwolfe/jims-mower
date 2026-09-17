@@ -274,7 +274,9 @@ flowchart LR
    On the robot, replace the classifier + back-project with your
    segmentation / depth head.
 2. **Costmap** — free = 1; steep below `planner.max_climb_slope_rad` = slow
-   corridor; steeper than that, drain lips, and channels are blocked. Channels
+   corridor; between that and the tip-safe margin = high contour cost (not
+   blocked); only above `tip_lethal_frac * tip_roll` plus drain lips /
+   channels are lethal. See [`docs/TIP_HILL.md`](docs/TIP_HILL.md). Channels
    and lips are inflated by `planner.drain_clearance_m`. Occupancy (trees /
    detections) is blocked too. Per-cell `confidence` inflates finite costs
    when the observer is unsure (`planner.uncertainty`).

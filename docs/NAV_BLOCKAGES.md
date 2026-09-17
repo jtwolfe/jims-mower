@@ -36,7 +36,7 @@ The gym can also **block without painting an obstacle disk**:
 | Drain channel / lip | Only after observer hazard lands on seen cells |
 | Tree / furniture body collision | During a mission job (`explore` / `mow` / …) the penetrating step is undone, a blockage is stamped, and the job continues. A non-mission gym episode still terminates. |
 | Geofence keep-in / keep-out | Costmap + fence advice, not a “blocked” raster |
-| Gentle swale / grade (acre undulation) | IMU tip-stop / slow; no learned no-go until this change |
+| Gentle swale / grade (acre undulation) | Grade-aware IMU: slow / contour, not tip-stop. No learned no-go. See [`TIP_HILL.md`](TIP_HILL.md). |
 | Camera ground-plane miss (wall, not dirt) | Seen mask does not grow; structure stays fog |
 
 So: not a broken integrator. The robot was never taught to **mark**
@@ -109,7 +109,8 @@ skipped or failed lips. Codes:
 | `seeking_frontier` | Seeking frontier · … |
 | `blockage_stamped` / `remapping` | Blocked — remapping around obstacle · … |
 | `frontier_skipped` | Frontier unreachable — skipping · … |
-| `tip_recovery` | Tip recovery · … |
+| `tip_recovery` | Tip risk — reversing · … |
+| `steep_grade` | Steep grade — contouring · … |
 | `path_blocked` | Path blocked — looking around · … |
 
 ## What this is not

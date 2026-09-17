@@ -75,6 +75,9 @@ def costmap_from_obs(obs: dict, cfg, geofence=None) -> Costmap:
         width_m=cols * res,
         height_m=rows * res,
         max_climb_slope_rad=cfg.planner.max_climb_slope_rad,
+        tip_lethal_slope_rad=float(cfg.planner.tip_lethal_frac)
+        * min(float(cfg.robot.tip_roll_rad), float(cfg.robot.tip_pitch_rad)),
+        contour_cost=cfg.planner.contour_cost,
         drain_clearance_m=cfg.planner.drain_clearance_m,
         occupancy=occupancy,
         occupancy_inflate_m=cfg.planner.occupancy_inflate_m,

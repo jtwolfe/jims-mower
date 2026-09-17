@@ -25,6 +25,7 @@ from jims_mower.geofence import GeofenceSpec, rasterize_geofence
 
 FREE_COST = 1.0
 STEEP_COST = 5.0
+CONTOUR_COST = 12.0
 BLOCKED_COST = math.inf
 
 
@@ -122,6 +123,8 @@ def build_costmap(
     width_m: float,
     height_m: float,
     max_climb_slope_rad: float,
+    tip_lethal_slope_rad: Optional[float] = None,
+    contour_cost: float = CONTOUR_COST,
     drain_clearance_m: float = 0.40,
     occupancy: Optional[np.ndarray] = None,
     occupancy_inflate_m: float = 0.0,
@@ -146,7 +149,9 @@ def build_costmap(
 
     Hazard labels (observation contract):
       0 free — cost 1
-      1 steep — slow corridor if ``slope < max_climb_slope_rad``, else blocked
+      1 steep — slow corridor if ``slope < max_climb_slope_rad``;
+        contour (high cost, not blocked) up to ``tip_lethal_slope_rad``;
+        blocked only above the tip-safe margin
       2 drain lip — reroute (blocked, plus clearance inflation)
       3 drain channel — forbidden (blocked, plus clearance inflation)
 
@@ -184,12 +189,19 @@ def build_costmap(
     cost = np.full((rows, cols), FREE_COST, dtype=np.float32)
     blocked = np.zeros((rows, cols), dtype=bool)
 
-    too_steep = slope >= float(max_climb_slope_rad)
-    steep_corridor = (hazard >= HAZARD_STEEP) & (hazard < HAZARD_DRAIN_EDGE) & ~too_steep
+    climb = float(max_climb_slope_rad)
+    lethal = float(tip_lethal_slope_rad) if tip_lethal_slope_rad is not None else climb
+    if lethal < climb:
+        lethal = climb
+    too_steep = slope >= lethal
+    contour = (slope >= climb) & (slope < lethal)
+    steep_corridor = (hazard >= HAZARD_STEEP) & (hazard < HAZARD_DRAIN_EDGE) & (slope < climb)
     cost[steep_corridor] = STEEP_COST
     if wet and wet_slope_extra > 0.0:
         cost[steep_corridor] = cost[steep_corridor] + float(wet_slope_extra)
-    # Unlabeled but still over the climb cap (heuristic maps, etc.).
+    # Climbable-but-steep: prefer contour around, still traversable.
+    cost[contour] = np.maximum(cost[contour], float(contour_cost))
+    # Unlabeled past the tip-safe margin (heuristic maps, etc.).
     cost[too_steep] = BLOCKED_COST
     blocked[too_steep] = True
 
@@ -284,6 +296,13 @@ def build_costmap(
         resolution_m=float(resolution_m),
         confidence=conf,
     )
+
+
+def slope_from_elevation(elevation: np.ndarray, resolution_m: float) -> np.ndarray:
+    """Finite-difference grade (radians) from an elevation raster."""
+    res = max(float(resolution_m), 1e-6)
+    gy, gx = np.gradient(np.asarray(elevation, dtype=np.float32), res)
+    return np.arctan(np.hypot(gx, gy)).astype(np.float32)
 
 
 def _blend_slope_with_prior(

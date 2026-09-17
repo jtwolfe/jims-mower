@@ -187,6 +187,13 @@ class ObservedMap:
     def blockage_count(self) -> int:
         return int(np.asarray(self.blockage, dtype=bool).sum())
 
+    def clear_blockages(self) -> int:
+        """Drop learned no-go disks. Fence / observed map stay. Returns cells cleared."""
+        n = int(np.asarray(self.blockage, dtype=bool).sum())
+        self.blockage = np.zeros_like(self.blockage, dtype=bool)
+        self.refresh_free()
+        return n
+
     def stamp_cameras(
         self,
         images: dict[str, np.ndarray],

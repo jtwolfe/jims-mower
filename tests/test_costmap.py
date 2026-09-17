@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from jims_mower.constants import HAZARD_DRAIN, HAZARD_DRAIN_EDGE, HAZARD_NONE, HAZARD_STEEP
-from jims_mower.planning.costmap import BLOCKED_COST, STEEP_COST, build_costmap
+from jims_mower.planning.costmap import BLOCKED_COST, CONTOUR_COST, STEEP_COST, build_costmap
 
 
 def _empty(n: int = 20) -> tuple[np.ndarray, np.ndarray]:
@@ -100,6 +100,26 @@ def test_steep_below_climb_cap_is_slow_corridor() -> None:
     )
     assert not cm.blocked[6, 6]
     assert cm.cost[6, 6] == pytest.approx(STEEP_COST)
+
+
+def test_steep_between_climb_and_tip_is_contour_not_blocked() -> None:
+    hazard, slope = _empty(16)
+    hazard[6, 6] = HAZARD_STEEP
+    slope[6, 6] = 0.35
+    cm = build_costmap(
+        hazard,
+        slope,
+        resolution_m=0.2,
+        width_m=3.2,
+        height_m=3.2,
+        max_climb_slope_rad=0.32,
+        tip_lethal_slope_rad=0.38,
+        contour_cost=CONTOUR_COST,
+        drain_clearance_m=0.0,
+        margin_m=0.0,
+    )
+    assert not cm.blocked[6, 6]
+    assert cm.cost[6, 6] == pytest.approx(CONTOUR_COST)
 
 
 def test_steep_above_climb_cap_is_blocked() -> None:

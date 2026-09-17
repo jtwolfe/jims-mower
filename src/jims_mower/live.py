@@ -118,6 +118,8 @@ OWNER_COPY = {
     "immobilised": "SOS — immobilised. Retrieve the mower.",
     "stuck": "Stuck — recovering (reverse / pivot).",
     "blocked_remap": "Blocked — remapping around obstacle",
+    "tip_risk": "Tip risk — reversing",
+    "steep_grade": "Steep grade — contouring",
     "unpaired": "Pair Bluetooth before Start.",
     "pairing": "Pairing…",
     "pair_failed": "Pairing failed — check the gym PIN.",
@@ -200,6 +202,7 @@ def owner_copy_for(
     explore_reason: Optional[dict[str, Any]] = None,
     charge_state: str = "",
     return_kind: str = "",
+    tilt_kind: str = "",
 ) -> str:
     blob = fault if isinstance(fault, dict) else None
     if hw_estop or (blob and str(blob.get("code") or "") == "HW_ESTOP"):
@@ -233,11 +236,23 @@ def owner_copy_for(
         return OWNER_COPY["low_battery"]
     if charge_state == "resuming":
         return OWNER_COPY["resuming_explore"] if phase == "explore" else OWNER_COPY["resuming_mow"]
+    # Idle after Reset (or parked): do not keep asking to start mow.
+    if job_state == "idle" and phase not in {"complete", "teach", "calibrate_boundary"}:
+        if isinstance(explore_reason, dict) and explore_reason.get("label"):
+            return str(explore_reason["label"])
+        if taught:
+            return OWNER_COPY["taught_idle"]
+        return OWNER_COPY["idle"]
     # MAP READY is a review beat, not SafeState / ESTOP.
     if phase == "review":
         return OWNER_COPY["review"]
     if phase == "explore" and isinstance(explore_reason, dict) and explore_reason.get("label"):
         return str(explore_reason["label"])
+    kind = str(tilt_kind or "")
+    if kind == "tip" and phase in {"explore", "mow", "calibrate_boundary"}:
+        return OWNER_COPY["tip_risk"]
+    if kind == "grade" and phase in {"explore", "mow", "calibrate_boundary"}:
+        return OWNER_COPY["steep_grade"]
     if phase == "safe":
         return OWNER_COPY["safe"]
     if job_state in OWNER_COPY and job_state in {"idle", "paused", "hold"}:
@@ -848,6 +863,30 @@ class LiveSession:
                 mode=str(kwargs.get("mode") or "open_circuit"),
                 soc=soc,
             )
+        elif key == "reset":
+            raw_clear = kwargs.get("clear_blockages", kwargs.get("clear_learned", False))
+            if isinstance(raw_clear, str):
+                clear_blockages = raw_clear.strip().lower() not in {"0", "false", "off", "no"}
+            else:
+                clear_blockages = bool(raw_clear)
+            self.estop = False
+            self.done = False
+            self._fault_overlay = {}
+            reset_info: dict[str, Any] = {}
+            if self.policy is not None:
+                reset_info = self.policy.owner_reset(clear_blockages=clear_blockages)
+            self.job_state = "idle"
+            self._stop.set()
+            snap = self.snapshot()
+            return {
+                "ok": True,
+                "cmd": key,
+                "clear_blockages": clear_blockages,
+                "kept_fence": bool(self.owner_taught or (self.yard_profile is not None)),
+                "kept_blockages": not clear_blockages,
+                **reset_info,
+                **snap,
+            }
         return {"ok": True, "cmd": key, **self.snapshot()}
 
     def _command_via_radio(self, key: str) -> Optional[dict[str, Any]]:
@@ -1632,6 +1671,7 @@ class LiveSession:
                 explore_reason=status.get("explore_reason") if isinstance(status.get("explore_reason"), dict) else None,
                 charge_state=str(status.get("charge_state") or ""),
                 return_kind=str(status.get("return_kind") or ""),
+                tilt_kind=str(status.get("tilt_kind") or getattr(policy, "last_tilt_kind", "") or ""),
             ),
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
@@ -1653,6 +1693,8 @@ class LiveSession:
             "can_mow": not fence_unusable,
             "can_return": self.job_state in {"running", "paused", "hold"} or status["phase"] not in {"idle", "complete", ""},
             "explore_reason": status.get("explore_reason") or {},
+            "tilt_kind": str(status.get("tilt_kind") or getattr(policy, "last_tilt_kind", "") or ""),
+            "can_reset": True,
             "full_explore": bool(status.get("full_explore")),
             "charge_state": status.get("charge_state") or "",
             "return_kind": status.get("return_kind") or "",

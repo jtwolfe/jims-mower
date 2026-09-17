@@ -4,6 +4,15 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 const $ = (id) => document.getElementById(id);
 
+const embedMode = (() => {
+  const q = new URLSearchParams(location.search);
+  return q.get("embed") === "1" || q.get("chrome") === "embed";
+})();
+if (embedMode) {
+  document.documentElement.classList.add("embed");
+  document.body.classList.add("embed");
+}
+
 const state = {
   manifest: null,
   profile: null,
@@ -752,6 +761,10 @@ async function postControl(cmd, extra) {
 function setOwnerBar(frame) {
   const bar = $("owner-bar");
   if (!bar) return;
+  if (embedMode) {
+    bar.hidden = true;
+    return;
+  }
   bar.hidden = false;
   const copy = $("owner-copy");
   if (copy) copy.textContent = frame.owner_copy || "Yard unknown — start a job when ready.";
@@ -828,6 +841,8 @@ function bindOwnerBar() {
   }
   const reexplore = $("btn-reexplore");
   if (reexplore) reexplore.addEventListener("click", () => postControl("reexplore").catch(() => {}));
+  const reset = $("btn-reset");
+  if (reset) reset.addEventListener("click", () => postControl("reset").catch(() => {}));
   const estop = $("btn-estop");
   if (estop) estop.addEventListener("click", () => postControl("estop").catch(() => {}));
   const yard = $("owner-yard");

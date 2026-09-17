@@ -117,16 +117,20 @@ Narrow phone chrome (~390 px). Hash routes:
   shown), a **Full explore** On/Off toggle, then the map with area-type
   raster, a labeled **Area types** legend (grass / mow-this / path /
   sand / building / water / drain / beds / keep-out / blocked / fog)
-  plus the Path Fog/Mapped/Trail/Plan/Cut row. **Low battery** inject is on Map
+  plus the Path Fog/Mapped/Trail/Plan/Cut row. **Reset** sits with the
+  manual phases (stop job, clear tip cool-down, keep the fence; learned
+  blockages stay unless `clear_blockages`). **Low battery** inject is on Map
   and Health (`{cmd: inject, kind: low_soc}`). Pair still required
-  before Start. Else 2D SVG yard.
+  before Start. Else 2D SVG yard. Desktop widens this same chrome and
+  embeds `/viewer?embed=1` as the map pane — one owner shell, not a
+  second product. Layer toggles live under **Advanced**.
 - `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run, Low battery inject when `--live`
 - `#/fault` — ESTOP / SOS vs stuck recovery
 
 `viewer.js` is a 2D SVG fallback for the phone chrome only. The three.js
 World Viewer is **UX-A** (`viewer_static/` + `mesh_to_payload`). The
-owner app serves those same assets at `/viewer` and `/data/yard.json`.
-Do not add a second WebGL stack.
+owner app serves those same assets at `/viewer` and embeds them on
+desktop (`/viewer?embed=1`). Do not add a second WebGL stack.
 
 ## Reuse UX-A + UX-B
 

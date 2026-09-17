@@ -4,27 +4,36 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>Jim's Mower</title>
-  <link rel="stylesheet" href="/static/app.css?v=owner-ui-4"/>
+  <link rel="stylesheet" href="/static/app.css?v=owner-ui-5"/>
 </head>
 <body>
-  <div class="phone" id="app">
-    <div class="status-bar">
-      <span id="clock">9:41</span>
-      <span class="notch"></span>
-      <span class="pills">
-        <span id="robot-pill" class="idle">idle</span>
-        <span id="batt-pill">92%</span>
-      </span>
+  <div class="shell" id="shell">
+    <div class="phone" id="app">
+      <div class="status-bar">
+        <span id="clock">9:41</span>
+        <span class="notch"></span>
+        <span class="pills">
+          <span id="robot-pill" class="idle">idle</span>
+          <span id="batt-pill">92%</span>
+        </span>
+      </div>
+      <main id="screen"></main>
+      <nav id="tabbar" hidden>
+        <button data-href="#/map">Map</button>
+        <button data-href="#/health">Health</button>
+        <button data-href="#/fault" class="sos">SOS</button>
+      </nav>
     </div>
-    <main id="screen"></main>
-    <nav id="tabbar" hidden>
-      <button data-href="#/map">Map</button>
-      <button data-href="#/health">Health</button>
-      <button data-href="#/fault" class="sos">SOS</button>
-    </nav>
+    <aside class="desk-stage" id="desk-stage" aria-label="Yard map">
+      <div class="desk-stage-bar">
+        <span class="desk-stage-title">Yard map</span>
+        <span class="desk-stage-sub">same job as the owner controls</span>
+      </div>
+      <iframe id="viewer-embed" title="3D yard map" src="/viewer?embed=1"></iframe>
+    </aside>
   </div>
-  <p class="desk-hint">Local owner app · weekly schedule on Health · UI build owner-ui-4</p>
-  <script src="/static/viewer.js?v=owner-ui-4"></script>
-  <script src="/static/app.js?v=owner-ui-4"></script>
+  <p class="desk-hint">Local owner app · weekly schedule on Health · UI build owner-ui-5</p>
+  <script src="/static/viewer.js?v=owner-ui-5"></script>
+  <script src="/static/app.js?v=owner-ui-5"></script>
 </body>
 </html>

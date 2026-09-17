@@ -60,7 +60,7 @@ Same integers on the observer raster and on oracle PNGs from the exporter:
 | Value | Name | Policy meaning |
 | --- | --- | --- |
 | 0 | free | Cost 1 |
-| 1 | steep | Slow corridor if `slope < planner.max_climb_slope_rad`, else blocked |
+| 1 | steep | Slow corridor if `slope < planner.max_climb_slope_rad`; contour (high cost) up to tip-safe margin; blocked only above `tip_lethal_frac * tip_roll` |
 | 2 | drain lip | Reroute; inflated by `planner.drain_clearance_m` |
 | 3 | drain channel | Forbidden; same inflation |
 

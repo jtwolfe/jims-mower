@@ -279,6 +279,12 @@ def test_owner_copy_reads_like_a_product() -> None:
     assert owner_copy_for("running", "mow", charge_state="resuming") == "Resuming mow"
     assert owner_copy_for("running", "review") == "Map ready — start mow?"
     assert owner_copy_for("hold", "review") == "Map ready — start mow?"
+    assert owner_copy_for("idle", "review") == "Yard unknown — start a job when ready."
+    assert "Idle" in owner_copy_for(
+        "idle",
+        "review",
+        explore_reason={"label": "Idle · map 0% of target 70% · step 0/360"},
+    )
     assert owner_copy_for("running", "review", fence_unusable=True) == (
         "Fence too small — re-teach the keep-in."
     )

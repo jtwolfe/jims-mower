@@ -184,6 +184,7 @@ LIVE_CONTROL_CMDS = (
     "teach",
     "save_yard",
     "load_yard",
+    "reset",
 )
 APP_LIVE_PORT = 8766
 YARD_PROFILE_SCHEMA = "jims_mower.yard.v1"

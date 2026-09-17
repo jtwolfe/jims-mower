@@ -31,6 +31,7 @@ BUTTON_IDS = (
     "explore-reason",
     "area-legend",
     "phase-row",
+    "cmd-reset",
 )
 
 OWNER_LABELS = (
@@ -50,6 +51,9 @@ OWNER_LABELS = (
     "Beds",
     "Keep-out",
     "Blocked / no-go learned",
+    "Reset",
+    "Tip risk — reversing",
+    "Steep grade — contouring",
 )
 
 STATUS_FLAGS = (
@@ -95,6 +99,11 @@ def test_static_app_js_has_manual_phase_controls() -> None:
     # Not gated behind Start mow / hidden-until-MAP-READY.
     assert "phase-row" in js
     assert "Manual phases" in js
+    assert 'id="cmd-reset"' in js
+    assert ">Reset<" in js
+    assert "Tip risk — reversing" in js
+    assert "Steep grade — contouring" in js
+    assert "advanced-card" in js
     assert f'window.JIMS_UI_BUILD = "{UI_BUILD}"' in js
     assert "UI build " in js
     assert "stale cached app.js" in js
@@ -239,6 +248,11 @@ def test_status_and_live_frame_expose_owner_ui_flags(tmp_path: Path) -> None:
         code, full = _json(host, port, "POST", "/api/live/control", {"cmd": "full_explore", "enabled": True})
         assert full["ok"] is True
         assert full.get("full_explore") is True
+        code, reset = _json(host, port, "POST", "/api/live/control", {"cmd": "reset"})
+        assert reset["ok"] is True
+        assert reset.get("cmd") == "reset"
+        assert reset.get("job_state") == "idle"
+        assert reset.get("kept_blockages") is True
         code, low = _json(host, port, "POST", "/api/live/control", {"cmd": "inject", "kind": "low_soc", "soc": 0.12})
         assert low["ok"] is True
     finally:
