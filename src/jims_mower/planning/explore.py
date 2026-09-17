@@ -51,9 +51,12 @@ def explore_costmap(
         lethal = float(tip_lethal_slope_rad) if tip_lethal_slope_rad is not None else climb
         if lethal < climb:
             lethal = climb
-        contour = (slope >= climb) & (slope < lethal) & ~blocked
+        known = np.asarray(omap.observed, dtype=bool)
+        contour = known & (slope >= climb) & (slope < lethal) & ~blocked
         cost[contour] = np.maximum(cost[contour], float(contour_cost))
-        lethal_mask = (slope >= lethal) & ~blocked
+        # Lethal only on *observed* tip-dangerous grade. Incomplete elev
+        # must not invent a blocked wall that forces a ridge path.
+        lethal_mask = known & (slope >= lethal) & ~blocked
         blocked = blocked | lethal_mask
     cost[blocked] = BLOCKED_COST
     return Costmap(

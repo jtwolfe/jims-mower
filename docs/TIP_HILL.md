@@ -11,8 +11,8 @@ See also [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md) (learned no-go) and
 
 | Layer | What it measures | Trip | What the robot should do |
 | --- | --- | --- | --- |
-| **IMU tip-stop** | Chassis roll / pitch (accel + fused pose) | Near `robot.tip_roll_rad` / `tip_pitch_rad` (defaults 0.40 / 0.45 ≈ 23° / 26°) | **Tip risk — reversing.** Reverse, pivot, skip a short cluster. Do **not** keep reverse-looping. |
-| **Climbable grade** | Observer / prior slope vs `planner.max_climb_slope_rad` (default 0.32 ≈ 18°; acre demo 0.34) | Below the climb cap, or between climb and the tip-safe margin | **Steep grade — contouring.** Slow on the face, A* prefers a contour. Climb if the path is still under the cap. |
+| **IMU tip-stop** | Chassis roll / pitch (accel + fused pose) | Past `max_climb_slope_rad`, or at `robot.tip_roll_rad` / `tip_pitch_rad` (defaults 0.40 / 0.45 ≈ 23° / 26°) | **Tip risk — reversing.** Reverse, pivot, skip a short cluster. Do **not** keep reverse-looping. |
+| **Climbable grade** | Observer / prior slope vs `planner.max_climb_slope_rad` (default 0.32 ≈ 18°; acre demo 0.34) | Chassis ≤ climb cap; mapped cells between climb and the tip-safe margin | **Steep grade — contouring.** Slow on the face, A* prefers a contour. Climb if the path is still under the cap. |
 | **Physics tip-over** | True height-field sit | Full tip thresholds | Episode / job terminate. Software trips stay **below** the static chassis tip (do not raise them to “match” fab). |
 
 IMU `stop` used to fire at `imu_stop_frac * tip` (0.85 × 0.40 = **0.34 rad**).
@@ -25,15 +25,18 @@ fixes that without moving the physics tip.
 
 1. **Climb** — slope and chassis attitude ≤ `max_climb_slope_rad`. Slow
    corridor if the cell is labeled steep. Explore may walk it.
-2. **Contour** — slope (or attitude) above the climb cap but **below**
-   the tip-safe margin (`tip_lethal_frac * min(tip_roll, tip_pitch)`,
-   default 0.95 × 0.40 ≈ 0.38 rad). Costmap / explore A* pay a high
-   contour cost. Owner line: *Steep grade — contouring*. Not a learned
-   blockage.
-3. **Tip-stop** — filtered attitude at/above the tip-safe margin, or a
-   true physics tip. Owner line: *Tip risk — reversing*. Explore stamps
-   a learned no-go only on this path (same #46 blockage disk), not on a
-   climbable hill.
+2. **Contour (planner)** — *mapped / observed* slope above the climb
+   cap but **below** the tip-safe margin (`tip_lethal_frac *
+   min(tip_roll, tip_pitch)`, default 0.95 × 0.40 ≈ 0.38 rad). Costmap
+   / explore A* pay a high contour cost. Incomplete elevation must not
+   invent a blocked wall. Owner line: *Steep grade — contouring*. Not a
+   learned blockage.
+3. **Tip-stop (chassis IMU)** — attitude **past** `max_climb_slope_rad`,
+   or a true physics tip. This is urgent: a ridge can jump ~0.10 rad in
+   one physics step, so we do not wait for `imu_stop_frac`. Owner line:
+   *Tip risk — reversing*. Explore stamps a learned no-go only on this
+   path (same #46 blockage disk), not on a climbable hill. A single
+   non-urgent IMU spike still holds (see Filter).
 4. **Lethal / no-go** — slope ≥ tip-safe margin, drain lip / channel,
    hard structure, or a **learned** blockage from #46. Fence stays.
 
@@ -45,9 +48,10 @@ gentle swale stays grade / slow.
 
 A single IMU spike on a gentle hill must not reverse. `TipHoldFilter`
 takes a short median window (`imu_tilt_window`, default 5) and requires
-`imu_stop_hold_steps` (default 3) consecutive tip classifications before
-emitting `stop`. Attitude at the **full** tip trip still fires
-immediately.
+`imu_stop_hold_steps` (default 3) consecutive *non-urgent* tip
+classifications before emitting `stop`. **Urgent** samples (past the
+climb cap, or attitude at the full physics tip) fire immediately — a
+real tip after level driving must not look like a spike.
 
 ## 4. Reset vs Re-teach
 

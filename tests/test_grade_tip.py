@@ -64,8 +64,8 @@ def test_legacy_imu_advice_still_stops_at_stop_frac() -> None:
 
 
 def test_gentle_hill_is_grade_slow_not_tip() -> None:
-    # ~12° pitch on a 18° climb cap — camera is tilted, chassis is not tipping.
-    got = _cls(0.0, 0.22)
+    # ~15° pitch on an 18° climb cap — camera is tilted, chassis is not tipping.
+    got = _cls(0.0, 0.26)
     assert got.kind == KIND_GRADE
     assert got.advice == "slow"
     assert got.owner_copy == OWNER_STEEP_GRADE
@@ -79,10 +79,10 @@ def test_max_climb_boundary_is_not_tip_stop() -> None:
     assert got.advice != "stop"
 
 
-def test_past_climb_cap_contours() -> None:
+def test_past_climb_cap_is_tip_stop() -> None:
     got = _cls(0.0, 0.36, max_climb=0.32)
-    assert got.kind == KIND_GRADE
-    assert got.advice == "reroute"
+    assert got.kind == KIND_TIP
+    assert got.advice == "stop"
 
 
 def test_ridge_side_roll_near_tip_is_tip() -> None:
@@ -129,6 +129,31 @@ def test_filter_emits_stop_after_hold() -> None:
     assert last is not None
     assert last.advice == "stop"
     assert last.kind == KIND_TIP
+
+
+def test_filter_full_tip_after_flat_frames_is_immediate() -> None:
+    filt = TipHoldFilter(window=5, hold_steps=3)
+    flat = classify_tilt(
+        0.0,
+        0.0,
+        tip_roll_rad=0.40,
+        tip_pitch_rad=0.45,
+        slow_frac=0.55,
+        stop_frac=0.85,
+    )
+    for _ in range(4):
+        filt.update(flat, tip_roll_rad=0.40, tip_pitch_rad=0.45)
+    hard = classify_tilt(
+        0.45,
+        0.0,
+        tip_roll_rad=0.40,
+        tip_pitch_rad=0.45,
+        slow_frac=0.55,
+        stop_frac=0.85,
+    )
+    got = filt.update(hard, tip_roll_rad=0.40, tip_pitch_rad=0.45)
+    assert got.advice == "stop"
+    assert got.kind == KIND_TIP
 
 
 def test_filter_full_tip_is_immediate() -> None:

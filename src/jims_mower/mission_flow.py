@@ -918,8 +918,14 @@ class MissionPolicy:
             advice = combine_advice(env_advice, sensed, chassis, living, fence, power)
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
-        # Climbable grade must not ride a physics "slow" + IMU spike into tip-stop.
-        if advice == "stop" and self.last_tilt_kind == KIND_GRADE and not bool(info.get("tipover")):
+        # IMU spike on a climbable face → contour. Do not rewrite a physics
+        # stop (drain / pond / true tipover).
+        if (
+            advice == "stop"
+            and self.last_tilt_kind == KIND_GRADE
+            and env_advice != "stop"
+            and not bool(info.get("tipover"))
+        ):
             advice = "reroute"
         return advice
 
@@ -1100,22 +1106,6 @@ class MissionPolicy:
                         "skipped_frontiers": int(self.explore_plan.skipped_frontiers),
                     },
                 )
-        if advice == "stop" and self.last_tilt_kind == KIND_GRADE:
-            # Climbable / contour grade — do not stamp a no-go or reverse-loop.
-            self._explore_spin = 0
-            self.explore_reason = self._build_explore_reason(
-                completion, info, n_frontiers=len(thin), code="steep_grade"
-            )
-            if self.phase_step % 2 == 0:
-                self.explore_plan = None
-            return self._look_around(pose)
-        if advice == "reroute" and self.last_tilt_kind == KIND_GRADE:
-            self._explore_spin = 0
-            self.explore_reason = self._build_explore_reason(
-                completion, info, n_frontiers=len(thin), code="steep_grade"
-            )
-            if self.phase_step % 3 == 0:
-                self.explore_plan = None
         if advice == "stop":
             self._explore_spin += 1
             if self._explore_spin >= 4:
@@ -1181,6 +1171,8 @@ class MissionPolicy:
         self._explore_blocked = 0
         remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
         code = "remapping" if remapping and self._progress_map_stall > 8 else "seeking_frontier"
+        if self.last_tilt_kind == KIND_GRADE and not remapping:
+            code = "steep_grade"
         self.explore_reason = self._build_explore_reason(
             completion, info, n_frontiers=len(thin), code=code
         )

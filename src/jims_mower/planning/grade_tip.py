@@ -39,6 +39,7 @@ class TiltClass:
     kind: str
     roll: float
     pitch: float
+    urgent: bool = False
 
     @property
     def owner_copy(self) -> str:
@@ -93,8 +94,11 @@ def classify_tilt(
     When ``max_climb_slope_rad`` is set (mission / coverage path):
 
     * attitude inside the climb cap → climbable **grade** (``slow``, not stop)
-    * between climb and tip-lethal → **contour** (``reroute``)
-    * at/above tip-lethal or the full tip trip → **tip** (``stop``)
+    * past the climb cap → **tip** ``stop`` (urgent). A ridge can jump
+      ~0.10 rad in one physics step; waiting for ``imu_stop_frac`` lets
+      pitch run through 0.38 → 0.47 and actually tip over.
+    * the costmap still *contours* mapped cells between climb and the
+      tip-safe margin — that is planning, not chassis IMU.
 
     When ``max_climb_slope_rad`` is omitted, keep the legacy fractional
     trips so unit tests and older callers still see stop at ``stop_frac``.
@@ -108,12 +112,10 @@ def classify_tilt(
     slow_p = float(slow_frac) * tip_p
     stop_r = float(stop_frac) * tip_r
     stop_p = float(stop_frac) * tip_p
-    lethal_r = float(tip_lethal_frac) * tip_r
-    lethal_p = float(tip_lethal_frac) * tip_p
 
     # Always trip at the physics tip — do not wait for a filter on this path.
     if abs_r >= tip_r or abs_p >= tip_p:
-        return TiltClass("stop", KIND_TIP, roll_a, pitch_a)
+        return TiltClass("stop", KIND_TIP, roll_a, pitch_a, urgent=True)
 
     if max_climb_slope_rad is None:
         if abs_r >= stop_r or abs_p >= stop_p:
@@ -123,20 +125,18 @@ def classify_tilt(
         return TiltClass("ok", KIND_OK, roll_a, pitch_a)
 
     climb = float(max_climb_slope_rad)
-    # True tip margin (near software trip), including a hard side-roll.
-    if abs_r >= lethal_r or abs_p >= lethal_p:
-        return TiltClass("stop", KIND_TIP, roll_a, pitch_a)
-
     in_climb = abs_r <= climb and abs_p <= climb
     if in_climb:
+        # The original bug: IMU stop == max_climb on the acre demo, so a
+        # climbable face looked like a tip. Stay slow, do not reverse.
         if abs_r >= slow_r or abs_p >= slow_p:
             return TiltClass("slow", KIND_GRADE, roll_a, pitch_a)
         return TiltClass("ok", KIND_OK, roll_a, pitch_a)
-
-    # Past the climb cap but not tip-lethal: prefer contour, do not reverse.
+    # Past the climb cap: stop. A ridge can jump 0.10 rad in one physics
+    # step; waiting for imu_stop_frac lets pitch run through 0.38 → 0.47.
     if abs_r >= slow_r or abs_p >= slow_p:
-        return TiltClass("reroute", KIND_GRADE, roll_a, pitch_a)
-    return TiltClass("ok", KIND_OK, roll_a, pitch_a)
+        return TiltClass("stop", KIND_TIP, roll_a, pitch_a, urgent=True)
+    return TiltClass("reroute", KIND_GRADE, roll_a, pitch_a)
 
 
 class TipHoldFilter:
@@ -171,13 +171,17 @@ class TipHoldFilter:
         self._pitches.append(float(sample.pitch))
         roll = float(np.median(np.asarray(self._rolls, dtype=np.float32)))
         pitch = float(np.median(np.asarray(self._pitches, dtype=np.float32)))
-        # Re-classify on the filtered attitude using the sample's kind/advice
-        # as a hint only when the median still agrees.
         filtered = TiltClass(sample.advice, sample.kind, roll, pitch)
-        # Immediate physics-near tip: do not debounce.
-        if abs(roll) >= float(tip_roll_rad) or abs(pitch) >= float(tip_pitch_rad):
+        # Immediate physics-near tip: do not debounce the raw *or* median
+        # sample. A real tip after level driving must not look like a spike.
+        if sample.urgent or (
+            abs(sample.roll) >= float(tip_roll_rad)
+            or abs(sample.pitch) >= float(tip_pitch_rad)
+            or abs(roll) >= float(tip_roll_rad)
+            or abs(pitch) >= float(tip_pitch_rad)
+        ):
             self._stop_hold = 0
-            self.last = TiltClass("stop", KIND_TIP, roll, pitch)
+            self.last = TiltClass("stop", KIND_TIP, sample.roll, sample.pitch, urgent=True)
             return self.last
         if sample.kind == KIND_TIP and sample.advice == "stop":
             self._stop_hold += 1
