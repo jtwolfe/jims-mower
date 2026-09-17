@@ -4,8 +4,9 @@ Honest model for Jamie. Camera tilt on a hill is **not** the same as a
 tip. This note is the contract the gym and owner copy use. No invented
 mAP / RF / acre runtime.
 
-See also [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md) (learned no-go) and
-[`MISSION_FLOW.md`](MISSION_FLOW.md) (phases).
+See also [`CHASSIS_PHYSICS.md`](CHASSIS_PHYSICS.md) (kinematic sit,
+acre mesh, speed, sensors), [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md)
+(learned no-go) and [`MISSION_FLOW.md`](MISSION_FLOW.md) (phases).
 
 ## 1. Two different trips
 
@@ -66,7 +67,29 @@ Owner **Reset** (`POST /api/live/control` `cmd=reset`):
 
 **Re-teach** is a different button. Reset does not drop the keep-in.
 
+## 5. Jamie's four questions (honest)
+
+1. **Real rolling mower, or ground-polygon tangent?** Kinematic sit.
+   `integrate_pose` then `sit_on_terrain` (`atan2` of four contact
+   heights). Not inertia / CG tip-moment physics. See
+   [`CHASSIS_PHYSICS.md`](CHASSIS_PHYSICS.md).
+2. **Raise height-field resolution?** Yes on the acre. `acre_yard` /
+   `acre_yard_demo` are **0.25 m** (was 0.50 m — one cell across the
+   chassis). Golf / default stay as-is.
+3. **Forward ground lidar, or cameras enough?** Cameras + IMU + corner
+   ToF + existing stereo first. A short sit-probe (`grade_look_ahead_m`)
+   uses that height so we slow / contour *before* seated pitch crosses
+   climb → tip. Optional forward ranger later. No lidar stack in this
+   change.
+4. **Decrease top speed while moving around?** Yes. Explore cap
+   `explore_cruise: 0.45` (≈ 0.54 m/s at `max_wheel_speed_mps: 1.2`).
+   Further slow on `KIND_GRADE` / steep via `grade_speed_factor`.
+
+Owner lines stay **Steep grade — contouring** vs **Tip risk — reversing**.
+We did not move `tip_roll_rad` / `tip_pitch_rad` to “pass” the demo.
+
 ## What this is not
 
 Not a retune of gym physics tip constants. Not a claim that every real
-bank is safe. Not a new SLAM stack.
+bank is safe. Not a new SLAM stack. Not a rolling rigid-body engine
+and not a lidar product.

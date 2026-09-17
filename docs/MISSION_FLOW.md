@@ -78,7 +78,7 @@ profile**, not a smaller world:
 * **Demo mow finish** at `max_mow_steps: 1600` or `mow_complete_frac:
   0.10` of the planned reachable lawn, then `return_home` → `complete`.
   Owner cut % is that job fraction (not world-grass %). `cover_radius_m:
-  0.70` paints the 0.50 m raster so strips show; the physical trimmer
+  0.70` paints the coarse demo raster so strips show; the physical trimmer
   stays 0.16 m. IMU tip-stop skips a cluster and keeps mowing.
   `acre_yard` does **not** early-home.
 * `--phase-budget 0.4` scales the phase caps on any yard the same way.

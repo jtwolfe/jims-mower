@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 import numpy as np
 
@@ -145,6 +145,28 @@ def contact_midpoints(
     return front, rear, left, right
 
 
+def sit_on_height_fn(
+    pose: Pose,
+    sample_z: Callable[[float, float], float],
+    length_m: float,
+    track_m: float,
+) -> Pose:
+    """Kinematic seating: four contact heights → z / pitch / roll.
+
+    This is a ground-polygon tangent, not rigid-body rolling. Pitch and
+    roll are ``atan2`` of the front–rear and left–right height differences.
+    """
+    front, rear, left, right = contact_midpoints(pose, length_m, track_m)
+    z_f = float(sample_z(*front))
+    z_r = float(sample_z(*rear))
+    z_l = float(sample_z(*left))
+    z_ri = float(sample_z(*right))
+    z = 0.25 * (z_f + z_r + z_l + z_ri)
+    pitch = math.atan2(z_f - z_r, max(length_m, 1e-6))
+    roll = math.atan2(z_l - z_ri, max(track_m, 1e-6))
+    return Pose(pose.x, pose.y, pose.theta, float(z), float(pitch), float(roll))
+
+
 def sit_on_terrain(
     pose: Pose,
     height_field: Optional["HeightField"],
@@ -154,19 +176,12 @@ def sit_on_terrain(
     """Lift the planar pose onto the height field and set pitch / roll.
 
     Four-wheel samples drive tip / drop checks; pitch and roll come from
-    the front–rear and left–right height differences.
+    the front–rear and left–right height differences. Not inertia / CG
+    tip-moment physics — see ``docs/CHASSIS_PHYSICS.md``.
     """
     if height_field is None:
         return Pose(pose.x, pose.y, pose.theta, 0.0, 0.0, 0.0)
-    front, rear, left, right = contact_midpoints(pose, length_m, track_m)
-    z_f = height_field.sample(*front)
-    z_r = height_field.sample(*rear)
-    z_l = height_field.sample(*left)
-    z_ri = height_field.sample(*right)
-    z = 0.25 * (z_f + z_r + z_l + z_ri)
-    pitch = math.atan2(z_f - z_r, max(length_m, 1e-6))
-    roll = math.atan2(z_l - z_ri, max(track_m, 1e-6))
-    return Pose(pose.x, pose.y, pose.theta, float(z), float(pitch), float(roll))
+    return sit_on_height_fn(pose, height_field.sample, length_m, track_m)
 
 
 def wheel_clearances(

@@ -359,6 +359,11 @@ class PlannerConfig:
     max_climb_slope_rad: float = 0.32
     drain_clearance_m: float = 0.40
     slow_speed_factor: float = 0.35
+    # Extra scale on KIND_GRADE / look-ahead steep (explore and mow).
+    grade_speed_factor: float = 0.50
+    # Forward sit-probe (cameras / stereo / ToF elevation), not a lidar stack.
+    grade_look_ahead_m: float = 1.10
+    grade_look_ahead_samples: int = 4
     strip_spacing_m: float = 0.28
     waypoint_stride_m: float = 0.32
     arrive_radius_m: float = 0.20
@@ -414,7 +419,9 @@ class MissionConfig:
     max_return_steps: int = 500
     snapshot_stride: int = 25
     review_min_closure_m: float = 0.80
-    explore_cruise: float = 0.80
+    # Wheel-command fraction. Actual ≈ explore_cruise * max_wheel_speed_mps
+    # (default 0.45 × 1.2 ≈ 0.54 m/s). Fast CI settings may raise this.
+    explore_cruise: float = 0.45
     mow_cruise: float = 0.55
     # 0 = auto from yard size. Large yards use a longer stride so the
     # teach tracker does not chatter on a 200 m fence.
@@ -921,6 +928,12 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner.drain_clearance_m must be >= 0")
     if not 0.0 < plan.slow_speed_factor <= 1.0:
         raise ConfigError("planner.slow_speed_factor must be in (0, 1]")
+    if not 0.0 < plan.grade_speed_factor <= 1.0:
+        raise ConfigError("planner.grade_speed_factor must be in (0, 1]")
+    if float(plan.grade_look_ahead_m) < 0.0:
+        raise ConfigError("planner.grade_look_ahead_m must be >= 0")
+    if int(plan.grade_look_ahead_samples) < 1:
+        raise ConfigError("planner.grade_look_ahead_samples must be >= 1")
     if plan.strip_spacing_m <= 0 or plan.waypoint_stride_m <= 0:
         raise ConfigError("planner strip/waypoint spacing must be positive")
     if plan.arrive_radius_m <= 0:

@@ -22,6 +22,8 @@ from jims_mower.planning.grade_tip import (
     OWNER_TIP_RISK,
     TipHoldFilter,
     classify_tilt,
+    look_ahead_advice,
+    probe_forward_grade,
     read_tilt,
     tip_lethal_slope_rad,
 )
@@ -363,3 +365,22 @@ def test_read_tilt_prefers_worse_accel() -> None:
     imu = np.array([-3.2, 0.0, 9.2, 0.0, 0.0, 0.0], dtype=np.float32)
     roll, pitch = read_tilt(imu, pose_pitch=0.05, pose_roll=0.0)
     assert abs(pitch) > 0.20
+
+
+def test_forward_probe_is_grade_or_reroute_not_seated_tip() -> None:
+    hf = HeightField.from_function(
+        8.0, 5.0, 0.25, lambda x, y: np.clip((x - 3.8) / 0.16, 0.0, 1.0) * 0.22
+    )
+    pose = sit_on_terrain(Pose(2.6, 2.5, 0.0), hf, 0.50, 0.40)
+    assert abs(pose.pitch) < 0.20
+    ahead = probe_forward_grade(
+        pose,
+        hf.sample,
+        length_m=0.50,
+        track_m=0.40,
+        look_ahead_m=1.10,
+        max_climb_slope_rad=0.32,
+    )
+    assert ahead.kind in {KIND_GRADE, KIND_TIP}
+    assert look_ahead_advice(ahead) in {"slow", "reroute"}
+    assert ahead.owner_copy in {OWNER_STEEP_GRADE, OWNER_TIP_RISK}

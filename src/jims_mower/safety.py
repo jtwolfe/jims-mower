@@ -314,15 +314,20 @@ def terrain_hazards(
     tip_pitch_rad: float,
     wheel_drop_m: float,
     steep_slope_rad: float,
-    look_ahead_m: float = 0.55,
+    look_ahead_m: float = 1.10,
+    look_ahead_samples: int = 4,
+    max_climb_slope_rad: Optional[float] = None,
 ) -> TerrainSafety:
     """Physics-side terrain safety (true height field, not the observer maps).
 
     Recommended policy behaviour (also returned as ``advice``):
     - ``ok`` — continue
-    - ``slow`` — high slope under the chassis; cut speed
-    - ``reroute`` — drain lip ahead or under a wheel; do not straddle
+    - ``slow`` — high slope under the chassis or a climbable face ahead; cut speed
+    - ``reroute`` — drain lip or tip-risk face ahead; do not drive in at speed
     - ``stop`` — tip-over risk or a wheel already in the channel
+
+    Look-ahead uses the same kinematic sit as ``sit_on_terrain``. A face
+    ahead is slow / reroute — it is not a seated physics tip-over.
     """
     if height_field is None:
         return TerrainSafety(
@@ -351,6 +356,21 @@ def terrain_hazards(
     ahead_label = height_field.sample_label(*ahead)
     lip_ahead = ahead_label in {TERRAIN_DRAIN, TERRAIN_DRAIN_EDGE}
     lip_under = any(lab == TERRAIN_DRAIN_EDGE for lab in labels)
+    climb = float(max_climb_slope_rad) if max_climb_slope_rad is not None else float(steep_slope_rad)
+    # Late import: safety is a leaf used by terrain/structures.
+    from jims_mower.planning.grade_tip import KIND_GRADE, KIND_TIP, probe_forward_grade
+
+    ahead_grade = probe_forward_grade(
+        seated,
+        height_field.sample,
+        length_m=length_m,
+        track_m=track_m,
+        look_ahead_m=look_ahead_m,
+        n_samples=look_ahead_samples,
+        tip_roll_rad=tip_roll_rad,
+        tip_pitch_rad=tip_pitch_rad,
+        max_climb_slope_rad=climb,
+    )
 
     if tipover:
         advice, reason = "stop", "tip-over risk from pitch/roll"
@@ -358,8 +378,12 @@ def terrain_hazards(
         advice, reason = "stop", "wheel in earth drain / channel"
     elif lip_ahead or lip_under:
         advice, reason = "reroute", "drain edge — do not drop a wheel in"
-    elif steep:
+    elif ahead_grade.kind == KIND_TIP:
+        advice, reason = "reroute", "grade look-ahead — tip-risk face"
+        steep = True
+    elif ahead_grade.kind == KIND_GRADE or steep:
         advice, reason = "slow", "steep slope — reduce speed"
+        steep = True
     elif any(lab == TERRAIN_POND for lab in labels):
         advice, reason = "stop", "pond keep-out — not mowable water"
         steep = True

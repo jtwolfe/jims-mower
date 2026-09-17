@@ -14,14 +14,17 @@ Planner lethal cells are only those above the tip-safe margin — see
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
 from jims_mower.constants import GRAVITY_MPS2
+from jims_mower.kinematics import sit_on_height_fn
 from jims_mower.planning.fusion import attitude_from_accel
+from jims_mower.types import Pose
 
 KIND_OK = "ok"
 KIND_GRADE = "grade"
@@ -203,3 +206,180 @@ def owner_copy_for_tilt(kind: str, advice: str = "") -> str:
     if kind == KIND_GRADE:
         return OWNER_STEEP_GRADE
     return ""
+
+
+def grade_aware_cruise(
+    base: float,
+    *,
+    advice: str,
+    tilt_kind: str,
+    slow_speed_factor: float,
+    grade_speed_factor: float,
+) -> float:
+    """Scale a wheel-command cruise for explore / steep / unknown faces.
+
+    ``base`` is the existing cruise fraction (× ``max_wheel_speed_mps``
+    ≈ m/s). Climbable grade uses ``grade_speed_factor``; other ``slow``
+    advice uses ``slow_speed_factor``. Does not change tip radians.
+    """
+    cruise = float(base)
+    if tilt_kind == KIND_GRADE:
+        cruise *= float(grade_speed_factor)
+    elif advice == "slow":
+        cruise *= float(slow_speed_factor)
+    return max(0.0, cruise)
+
+
+def probe_forward_grade(
+    pose: Pose,
+    sample_z: Callable[[float, float], float],
+    *,
+    length_m: float,
+    track_m: float,
+    look_ahead_m: float = 1.10,
+    n_samples: int = 4,
+    tip_roll_rad: float = 0.40,
+    tip_pitch_rad: float = 0.45,
+    slow_frac: float = 0.55,
+    stop_frac: float = 0.85,
+    max_climb_slope_rad: Optional[float] = None,
+    tip_lethal_frac: float = 0.95,
+) -> TiltClass:
+    """Sit-model pitch/roll if the chassis were translated forward.
+
+    Same ``atan2`` seating as ``sit_on_terrain`` — not a rolling rigid
+    body. Used so the controller can slow or contour *before* the seated
+    pose crosses climb → tip. Does not emit owner tip-stop by itself.
+    """
+    reach = max(float(look_ahead_m), 0.0)
+    samples = max(1, int(n_samples))
+    if reach <= 1e-6:
+        seated = sit_on_height_fn(pose, sample_z, length_m, track_m)
+        return classify_tilt(
+            seated.roll,
+            seated.pitch,
+            tip_roll_rad=tip_roll_rad,
+            tip_pitch_rad=tip_pitch_rad,
+            slow_frac=slow_frac,
+            stop_frac=stop_frac,
+            max_climb_slope_rad=max_climb_slope_rad,
+            tip_lethal_frac=tip_lethal_frac,
+        )
+    heading = float(pose.theta)
+    c, s = math.cos(heading), math.sin(heading)
+    worst = classify_tilt(
+        0.0,
+        0.0,
+        tip_roll_rad=tip_roll_rad,
+        tip_pitch_rad=tip_pitch_rad,
+        slow_frac=slow_frac,
+        stop_frac=stop_frac,
+        max_climb_slope_rad=max_climb_slope_rad,
+        tip_lethal_frac=tip_lethal_frac,
+    )
+    rank = {"ok": 0, "slow": 1, "reroute": 2, "stop": 3}
+    start = min(0.28, reach)
+    for dist in np.linspace(start, reach, samples):
+        ghost = Pose(
+            pose.x + float(dist) * c,
+            pose.y + float(dist) * s,
+            pose.theta,
+        )
+        seated = sit_on_height_fn(ghost, sample_z, length_m, track_m)
+        got = classify_tilt(
+            seated.roll,
+            seated.pitch,
+            tip_roll_rad=tip_roll_rad,
+            tip_pitch_rad=tip_pitch_rad,
+            slow_frac=slow_frac,
+            stop_frac=stop_frac,
+            max_climb_slope_rad=max_climb_slope_rad,
+            tip_lethal_frac=tip_lethal_frac,
+        )
+        if rank.get(got.advice, 0) > rank.get(worst.advice, 0):
+            worst = got
+        elif rank.get(got.advice, 0) == rank.get(worst.advice, 0) and (
+            abs(got.pitch) + abs(got.roll) > abs(worst.pitch) + abs(worst.roll)
+        ):
+            worst = got
+    return worst
+
+
+def look_ahead_from_elevation(
+    pose: Pose,
+    elevation: Optional[np.ndarray],
+    *,
+    resolution_m: float,
+    length_m: float,
+    track_m: float,
+    look_ahead_m: float = 1.10,
+    n_samples: int = 4,
+    tip_roll_rad: float = 0.40,
+    tip_pitch_rad: float = 0.45,
+    slow_frac: float = 0.55,
+    stop_frac: float = 0.85,
+    max_climb_slope_rad: Optional[float] = None,
+    tip_lethal_frac: float = 0.95,
+) -> Optional[TiltClass]:
+    """Forward sit-probe on an observer / stereo+ToF elevation raster."""
+    if elevation is None:
+        return None
+    arr = np.asarray(elevation)
+    if arr.ndim != 2 or arr.size == 0:
+        return None
+    # Local nearest-cell sample — do not import perception.stereo here
+    # (that package pulls terrain → safety → this module).
+    sample_z = _raster_sample_z(arr, resolution_m)
+    return probe_forward_grade(
+        pose,
+        sample_z,
+        length_m=length_m,
+        track_m=track_m,
+        look_ahead_m=look_ahead_m,
+        n_samples=n_samples,
+        tip_roll_rad=tip_roll_rad,
+        tip_pitch_rad=tip_pitch_rad,
+        slow_frac=slow_frac,
+        stop_frac=stop_frac,
+        max_climb_slope_rad=max_climb_slope_rad,
+        tip_lethal_frac=tip_lethal_frac,
+    )
+
+
+def _raster_sample_z(elev: np.ndarray, resolution_m: float) -> Callable[[float, float], float]:
+    ev = np.asarray(elev, dtype=np.float32)
+    rows, cols = int(ev.shape[0]), int(ev.shape[1])
+    res = max(float(resolution_m), 1e-6)
+
+    def height_at(x: float, y: float) -> float:
+        if x < 0.0 or y < 0.0:
+            return 0.0
+        rr = int(y / res)
+        cc = int(x / res)
+        if 0 <= rr < rows and 0 <= cc < cols:
+            return float(ev[rr, cc])
+        return 0.0
+
+    return height_at
+
+
+def look_ahead_advice(ahead: Optional[TiltClass]) -> str:
+    """Map a sit-probe to controller advice. Ahead tip-risk is reroute, not stop."""
+    if ahead is None or ahead.kind == KIND_OK:
+        return "ok"
+    if ahead.kind == KIND_TIP:
+        return "reroute"
+    if ahead.kind == KIND_GRADE:
+        return "slow"
+    return "ok"
+
+
+def merge_look_ahead_kind(current_kind: str, ahead: Optional[TiltClass]) -> str:
+    """Look-ahead tip-risk is a contour, not an IMU reverse / no-go stamp."""
+    if ahead is None or ahead.kind == KIND_OK:
+        return current_kind
+    if current_kind == KIND_TIP:
+        return current_kind
+    if ahead.kind in {KIND_GRADE, KIND_TIP}:
+        return KIND_GRADE
+    return current_kind
