@@ -1364,7 +1364,13 @@ class MissionPolicy:
                 advice = "reroute"
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
         if self._mow_no_progress(pose, info, advice):
-            self._stamp_learned_blockage(pose, info, reason="mow_no_progress")
+            hard = (
+                self.last_tilt_kind == KIND_TIP
+                or bool((info or {}).get("collision"))
+                or bool((info or {}).get("tipover"))
+            )
+            if hard:
+                self._stamp_learned_blockage(pose, info, reason="mow_no_progress")
             if self.index < len(self.global_plan.waypoints):
                 skipped = self.global_plan.waypoints[self.index]
                 self._skipped_global.append(skipped)
@@ -1406,7 +1412,10 @@ class MissionPolicy:
                 skipped_now = True
             skip_limit = 48
             min_mow = 80
-            if len(self._skipped_global) >= skip_limit and self.phase_step >= min_mow:
+            stop_skips = sum(1 for ev in self.events if ev.event == "unreachable_segment" and ev.detail.get("reason") == "stop")
+            if stop_skips >= skip_limit and self.phase_step >= min_mow:
+                if self._replan_leftover_uncut(pose, info):
+                    return self._hold()
                 self._emit(
                     "mow_budget",
                     {
@@ -1753,8 +1762,12 @@ class MissionPolicy:
                 self._blocked_frontier_count += 1
         if len(self._skipped_frontiers) > 32:
             self._skipped_frontiers = self._skipped_frontiers[-32:]
-        self.explore_plan = None
-        self.index = 0
+        # Explore must drop the current frontier plan. Mow must keep the
+        # coverage index — resetting to 0 was re-skipping the first strip
+        # and aborting the tiny job at ~50–80% cut.
+        if self.phase != MissionPhase.MOW:
+            self.explore_plan = None
+            self.index = 0
         self._reset_explore_progress(pose, self.observed.completion(self.keep_in_mask))
         self._emit(
             "blockage_stamped",
