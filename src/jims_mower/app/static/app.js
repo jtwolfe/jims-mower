@@ -1,5 +1,5 @@
 (() => {
-  window.JIMS_UI_BUILD = "owner-ui-3";
+  window.JIMS_UI_BUILD = "owner-ui-4";
   const ONBOARD = ["unbox", "pair", "home", "teach", "mow"];
   const KEY = "jims_mower_onboarded";
 
@@ -479,6 +479,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       { id: "drain", label: "Drain", color: "#c46024" },
       { id: "beds", label: "Beds", color: "#58763c" },
       { id: "keepout", label: "Keep-out", color: "#c82828" },
+      { id: "blocked", label: "Blocked / no-go learned", color: "#c44c7a" },
       { id: "fog", label: "Fog", color: "#1c1e22" },
     ];
   }

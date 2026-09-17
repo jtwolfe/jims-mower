@@ -44,6 +44,8 @@ FREE_RGB = (46, 140, 58)
 EXPLORED_RGB = (72, 176, 88)
 HAZARD_RGB = (196, 96, 36)
 STRUCTURE_RGB = (92, 92, 110)
+BLOCKAGE_RGB = (196, 76, 122)
+BLOCKAGE_VIEW_HEX = "#c44c7a"
 # Owner-view water / sheds: saturated so they read through fog holes.
 # Physics / CV still use POND_RGB / BUILDING_RGB on the true field.
 POND_VIEW_RGB = (28, 164, 214)
@@ -66,6 +68,7 @@ AREA_LEGEND: tuple[dict[str, str], ...] = (
     {"id": "drain", "label": "Drain", "color": "#c46024"},
     {"id": "beds", "label": "Beds", "color": "#58763c"},
     {"id": "keepout", "label": "Keep-out", "color": "#c82828"},
+    {"id": "blocked", "label": "Blocked / no-go learned", "color": "#c44c7a"},
     {"id": "fog", "label": "Fog", "color": "#1c1e22"},
 )
 FOG_RGB = (16, 18, 22)
@@ -88,6 +91,7 @@ class ObservedMap:
     occupancy: np.ndarray
     elevation_set: np.ndarray
     locked: np.ndarray
+    blockage: np.ndarray
     width_m: float
     height_m: float
     resolution_m: float
@@ -117,6 +121,7 @@ class ObservedMap:
             occupancy=np.zeros((rows, cols), dtype=np.float32),
             elevation_set=np.zeros((rows, cols), dtype=bool),
             locked=np.zeros((rows, cols), dtype=bool),
+            blockage=np.zeros((rows, cols), dtype=bool),
             width_m=float(width_m),
             height_m=float(height_m),
             resolution_m=res,
@@ -158,6 +163,29 @@ class ObservedMap:
             self.explored[rows, cols] = True
             self.confidence[rows, cols] = np.maximum(self.confidence[rows, cols], 0.70)
         return int(fresh.sum())
+
+    def stamp_blockage(self, x: float, y: float, radius_m: float) -> int:
+        """Mark a local disk as a learned no-go (lethal for planning).
+
+        Invisible / dynamic blockages (physics that never painted a shed,
+        a fence the cameras missed, wheel-slip against a lip) become
+        known-blocked: observed, not free, high occupancy. Returns newly
+        blocked cells. Does not lock — a later owner remap can restamp.
+        """
+        cell = self._disk_indices(x, y, radius_m)
+        if cell[0].size == 0:
+            return 0
+        rows, cols = cell
+        fresh = ~np.asarray(self.blockage[rows, cols], dtype=bool)
+        self.blockage[rows, cols] = True
+        self.observed[rows, cols] = True
+        self.occupancy[rows, cols] = np.maximum(self.occupancy[rows, cols], 0.95)
+        self.confidence[rows, cols] = np.maximum(self.confidence[rows, cols], 0.80)
+        self.refresh_free()
+        return int(fresh.sum())
+
+    def blockage_count(self) -> int:
+        return int(np.asarray(self.blockage, dtype=bool).sum())
 
     def stamp_cameras(
         self,
@@ -343,7 +371,8 @@ class ObservedMap:
         # Channels are forbidden. Isolated lip stamps from the colour
         # heuristic are not a ditch — the costmap can still slow them.
         channel = self.hazard >= HAZARD_DRAIN
-        self.free = self.observed & ~hard & ~channel
+        learned = np.asarray(self.blockage, dtype=bool)
+        self.free = self.observed & ~hard & ~channel & ~learned
 
     def keep_in_mask(self, spec: Optional[GeofenceSpec]) -> np.ndarray:
         if spec is None or not spec.has_polygons():
@@ -383,7 +412,8 @@ class ObservedMap:
             self.structure,
             (STRUCTURE_BUILDING, STRUCTURE_BUNKER, STRUCTURE_GARDEN, STRUCTURE_GREEN),
         )
-        blocked = blocked | hard | (self.hazard >= HAZARD_DRAIN)
+        learned = np.asarray(self.blockage, dtype=bool)
+        blocked = blocked | hard | (self.hazard >= HAZARD_DRAIN) | learned
         if keep_in is not None:
             blocked = blocked | ~np.asarray(keep_in, dtype=bool)
         return blocked
@@ -404,6 +434,7 @@ class ObservedMap:
         rgb[mask & (self.structure == STRUCTURE_GREEN)] = GARDEN_VIEW_RGB
         rgb[mask & (self.structure == STRUCTURE_BUILDING)] = BUILDING_VIEW_RGB
         rgb[mask & (self.structure == STRUCTURE_POND)] = POND_VIEW_RGB
+        rgb[mask & np.asarray(self.blockage, dtype=bool)] = BLOCKAGE_RGB
         return rgb
 
     def as_rgb(self, *, frontiers: Optional[list[tuple[int, int]]] = None) -> np.ndarray:
@@ -502,6 +533,7 @@ class ObservedMap:
             occupancy=self.occupancy.copy(),
             elevation_set=np.asarray(self.elevation_set, dtype=bool).copy(),
             locked=np.asarray(self.locked, dtype=bool).copy(),
+            blockage=np.asarray(self.blockage, dtype=bool).copy(),
             width_m=self.width_m,
             height_m=self.height_m,
             resolution_m=self.resolution_m,
@@ -523,6 +555,7 @@ class ObservedMap:
             occupancy=np.asarray(self.occupancy, dtype=np.float32),
             elevation_set=np.asarray(self.elevation_set, dtype=bool),
             locked=np.asarray(self.locked, dtype=bool),
+            blockage=np.asarray(self.blockage, dtype=bool),
             width_m=np.float32(self.width_m),
             height_m=np.float32(self.height_m),
             resolution_m=np.float32(self.resolution_m),
@@ -548,6 +581,9 @@ class ObservedMap:
             locked=np.asarray(data["locked"], dtype=bool)
             if "locked" in data.files
             else np.zeros_like(data["observed"], dtype=bool),
+            blockage=np.asarray(data["blockage"], dtype=bool)
+            if "blockage" in data.files
+            else np.zeros_like(data["observed"], dtype=bool),
             width_m=float(data["width_m"]),
             height_m=float(data["height_m"]),
             resolution_m=float(data["resolution_m"]),
@@ -567,6 +603,7 @@ class ObservedMap:
             "omap_occupancy": np.asarray(self.occupancy, dtype=np.float32),
             "omap_elevation_set": np.asarray(self.elevation_set, dtype=bool),
             "omap_locked": np.asarray(self.locked, dtype=bool),
+            "omap_blockage": np.asarray(self.blockage, dtype=bool),
         }
 
     @classmethod
@@ -588,6 +625,9 @@ class ObservedMap:
             else np.zeros_like(data["omap_observed"], dtype=bool),
             locked=np.asarray(data["omap_locked"], dtype=bool)
             if "omap_locked" in files
+            else np.zeros_like(data["omap_observed"], dtype=bool),
+            blockage=np.asarray(data["omap_blockage"], dtype=bool)
+            if "omap_blockage" in files
             else np.zeros_like(data["omap_observed"], dtype=bool),
             width_m=float(data["width_m"]),
             height_m=float(data["height_m"]),
@@ -717,9 +757,12 @@ def frontiers(
     free: np.ndarray,
     *,
     keep_in: Optional[np.ndarray] = None,
+    ignore_unknown: Optional[np.ndarray] = None,
 ) -> list[tuple[int, int]]:
     """Known-free cells that touch unknown (and stay inside keep-in)."""
     unknown = ~np.asarray(observed, dtype=bool)
+    if ignore_unknown is not None:
+        unknown = unknown & ~np.asarray(ignore_unknown, dtype=bool)
     safe = np.asarray(free, dtype=bool)
     if keep_in is not None:
         region = np.asarray(keep_in, dtype=bool)

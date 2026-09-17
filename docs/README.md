@@ -13,6 +13,7 @@ Wave notes and the on-box message contract live here.
 | [`WAVE4.md`](WAVE4.md) | Appearance categories, persist occupancy, wet/energy plan, world/Orin hooks |
 | [`TERRAIN_MAPS.md`](TERRAIN_MAPS.md) | Observer-vs-physics grade, paths/structures, golf + acre yards |
 | [`MISSION_FLOW.md`](MISSION_FLOW.md) | Calibrate → explore → freeze map → global mow; live SSE + fog-of-war |
+| [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md) | Unknown vs free vs learned no-go; why full explore thrashed at ~20% |
 | [`UX.md`](UX.md) | World Viewer + Teach Boundary (low-poly mesh, no mAP/FPS) |
 | [`UX_B.md`](UX_B.md) | FaultBus, dead-motor SOS, radio sim, `jims-mower-selftest` |
 | [`UX_C.md`](UX_C.md) | Thin owner app, YardProfile API, buy→mow (BT / optional Wi-Fi / LoRa) |

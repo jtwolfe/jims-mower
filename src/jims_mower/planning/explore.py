@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Iterable, Optional
 
 import numpy as np
 
@@ -22,6 +22,7 @@ class ExplorePlan:
     frontier_cells: list[tuple[int, int]] = field(default_factory=list)
     no_frontier: bool = False
     unreachable_frontiers: int = 0
+    skipped_frontiers: int = 0
 
     @property
     def done(self) -> bool:
@@ -43,20 +44,40 @@ def explore_costmap(omap: ObservedMap, keep_in: Optional[np.ndarray] = None) -> 
     )
 
 
+def _cell_near_skip(
+    cell: tuple[int, int],
+    skip: Iterable[tuple[int, int]],
+    *,
+    radius: int = 3,
+) -> bool:
+    r2 = max(1, int(radius)) ** 2
+    cr, cc = cell
+    for sr, sc in skip:
+        if (cr - sr) ** 2 + (cc - sc) ** 2 <= r2:
+            return True
+    return False
+
+
 def plan_explore(
     omap: ObservedMap,
     start_xy: tuple[float, float],
     *,
     keep_in: Optional[np.ndarray] = None,
     waypoint_stride_m: float = 0.40,
+    skip_cells: Optional[Iterable[tuple[int, int]]] = None,
+    avoid_xy: Optional[tuple[float, float]] = None,
+    cluster_cells: int = 3,
 ) -> ExplorePlan:
     """A* from the robot to the nearest reachable frontier.
 
     The goal is a known-free cell that touches unknown. Local camera/ToF
     stamps then grow known space; the planner never assumes unknown is safe.
+    Learned blockage cells and ``skip_cells`` (failed no-progress frontiers)
+    are not retried — they count as unreachable so the owner line is honest.
     """
     cm = explore_costmap(omap, keep_in)
-    raw = frontiers(omap.observed, omap.free, keep_in=keep_in)
+    ignore = np.asarray(omap.blockage, dtype=bool)
+    raw = frontiers(omap.observed, omap.free, keep_in=keep_in, ignore_unknown=ignore)
     thin = downsample_frontiers(raw, min_sep=2, limit=80)
     start = cm.nearest_free(*start_xy)
     if start is None:
@@ -66,10 +87,30 @@ def plan_explore(
     if not thin:
         return ExplorePlan(waypoints=[], frontier_cells=[], no_frontier=True)
 
-    # Try nearest first, then a few farther frontiers if A* cannot connect.
-    ordered = sorted(thin, key=lambda rc: (rc[0] - start[0]) ** 2 + (rc[1] - start[1]) ** 2)
+    skip = list(skip_cells or [])
+    skipped = 0
+    candidates: list[tuple[int, int]] = []
+    for cell in thin:
+        if bool(ignore[cell]) or (skip and _cell_near_skip(cell, skip, radius=cluster_cells)):
+            skipped += 1
+            continue
+        candidates.append(cell)
+
+    # Try nearest first, then farther frontiers if A* cannot connect.
+    # After a nearby failure, prefer a different heading so we do not
+    # oscillate on the same free/unknown lip.
+    def _score(rc: tuple[int, int]) -> tuple[float, float]:
+        dist2 = float((rc[0] - start[0]) ** 2 + (rc[1] - start[1]) ** 2)
+        penalty = 0.0
+        if avoid_xy is not None:
+            ax, ay = omap.cell_to_world(*rc)
+            penalty = -((ax - avoid_xy[0]) ** 2 + (ay - avoid_xy[1]) ** 2)
+        return (dist2 + 0.35 * penalty, dist2)
+
+    ordered = sorted(candidates, key=_score)
     unreachable = 0
-    for target in ordered[:16]:
+    try_n = min(len(ordered), 28)
+    for target in ordered[:try_n]:
         if cm.blocked[target]:
             snapped = cm.nearest_free(*cm.cell_to_world(*target))
             if snapped is None:
@@ -84,19 +125,23 @@ def plan_explore(
         if cells[-1] != path[-1]:
             cells.append(path[-1])
         waypoints = [cm.cell_to_world(r, c) for r, c in cells]
+        leftover = max(0, len(ordered) - try_n)
         return ExplorePlan(
             waypoints=waypoints,
             cells=cells,
             target=target,
             frontier_cells=thin,
             no_frontier=False,
-            unreachable_frontiers=unreachable,
+            unreachable_frontiers=unreachable + skipped + leftover,
+            skipped_frontiers=skipped,
         )
+    leftover = max(0, len(ordered) - try_n)
     return ExplorePlan(
         waypoints=[],
         frontier_cells=thin,
-        no_frontier=False,
-        unreachable_frontiers=unreachable + max(0, len(ordered) - 16),
+        no_frontier=not candidates,
+        unreachable_frontiers=unreachable + skipped + leftover,
+        skipped_frontiers=skipped,
     )
 
 
@@ -106,7 +151,12 @@ def pick_frontier_world(
     *,
     keep_in: Optional[np.ndarray] = None,
 ) -> Optional[tuple[float, float]]:
-    raw = frontiers(omap.observed, omap.free, keep_in=keep_in)
+    raw = frontiers(
+        omap.observed,
+        omap.free,
+        keep_in=keep_in,
+        ignore_unknown=np.asarray(omap.blockage, dtype=bool),
+    )
     start = omap.world_to_cell(*start_xy)
     if start is None:
         start = (int(omap.rows / 2), int(omap.cols / 2))

@@ -125,6 +125,7 @@ def test_build_path_overlay_explore_hides_mow_plan() -> None:
     assert overlay["colors"]["trail"] == "#aa88ff"
     assert overlay["colors"]["plan"] == "#2ad4e6"
     assert overlay["colors"]["mowable"] == "#7de66e"
+    assert overlay["colors"]["blocked"] == "#c44c7a"
 
 
 def test_build_path_overlay_mow_shows_plan_not_frontiers() -> None:

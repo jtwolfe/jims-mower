@@ -197,6 +197,16 @@ class MissionPolicy:
         self.explore_reason: dict[str, Any] = {}
         self._explore_blocked = 0
         self._explore_spin = 0
+        self._skipped_frontiers: list[tuple[int, int]] = []
+        self._blockage_events = 0
+        self._blocked_frontier_count = 0
+        self._last_blockage_xy: Optional[tuple[float, float]] = None
+        self._progress_pose: Optional[tuple[float, float]] = None
+        self._progress_best = 1e9
+        self._progress_stall = 0
+        self._progress_map = 0.0
+        self._progress_map_stall = 0
+        self._explore_recover_cool = 0
         self._return_kind = ""
         self._resume_phase: Optional[MissionPhase] = None
         self._resume_index = 0
@@ -493,6 +503,16 @@ class MissionPolicy:
         self.explore_reason = {}
         self._explore_blocked = 0
         self._explore_spin = 0
+        self._skipped_frontiers = []
+        self._blockage_events = 0
+        self._blocked_frontier_count = 0
+        self._last_blockage_xy = None
+        self._progress_pose = None
+        self._progress_best = 1e9
+        self._progress_stall = 0
+        self._progress_map = 0.0
+        self._progress_map_stall = 0
+        self._explore_recover_cool = 0
         self._return_kind = ""
         self._resume_phase = None
         self._resume_index = 0
@@ -637,6 +657,9 @@ class MissionPolicy:
             "fence_unusable": bool(self.fence_unusable),
             "explore_reason": dict(self.explore_reason or self._build_explore_reason(completion, info)),
             "full_explore": bool(self.settings.full_explore),
+            "blocked_cells": int(omap.blockage_count()) if omap is not None else 0,
+            "blocked_frontiers": int(self._blocked_frontier_count),
+            "n_blockages": int(self._blockage_events),
             "return_kind": self._return_kind,
             "charge_state": self._charge_state(),
             "resume_phase": self._resume_phase.value if self._resume_phase is not None else "",
@@ -848,7 +871,12 @@ class MissionPolicy:
     ) -> np.ndarray:
         assert self.observed is not None
         keep = self.keep_in_mask
-        raw = frontiers(self.observed.observed, self.observed.free, keep_in=keep)
+        raw = frontiers(
+            self.observed.observed,
+            self.observed.free,
+            keep_in=keep,
+            ignore_unknown=np.asarray(self.observed.blockage, dtype=bool),
+        )
         thin = downsample_frontiers(raw, min_sep=2, limit=40)
         self._frontier_xy = [self.observed.cell_to_world(r, c) for r, c in thin]
         completion = self.observed.completion(keep)
@@ -870,6 +898,7 @@ class MissionPolicy:
                     "timed_out": bool(timed_out and not ready),
                     "no_frontier": not thin,
                     "full_explore": bool(self.settings.full_explore),
+                    "blocked_frontiers": int(self._blocked_frontier_count),
                 },
             )
             if self._keep_in_too_small():
@@ -877,27 +906,80 @@ class MissionPolicy:
             self._transition(MissionPhase.REVIEW)
             return self._hold()
 
+        if self._explore_recover_cool > 0:
+            self._explore_recover_cool -= 1
+            remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
+            self.explore_reason = self._build_explore_reason(
+                completion,
+                info,
+                n_frontiers=len(thin),
+                code="remapping" if remapping else "blockage_stamped",
+            )
+            if self._explore_recover_cool >= 2:
+                return self._reverse_nudge(pose)
+            if self._explore_recover_cool == 1:
+                return self._lateral_nudge(pose)
+            self.explore_plan = None
+            self.index = 0
+
+        stalled = self._explore_no_progress(pose, info, advice, completion)
+        if stalled:
+            self._stamp_learned_blockage(pose, info, reason="no_progress")
+            remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
+            self.explore_reason = self._build_explore_reason(
+                completion,
+                info,
+                n_frontiers=len(thin),
+                code="remapping" if remapping else "blockage_stamped",
+            )
+            self._explore_recover_cool = 3
+            return self._reverse_nudge(pose)
+
         need_new = (
             self.explore_plan is None
             or self.index >= len(self.explore_plan.waypoints)
             or self.phase_step % 12 == 0
         )
         if need_new:
+            prev_target = self.explore_plan.target if self.explore_plan is not None else None
+            avoid = self._last_blockage_xy
             self.explore_plan = plan_explore(
                 self.observed,
                 (pose.x, pose.y),
                 keep_in=keep,
                 waypoint_stride_m=max(0.35, self.cfg.planner.waypoint_stride_m),
+                skip_cells=self._skipped_frontiers,
+                avoid_xy=avoid,
+                cluster_cells=int(self.settings.blockage_cluster_cells),
             )
             self.index = 0
+            if self.explore_plan.target != prev_target:
+                self._reset_explore_progress(pose, completion)
             if self.explore_plan.target is not None:
                 tx, ty = self.observed.cell_to_world(*self.explore_plan.target)
-                self._emit("frontier_target", {"x": tx, "y": ty, "n_frontiers": len(thin)})
+                self._emit(
+                    "frontier_target",
+                    {
+                        "x": tx,
+                        "y": ty,
+                        "n_frontiers": len(thin),
+                        "unreachable_frontiers": int(self.explore_plan.unreachable_frontiers),
+                        "skipped_frontiers": int(self.explore_plan.skipped_frontiers),
+                    },
+                )
         if advice == "stop":
+            self._explore_spin += 1
+            if self._explore_spin >= 4:
+                self._stamp_learned_blockage(pose, info, reason="tip_collision")
+                self.explore_reason = self._build_explore_reason(
+                    completion, info, n_frontiers=len(thin), code="blockage_stamped"
+                )
+                self._explore_spin = 0
+                self._explore_recover_cool = 3
+                return self._reverse_nudge(pose)
             self.explore_reason = self._build_explore_reason(
                 completion, info, n_frontiers=len(thin), code="tip_recovery"
             )
-            self._explore_spin += 1
             if self._explore_spin % 2 == 1:
                 return self._reverse_nudge(pose)
             return self._look_around(pose)
@@ -905,8 +987,12 @@ class MissionPolicy:
         if self.explore_plan is None or not self.explore_plan.waypoints:
             # Frontiers exist but A* cannot connect, or none remain.
             self._explore_blocked += 1
-            blocked = bool(thin) or int(getattr(self.explore_plan, "unreachable_frontiers", 0) or 0) > 0
+            unreachable = int(getattr(self.explore_plan, "unreachable_frontiers", 0) or 0)
+            blocked = bool(thin) or unreachable > 0 or bool(self._skipped_frontiers)
             code = "path_blocked" if blocked else "no_frontier"
+            if self._explore_blocked >= 3 and thin:
+                self._stamp_learned_blockage(pose, info, reason="path_blocked")
+                code = "frontier_skipped"
             self.explore_reason = self._build_explore_reason(
                 completion, info, n_frontiers=len(thin), code=code
             )
@@ -944,8 +1030,10 @@ class MissionPolicy:
                 return self._nudge_toward_frontier(pose, thin[0])
             return self._hold()
         self._explore_blocked = 0
+        remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
+        code = "remapping" if remapping and self._progress_map_stall > 8 else "seeking_frontier"
         self.explore_reason = self._build_explore_reason(
-            completion, info, n_frontiers=len(thin), code="seeking_frontier"
+            completion, info, n_frontiers=len(thin), code=code
         )
         return self._track_list(
             self.explore_plan.waypoints,
@@ -1036,6 +1124,18 @@ class MissionPolicy:
             self._transition(MissionPhase.RETURN_HOME)
             return self._hold()
         self.index = self._skip_arrived(self.global_plan.waypoints, pose, self.index)
+        if self._mow_no_progress(pose, info, advice):
+            self._stamp_learned_blockage(pose, info, reason="mow_no_progress")
+            if self.index < len(self.global_plan.waypoints):
+                skipped = self.global_plan.waypoints[self.index]
+                self._skipped_global.append(skipped)
+                self._emit(
+                    "unreachable_segment",
+                    {"x": skipped[0], "y": skipped[1], "index": self.index, "reason": "blockage"},
+                )
+                self.index += 1
+            self._local_replan(obs, pose)
+            self._reset_explore_progress(pose, 0.0)
         if advice == "stop" and self._stop_cool > 0:
             # After a ridge skip, keep painting instead of crawling reverse.
             advice = "slow"
@@ -1269,6 +1369,173 @@ class MissionPolicy:
         )
         return self._drive(float(wheels[0]), float(wheels[1]), 0.0, pose)
 
+    def _reset_explore_progress(self, pose: Pose, completion: float) -> None:
+        self._progress_pose = (pose.x, pose.y)
+        self._progress_best = 1e9
+        self._progress_stall = 0
+        if completion + 1e-6 >= self._progress_map:
+            self._progress_map = float(completion)
+            self._progress_map_stall = 0
+
+    def _current_explore_goal(self, pose: Pose) -> Optional[tuple[float, float]]:
+        if self.explore_plan is None:
+            return None
+        wps = self.explore_plan.waypoints
+        if wps and 0 <= self.index < len(wps):
+            return wps[self.index]
+        if self.explore_plan.target is not None and self.observed is not None:
+            return self.observed.cell_to_world(*self.explore_plan.target)
+        return None
+
+    def _explore_no_progress(
+        self,
+        pose: Pose,
+        info: dict[str, Any],
+        advice: str,
+        completion: float,
+    ) -> bool:
+        """True when commanded motion is not approaching the frontier / growing the map."""
+        if self.explore_plan is None or not self.explore_plan.waypoints:
+            return False
+        if self._explore_recover_cool > 0:
+            return False
+        goal = self._current_explore_goal(pose)
+        moved = 0.0
+        if self._progress_pose is not None:
+            moved = math.hypot(pose.x - self._progress_pose[0], pose.y - self._progress_pose[1])
+        self._progress_pose = (pose.x, pose.y)
+        if completion > self._progress_map + 0.003:
+            self._progress_map = float(completion)
+            self._progress_map_stall = 0
+            self._progress_stall = 0
+            if goal is not None:
+                self._progress_best = min(
+                    self._progress_best, math.hypot(pose.x - goal[0], pose.y - goal[1])
+                )
+            return False
+        self._progress_map_stall += 1
+        progressed = False
+        if goal is not None:
+            dist = math.hypot(pose.x - goal[0], pose.y - goal[1])
+            if dist + 0.05 < self._progress_best:
+                self._progress_best = dist
+                progressed = True
+        if moved >= 0.06:
+            progressed = True
+        if progressed:
+            self._progress_stall = 0
+            return False
+        self._progress_stall += 1
+        if advice == "stop" or bool(info.get("collision")) or bool(info.get("tipover")):
+            self._progress_stall += 2
+        commanded = abs(self._last_v) > 0.05
+        pivoting = abs(self._last_omega) > 0.35
+        if commanded and (not pivoting) and moved < 0.03:
+            self._progress_stall += 1
+        limit = max(4, int(self.settings.blockage_no_progress_steps))
+        return self._progress_stall >= limit
+
+    def _mow_no_progress(self, pose: Pose, info: dict[str, Any], advice: str) -> bool:
+        """Stamp a no-go when mow tracking is commanded but the pose is stuck."""
+        if self.global_plan is None or self.index >= len(self.global_plan.waypoints):
+            return False
+        if self._detour or self._replan_cool > 0:
+            return False
+        goal = self.global_plan.waypoints[self.index]
+        moved = 0.0
+        if self._progress_pose is not None:
+            moved = math.hypot(pose.x - self._progress_pose[0], pose.y - self._progress_pose[1])
+        self._progress_pose = (pose.x, pose.y)
+        dist = math.hypot(pose.x - goal[0], pose.y - goal[1])
+        if dist + 0.05 < self._progress_best:
+            self._progress_best = dist
+            self._progress_stall = 0
+            return False
+        if moved >= 0.06:
+            self._progress_stall = 0
+            return False
+        self._progress_stall += 1
+        if advice == "stop" or bool(info.get("collision")) or bool(info.get("tipover")):
+            self._progress_stall += 2
+        commanded = abs(self._last_v) > 0.05
+        pivoting = abs(self._last_omega) > 0.35
+        if commanded and (not pivoting) and moved < 0.03:
+            self._progress_stall += 1
+        limit = max(6, int(self.settings.blockage_no_progress_steps) + 4)
+        return self._progress_stall >= limit
+
+    def _blockage_stamp_xy(self, pose: Pose) -> tuple[float, float]:
+        """A point ahead of the chassis — never the robot's own cell."""
+        heading = float(pose.theta)
+        ahead = (
+            pose.x + 0.62 * math.cos(heading),
+            pose.y + 0.62 * math.sin(heading),
+        )
+        goal = self._current_explore_goal(pose)
+        if goal is not None and math.hypot(goal[0] - pose.x, goal[1] - pose.y) < 1.15:
+            ahead = goal
+        if math.hypot(ahead[0] - pose.x, ahead[1] - pose.y) < 0.38:
+            ahead = (
+                pose.x + 0.70 * math.cos(heading) - 0.35 * math.sin(heading),
+                pose.y + 0.70 * math.sin(heading) + 0.35 * math.cos(heading),
+            )
+        return ahead
+
+    def _stamp_learned_blockage(
+        self,
+        pose: Pose,
+        info: dict[str, Any],
+        *,
+        reason: str,
+    ) -> int:
+        """Paint a local no-go, skip the current frontier, and force a replan."""
+        _ = info
+        if self.observed is None:
+            return 0
+        x, y = self._blockage_stamp_xy(pose)
+        radius = float(self.settings.blockage_radius_m)
+        added = self.observed.stamp_blockage(x, y, radius)
+        self._last_blockage_xy = (x, y)
+        self._blockage_events += 1
+        target = self.explore_plan.target if self.explore_plan is not None else None
+        if target is not None:
+            self._skipped_frontiers.append(target)
+            self._blocked_frontier_count += 1
+        elif self.observed.world_to_cell(x, y) is not None:
+            cell = self.observed.world_to_cell(x, y)
+            if cell is not None:
+                self._skipped_frontiers.append(cell)
+                self._blocked_frontier_count += 1
+        if len(self._skipped_frontiers) > 32:
+            self._skipped_frontiers = self._skipped_frontiers[-32:]
+        self.explore_plan = None
+        self.index = 0
+        self._reset_explore_progress(pose, self.observed.completion(self.keep_in_mask))
+        self._emit(
+            "blockage_stamped",
+            {
+                "x": x,
+                "y": y,
+                "radius_m": radius,
+                "cells": int(added),
+                "reason": reason,
+                "blocked_frontiers": int(self._blocked_frontier_count),
+                "unreachable_frontiers": int(self._blocked_frontier_count),
+            },
+        )
+        if target is not None:
+            tx, ty = self.observed.cell_to_world(*target)
+            self._emit(
+                "frontier_skipped",
+                {
+                    "x": tx,
+                    "y": ty,
+                    "reason": reason,
+                    "blocked_frontiers": int(self._blocked_frontier_count),
+                },
+            )
+        return added
+
     def _build_explore_reason(
         self,
         completion: float,
@@ -1282,15 +1549,22 @@ class MissionPolicy:
         max_steps = int(self.settings.max_explore_steps)
         n_front = int(n_frontiers if n_frontiers is not None else len(self._frontier_xy))
         n_wp = 0
-        unreachable = 0
+        unreachable = int(self._blocked_frontier_count)
+        skipped = int(len(self._skipped_frontiers))
         if self.explore_plan is not None:
             n_wp = len(self.explore_plan.waypoints)
-            unreachable = int(getattr(self.explore_plan, "unreachable_frontiers", 0) or 0)
+            unreachable = max(
+                unreachable,
+                int(getattr(self.explore_plan, "unreachable_frontiers", 0) or 0),
+            )
+            skipped = max(skipped, int(getattr(self.explore_plan, "skipped_frontiers", 0) or 0))
         if not code:
             if self.phase != MissionPhase.EXPLORE:
                 code = "idle"
             elif self.last_advice == "stop":
                 code = "tip_recovery"
+            elif self._blockage_events and self._explore_recover_cool > 0:
+                code = "blockage_stamped"
             elif n_wp > 0:
                 code = "seeking_frontier"
             elif n_front > 0 or unreachable > 0:
@@ -1308,6 +1582,9 @@ class MissionPolicy:
             "no_frontier": "No reachable frontier",
             "stalled": "Explore stalled",
             "idle": "Idle",
+            "blockage_stamped": "Blocked — remapping around obstacle",
+            "frontier_skipped": "Frontier unreachable — skipping",
+            "remapping": "Blocked — remapping around obstacle",
         }
         label = (
             f"{labels.get(code, code)} · map {100.0 * completion:.0f}% of target "
@@ -1315,6 +1592,8 @@ class MissionPolicy:
         )
         if n_front:
             label = f"{label} · {n_front} frontiers"
+        if unreachable:
+            label = f"{label} · {unreachable} unreachable"
         return {
             "code": code,
             "label": label,
@@ -1325,6 +1604,10 @@ class MissionPolicy:
             "n_frontiers": n_front,
             "n_waypoints": n_wp,
             "unreachable_frontiers": unreachable,
+            "skipped_frontiers": skipped,
+            "blocked_cells": int(self.observed.blockage_count()) if self.observed is not None else 0,
+            "blocked_frontiers": int(self._blocked_frontier_count),
+            "n_blockages": int(self._blockage_events),
             "full_explore": bool(self.settings.full_explore),
         }
 
@@ -1378,6 +1661,8 @@ class MissionPolicy:
         snap = self.snapshot
         keep = snap.keep_in_mask if snap is not None else self.keep_in_mask
         extra = self.observed.unknown_blocked(keep)
+        if np.any(np.asarray(self.observed.blockage, dtype=bool)):
+            extra = extra | np.asarray(self.observed.blockage, dtype=bool)
         structure = self.observed.structure if snap is None else snap.structure
         raw_hazard = self.observed.hazard if snap is None else snap.hazard
         conf = self.observed.confidence if snap is None else snap.confidence
@@ -1761,6 +2046,10 @@ class MissionPolicy:
     def _enter(self, phase: MissionPhase, event: str, detail: Optional[dict[str, Any]] = None) -> None:
         self.phase = phase
         self.phase_step = 0
+        self._progress_stall = 0
+        self._progress_best = 1e9
+        self._progress_pose = None
+        self._explore_recover_cool = 0
         self.phase_ranges.append({"phase": phase.value, "start": self.step, "end": None})
         self._emit(event, detail or {})
 
@@ -1902,6 +2191,7 @@ def _fast_settings(base: MissionConfig) -> MissionConfig:
         phase_budget_scale=1.0,
         review_hold_steps=min(2, int(base.review_hold_steps or 2)),
         mow_complete_frac=float(base.mow_complete_frac or 0.0),
+        blockage_no_progress_steps=min(10, int(base.blockage_no_progress_steps or 16)),
         cover_radius_m=float(base.cover_radius_m or 0.0),
         mow_skip_cluster=max(4, int(base.mow_skip_cluster or 4)),
         mow_stop_cool=max(6, int(base.mow_stop_cool or 10)),

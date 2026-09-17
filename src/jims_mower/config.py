@@ -441,6 +441,13 @@ class MissionConfig:
     charge_resume_soc: float = 0.80
     # Gym charge increment per mission tick at the dock (not a BMS claim).
     gym_charge_soc_per_step: float = 0.12
+    # Learned no-go: no progress toward the current frontier / waypoint
+    # for this many steps (or collision / tip / slip proxies) stamps a
+    # local blockage disk, skips that frontier, and replans.
+    blockage_no_progress_steps: int = 16
+    blockage_radius_m: float = 0.55
+    blockage_cluster_cells: int = 4
+    blockage_replan_after: int = 6
 
 
 @dataclass
@@ -1016,6 +1023,14 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("mission.charge_resume_soc must be in [0, 1]")
     if not 0.0 < float(mission.gym_charge_soc_per_step) <= 1.0:
         raise ConfigError("mission.gym_charge_soc_per_step must be in (0, 1]")
+    if int(mission.blockage_no_progress_steps) < 2:
+        raise ConfigError("mission.blockage_no_progress_steps must be >= 2")
+    if float(mission.blockage_radius_m) <= 0.0:
+        raise ConfigError("mission.blockage_radius_m must be > 0")
+    if int(mission.blockage_cluster_cells) < 1:
+        raise ConfigError("mission.blockage_cluster_cells must be >= 1")
+    if int(mission.blockage_replan_after) < 1:
+        raise ConfigError("mission.blockage_replan_after must be >= 1")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

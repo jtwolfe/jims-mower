@@ -207,7 +207,9 @@ phone shell). Not a cloud account and not a claimed RF / mapping score.
 `--live` `/status` adds `backend`, `robot` (idle / pairing / live /
 fault), `owner_copy`, `radio_path`, map/cut %, `session_summary`,
 `explore_reason`, `full_explore`, `charge_state`, `path_overlay`,
-`mode_banner` (Mapping vs Mowing), and `areas_url` / `area_legend`.
+`mode_banner` (Mapping vs Mowing), `areas_url` / `area_legend`
+(includes learned **Blocked / no-go**), and blockage counts
+(`blocked_cells` / `blocked_frontiers`).
 `/api/live` and `/api/live/snapshot` carry the same overlay (downsampled
 trail / plan / frontiers). No RF range or mAP claim.
 `start` after `estop` is the operator clear of the software latch.
