@@ -75,6 +75,9 @@ def test_explore_reason_field_on_status() -> None:
         "no_frontier",
         "stalled",
         "idle",
+        "blockage_stamped",
+        "frontier_skipped",
+        "remapping",
     }
     assert "map" in reason["label"]
     assert "step" in reason["label"]
@@ -199,6 +202,7 @@ def test_area_type_overlay_and_legend() -> None:
         "drain",
         "beds",
         "keepout",
+        "blocked",
         "fog",
     } <= ids
     assert all(row.get("label") and row.get("color") for row in legend)

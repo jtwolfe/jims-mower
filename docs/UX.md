@@ -42,7 +42,8 @@ confirmation (`calibrate_confirm_m: 28`), and a **demo**
 `--speed max` can reach **MAP READY then MOW** in a practical window
 even with leftover frontiers. `acre_yard` stays at `0.72` / 4000 and a
 full fence lap. It is not a coverage benchmark. See
-[`MISSION_FLOW.md`](MISSION_FLOW.md). The viewer owner bar starts,
+[`MISSION_FLOW.md`](MISSION_FLOW.md) and
+[`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md). The viewer owner bar starts,
 pauses, sets speed, holds MAP READY for a 2 s beat (or **Start mow**),
 and ESTOPs locally. The phone app (`jims-mower-owner --live`) is the
 owner product loop; this desktop bar stays for laptop debugging.

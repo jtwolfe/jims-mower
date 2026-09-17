@@ -147,15 +147,24 @@ with 0 mowable cells stays on “Fence too small — re-teach the keep-in.”
 `session_summary.json` tracks the live phase (not a leftover calibrate
 card from Teach → Save). After MAP READY the phone draws **area types**
 (grass / path / sand / building / water / drain / beds / keep-out) plus
-the automatic **mowable mask** and coverage-plan polyline.
+the automatic **mowable mask**, learned **Blocked / no-go** cells, and
+coverage-plan polyline.
 
 ## Unknown-space semantics
 
+Learned invisible / dynamic no-go (no-progress, tip, collision, slip)
+is a separate `blockage` raster — see
+[`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md).
+
 `ObservedMap` keeps explicit `observed` / `explored` / `free` / `hazard`
-/ `structure` / `elevation` / `confidence` / `elevation_set`.
+/ `structure` / `elevation` / `confidence` / `elevation_set` / `blockage`.
 
 * Unknown is **not** mowable and **not** safe transit.
+* Learned **blockage** is known no-go (lethal). It is not fog and not
+  a drain/shed class — the phone paints it as “Blocked / no-go learned.”
 * Frontiers are known-free cells adjacent to unknown, inside keep-in.
+  A frontier A* can reach is not “yard reachable.” Failed progress
+  stamps a blockage, skips that lip, and counts it unreachable.
 * **Cameras** grow the seen mask (ground-plane hits). That is occupancy,
   not height.
 * **IMU pitch/roll** is local chassis attitude / tip. It is a slow prior
@@ -174,7 +183,9 @@ the automatic **mowable mask** and coverage-plan polyline.
 * Map-ready when `observed` fraction ≥ `mission.explore_complete`, or
   there are no frontiers and the fraction is at least
   `mission.explore_no_frontier`, or `max_explore_steps` elapses
-  (demo: leftover frontiers are OK).
+  (demo: leftover frontiers are OK). Full explore past the step cap
+  keeps seeking **other** frontiers after a blockage stamp; it does
+  not spin on the same lip.
 
 ## Coverage plan
 

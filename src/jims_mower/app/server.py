@@ -14,7 +14,7 @@ from jims_mower.viewer import static_dir as viewer_static_dir
 from jims_mower.yard_profile import YardProfileError, yard_profile_from_dict
 
 # Bump when owner-phone static files change so browsers drop a stale app.js.
-UI_BUILD = "owner-ui-3"
+UI_BUILD = "owner-ui-4"
 STATIC_CACHE_CONTROL = "no-store, no-cache, must-revalidate"
 
 

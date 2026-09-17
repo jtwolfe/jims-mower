@@ -95,7 +95,8 @@ map % of target / step cap), `full_explore`, `charge_state`, and a
 (explore / review / teach — never `running` → mowing). Overlay arrays
 are downsampled for SSE. Keep-out holes draw red on the phone fence.
 Area-type legend: grass / mow-this / path / sand / building / water /
-drain / beds / keep-out / fog. No mAP / RF range claimed.
+drain / beds / keep-out / blocked (no-go learned) / fog. See
+[`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md). No mAP / RF range claimed.
 
 `POST /command` `start` after ESTOP is the operator clear. On `--live`
 it forwards to `LiveSession.control` (`start` / `pause` / `estop` /
@@ -115,8 +116,8 @@ Narrow phone chrome (~390 px). Hash routes:
   **Explore / Mow / Return home** (enabled from `can_*`, disabled reason
   shown), a **Full explore** On/Off toggle, then the map with area-type
   raster, a labeled **Area types** legend (grass / mow-this / path /
-  sand / building / water / drain / beds / keep-out / fog) plus the
-  Path Fog/Mapped/Trail/Plan/Cut row. **Low battery** inject is on Map
+  sand / building / water / drain / beds / keep-out / blocked / fog)
+  plus the Path Fog/Mapped/Trail/Plan/Cut row. **Low battery** inject is on Map
   and Health (`{cmd: inject, kind: low_soc}`). Pair still required
   before Start. Else 2D SVG yard.
 - `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run, Low battery inject when `--live`

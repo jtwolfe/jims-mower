@@ -49,6 +49,7 @@ OWNER_LABELS = (
     "Drain",
     "Beds",
     "Keep-out",
+    "Blocked / no-go learned",
 )
 
 STATUS_FLAGS = (

@@ -60,6 +60,7 @@ OVERLAY_COLORS = {
     "water": "#1ca4d6",
     "drain": "#c46024",
     "beds": "#58763c",
+    "blocked": "#c44c7a",
 }
 
 

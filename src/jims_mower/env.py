@@ -703,8 +703,19 @@ class MowerEnv(gym.Env):
                 np.array([left_n, right_n, 1.0 if self._trimmer_on else 0.0], dtype=np.float32),
                 n_cameras=len(self.cameras),
             )
+        mission_phase = str(getattr(self, "_mission_phase", "") or "")
+        recoverable_hit = hit is not None and mission_phase in {
+            "explore",
+            "mow",
+            "calibrate_boundary",
+            "return_home",
+        }
+        if recoverable_hit and self._prev_pose is not None:
+            # Undo the penetrating step so the mission can stamp a no-go
+            # and reverse. Do not end the owner job on the first tree bump.
+            self._pose = self._prev_pose
         terminated = bool(
-            hit is not None
+            (hit is not None and not recoverable_hit)
             or oob
             or terrain_ev.tipover
             or terrain_ev.drain_drop
