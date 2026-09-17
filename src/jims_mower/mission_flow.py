@@ -2694,7 +2694,8 @@ class MissionPolicy:
 
     def _in_work_area(self, x: float, y: float) -> bool:
         """Keep retrace on the yard — do not reverse off a 6×5 world lip."""
-        margin = 0.22
+        radius = float(getattr(self.cfg.robot, "collision_radius_m", 0.35) or 0.35)
+        margin = max(0.40, radius + 0.16)
         if x < margin or y < margin:
             return False
         if x > float(self.cfg.world.width_m) - margin:
@@ -2716,6 +2717,8 @@ class MissionPolicy:
         if self.phase not in {MissionPhase.EXPLORE, MissionPhase.MOW}:
             return
         if self._chassis_tipped or self._retrace_wps:
+            return
+        if not self._in_work_area(pose.x, pose.y):
             return
         pt = (float(pose.x), float(pose.y), float(pose.theta))
         if not self._pose_trail:
@@ -2757,6 +2760,10 @@ class MissionPolicy:
         if self._chassis_tipped:
             self._clear_retrace()
             return None
+        if not self._in_work_area(pose.x, pose.y):
+            self._clear_retrace()
+            self._retrace_cool = 12
+            return self._lateral_nudge(pose)
         arrive = max(0.22, float(self.cfg.planner.arrive_radius_m))
         while self._retrace_index < len(self._retrace_wps):
             tx, ty = self._retrace_wps[self._retrace_index]
