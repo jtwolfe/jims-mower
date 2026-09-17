@@ -122,6 +122,8 @@ def test_live_reset_control_returns_idle_ready(tmp_path: Path) -> None:
     assert out["job_state"] == "idle"
     assert out.get("kept_blockages") is True
     assert out.get("can_reset") is True
+    assert "start mow" not in str(out.get("owner_copy") or "").lower()
+    assert out.get("can_explore") is True
     if session.policy is not None:
         assert session.policy._stop_cool == 0
         assert session.policy.profile is not None or session.owner_taught or True

@@ -236,6 +236,13 @@ def owner_copy_for(
         return OWNER_COPY["low_battery"]
     if charge_state == "resuming":
         return OWNER_COPY["resuming_explore"] if phase == "explore" else OWNER_COPY["resuming_mow"]
+    # Idle after Reset (or parked): do not keep asking to start mow.
+    if job_state == "idle" and phase not in {"complete", "teach", "calibrate_boundary"}:
+        if isinstance(explore_reason, dict) and explore_reason.get("label"):
+            return str(explore_reason["label"])
+        if taught:
+            return OWNER_COPY["taught_idle"]
+        return OWNER_COPY["idle"]
     # MAP READY is a review beat, not SafeState / ESTOP.
     if phase == "review":
         return OWNER_COPY["review"]
