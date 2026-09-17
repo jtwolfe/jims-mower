@@ -22,7 +22,7 @@ from jims_mower.scenarios import load_source
 from jims_mower.terrain import HeightField
 from jims_mower.types import Pose
 
-from tests.test_full_fence_job import _run_taught_tiny_job
+from test_full_fence_job import _run_taught_tiny_job
 
 # Live stuck baseline (tests/fixtures/phase0_baseline.md) — beat these.
 BASELINE_MAP_STUCK = 0.40
