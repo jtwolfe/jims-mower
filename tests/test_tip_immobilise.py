@@ -181,6 +181,47 @@ def test_look_ahead_refuses_forward_before_crossing() -> None:
     assert look_ahead_advice(ahead, physics=True) == "stop"
 
 
+def test_mission_past_tip_holds_not_reverse() -> None:
+    from jims_mower.constants import GRAVITY_MPS2
+    from jims_mower.mission_flow import MissionPhase, MissionPolicy
+    from jims_mower.profile import YardProfile
+
+    cfg, scenario = load_source("mission_tiny")
+    cfg.sensors.width = 32
+    cfg.sensors.height = 24
+    cfg.sensors.camera_count = 4
+    cfg.sensors.cameras = []
+    env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
+    profile = YardProfile(
+        name="tip_hold",
+        width_m=env.cfg.world.width_m,
+        height_m=env.cfg.world.height_m,
+        resolution_m=env.cfg.world.resolution_m,
+        keep_in=[(0.7, 0.7), (5.0, 0.7), (5.0, 4.0), (0.7, 4.0)],
+        home={"x": 1.2, "y": 1.2, "theta": 0.0},
+    )
+    obs, info = env.reset(seed=2, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info, profile=profile)
+    roll = 0.42
+    g = float(GRAVITY_MPS2)
+    info = dict(info)
+    info["terrain_advice"] = "stop"
+    info["pose"] = {**(info.get("pose") or {}), "roll": roll, "pitch": 0.0}
+    info["tipover"] = False
+    obs = dict(obs)
+    obs["imu"] = np.array(
+        [0.0, g * math.sin(roll), g * math.cos(roll), 0.0, 0.0, 0.0],
+        dtype=np.float32,
+    )
+    action = policy.act(obs, info)
+    env.close()
+    assert float(action[0]) == 0.0 and float(action[1]) == 0.0
+    assert policy.last_tilt_kind == KIND_TIP
+    assert policy.help_requested is True
+    assert policy.phase == MissionPhase.FAULT
+
+
 def test_climbable_grade_still_contours() -> None:
     hf = _climbable_field()
     pose = sit_on_terrain(Pose(2.4, 2.5, 0.0), hf, 0.50, 0.40)
