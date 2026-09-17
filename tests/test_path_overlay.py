@@ -78,6 +78,11 @@ def test_mode_banner_mapping_vs_mowing() -> None:
     assert idle["kind"] == "idle"
     assert mode_banner_for("complete", "idle")["label"] == "Done"
 
+    sos = mode_banner_for("explore", "idle", tipped=True)
+    assert sos["label"] == "SOS — immobilised"
+    assert "Ready" not in sos["label"]
+    assert mission_from_phase("explore", "idle", tipped=True) == "fault"
+
 
 def test_mission_from_phase_not_running_equals_mowing() -> None:
     assert mission_from_phase("explore", "running") == "explore"

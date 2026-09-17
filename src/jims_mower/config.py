@@ -363,7 +363,7 @@ class PlannerConfig:
     grade_speed_factor: float = 0.50
     # Forward sit-probe (cameras / stereo / ToF elevation), not a lidar stack.
     grade_look_ahead_m: float = 1.10
-    grade_look_ahead_samples: int = 4
+    grade_look_ahead_samples: int = 6
     strip_spacing_m: float = 0.28
     waypoint_stride_m: float = 0.32
     arrive_radius_m: float = 0.20

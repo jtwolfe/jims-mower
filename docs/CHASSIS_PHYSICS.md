@@ -18,8 +18,16 @@ Software tip checks compare that seated (and IMU) pitch / roll to
 tip-over is the same sit crossing the tip thresholds. We did **not**
 retune those fab constants in this change.
 
-Full CG tip-moment physics is **future work**. This repo does not ship
-a rolling rigid-body engine.
+`sit_on_terrain` will report |roll| / |pitch| **past** those trips.
+That is not a driveable re-seat. Once seated attitude (or env
+`tipover`) crosses the static tip angle we **latch** tipped /
+immobilised: wheels hold, owner SOS, `tilt_kind=tip`. Idle / explore
+stall / gym terminate must not clear that to Ready. Only owner
+**Reset / retrieve** (reseat at home) clears the latch — and if the
+retrieve pose still sits past tip, it re-arms.
+
+That latch is a **minimal static-tip latch**, not a CG tip-moment
+engine. Full rolling rigid-body physics is still **future work**.
 
 ## Should we increase ground-polygon / height-field resolution?
 
@@ -40,7 +48,10 @@ band), four downward ToF corners, and IMU. This change probes that
 height (physics field and observer / stereo+ToF raster) a short
 distance ahead (`planner.grade_look_ahead_m`, default 1.10 m) with the
 same sit model so the controller can slow or contour *before* seated
-pitch crosses climb → tip.
+pitch crosses climb → tip. A predicted sit **past the physics tip**
+is a **hard stop** (do not keep commanding forward). Climbable faces
+still contour. The probe starts ~0.06 m ahead of the hub so a bank
+inside the old 0.28 m blind zone cannot roll the chassis in one step.
 
 A dedicated forward ground ranger is **optional later**, not a v1 hard
 dependency. We did not add a lidar stack.
@@ -58,4 +69,5 @@ CI `--fast` settings may still raise cruise so tests finish.
 ## What this is not
 
 Not a claim that every real bank is safe. Not a new SLAM or lidar
-product. Not a change to owner phone/desktop chrome from #47.
+product. Not a retune of `tip_roll_rad` / `tip_pitch_rad`. Past-tip
+is immobilise / SOS, not Idle Ready.

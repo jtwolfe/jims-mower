@@ -149,6 +149,7 @@ class FaultBus:
         self._imu_freeze = False
         self._gnss_dropout = False
         self._stuck = False
+        self._tipped = False
         self._radio_loss: Optional[str] = None
         self._frozen_imu: Optional[np.ndarray] = None
         self._encoder_left = 0.0
@@ -265,9 +266,21 @@ class FaultBus:
     def drive_dead(self) -> bool:
         return self.left_dead or self.right_dead
 
+    def latch_tipover(self) -> None:
+        """Past-tip chassis: same SOS / retrieve path as a dead drive motor."""
+        self._tipped = True
+
+    def clear_tipover(self) -> None:
+        """Owner Reset / retrieve only — do not clear on idle or explore stall."""
+        self._tipped = False
+
+    @property
+    def chassis_tipped(self) -> bool:
+        return bool(self._tipped)
+
     @property
     def immobilised(self) -> bool:
-        return self.drive_dead
+        return self.drive_dead or bool(self._tipped)
 
     @property
     def stuck(self) -> bool:
@@ -363,6 +376,15 @@ class FaultBus:
     def report(self, pose: Any = None, *, gnss_dropped: bool = False) -> FaultReport:
         pose_d = pose_dict(pose)
         if self.immobilised:
+            if self._tipped and not self.drive_dead:
+                return FaultReport(
+                    code=CODE_IMMOBILISED,
+                    component=CHASSIS,
+                    pose=pose_d,
+                    retrieve=True,
+                    mode="tipover",
+                    reason="tipped — immobilised, retrieve",
+                )
             side = DRIVE_LEFT if self.left_dead else DRIVE_RIGHT
             mode = self._left_dead if self.left_dead else self._right_dead
             return FaultReport(
@@ -440,6 +462,7 @@ class FaultBus:
         blob["applied"] = [float(v) for v in self.last_applied]
         blob["immobilised"] = bool(self.immobilised)
         blob["stuck"] = bool(self.stuck)
+        blob["chassis_tipped"] = bool(self._tipped)
         if report.code not in FAULT_CODES and report.code != CODE_OK:
             blob["code"] = CODE_OK
         return blob

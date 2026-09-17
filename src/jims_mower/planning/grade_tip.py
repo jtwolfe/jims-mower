@@ -22,7 +22,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from jims_mower.constants import GRAVITY_MPS2
-from jims_mower.kinematics import sit_on_height_fn
+from jims_mower.kinematics import attitude_past_tip, sit_on_height_fn
 from jims_mower.planning.fusion import attitude_from_accel
 from jims_mower.types import Pose
 
@@ -43,6 +43,7 @@ class TiltClass:
     roll: float
     pitch: float
     urgent: bool = False
+    past_tip: bool = False
 
     @property
     def owner_copy(self) -> str:
@@ -118,7 +119,7 @@ def classify_tilt(
 
     # Always trip at the physics tip — do not wait for a filter on this path.
     if abs_r >= tip_r or abs_p >= tip_p:
-        return TiltClass("stop", KIND_TIP, roll_a, pitch_a, urgent=True)
+        return TiltClass("stop", KIND_TIP, roll_a, pitch_a, urgent=True, past_tip=True)
 
     if max_climb_slope_rad is None:
         if abs_r >= stop_r or abs_p >= stop_p:
@@ -177,14 +178,19 @@ class TipHoldFilter:
         filtered = TiltClass(sample.advice, sample.kind, roll, pitch)
         # Immediate physics-near tip: do not debounce the raw *or* median
         # sample. A real tip after level driving must not look like a spike.
-        if sample.urgent or (
-            abs(sample.roll) >= float(tip_roll_rad)
-            or abs(sample.pitch) >= float(tip_pitch_rad)
-            or abs(roll) >= float(tip_roll_rad)
-            or abs(pitch) >= float(tip_pitch_rad)
-        ):
+        past = bool(sample.past_tip) or attitude_past_tip(
+            sample.roll, sample.pitch, tip_roll_rad, tip_pitch_rad
+        ) or attitude_past_tip(roll, pitch, tip_roll_rad, tip_pitch_rad)
+        if sample.urgent or past:
             self._stop_hold = 0
-            self.last = TiltClass("stop", KIND_TIP, sample.roll, sample.pitch, urgent=True)
+            self.last = TiltClass(
+                "stop",
+                KIND_TIP,
+                sample.roll,
+                sample.pitch,
+                urgent=True,
+                past_tip=past,
+            )
             return self.last
         if sample.kind == KIND_TIP and sample.advice == "stop":
             self._stop_hold += 1
@@ -237,13 +243,15 @@ def probe_forward_grade(
     length_m: float,
     track_m: float,
     look_ahead_m: float = 1.10,
-    n_samples: int = 4,
+    n_samples: int = 6,
     tip_roll_rad: float = 0.40,
     tip_pitch_rad: float = 0.45,
     slow_frac: float = 0.55,
     stop_frac: float = 0.85,
     max_climb_slope_rad: Optional[float] = None,
     tip_lethal_frac: float = 0.95,
+    include_here: bool = True,
+    min_start_m: float = 0.06,
 ) -> TiltClass:
     """Sit-model pitch/roll if the chassis were translated forward.
 
@@ -267,18 +275,33 @@ def probe_forward_grade(
         )
     heading = float(pose.theta)
     c, s = math.cos(heading), math.sin(heading)
-    worst = classify_tilt(
-        0.0,
-        0.0,
-        tip_roll_rad=tip_roll_rad,
-        tip_pitch_rad=tip_pitch_rad,
-        slow_frac=slow_frac,
-        stop_frac=stop_frac,
-        max_climb_slope_rad=max_climb_slope_rad,
-        tip_lethal_frac=tip_lethal_frac,
-    )
+    if include_here:
+        here = sit_on_height_fn(pose, sample_z, length_m, track_m)
+        worst = classify_tilt(
+            here.roll,
+            here.pitch,
+            tip_roll_rad=tip_roll_rad,
+            tip_pitch_rad=tip_pitch_rad,
+            slow_frac=slow_frac,
+            stop_frac=stop_frac,
+            max_climb_slope_rad=max_climb_slope_rad,
+            tip_lethal_frac=tip_lethal_frac,
+        )
+    else:
+        worst = classify_tilt(
+            0.0,
+            0.0,
+            tip_roll_rad=tip_roll_rad,
+            tip_pitch_rad=tip_pitch_rad,
+            slow_frac=slow_frac,
+            stop_frac=stop_frac,
+            max_climb_slope_rad=max_climb_slope_rad,
+            tip_lethal_frac=tip_lethal_frac,
+        )
     rank = {"ok": 0, "slow": 1, "reroute": 2, "stop": 3}
-    start = min(0.28, reach)
+    # Physics probes from just in front of the hub. Observer rasters
+    # start a little farther so unknown-zero cells are not a ghost cliff.
+    start = min(max(float(min_start_m), 0.0), reach)
     for dist in np.linspace(start, reach, samples):
         ghost = Pose(
             pose.x + float(dist) * c,
@@ -296,7 +319,9 @@ def probe_forward_grade(
             max_climb_slope_rad=max_climb_slope_rad,
             tip_lethal_frac=tip_lethal_frac,
         )
-        if rank.get(got.advice, 0) > rank.get(worst.advice, 0):
+        if got.past_tip and not worst.past_tip:
+            worst = got
+        elif rank.get(got.advice, 0) > rank.get(worst.advice, 0):
             worst = got
         elif rank.get(got.advice, 0) == rank.get(worst.advice, 0) and (
             abs(got.pitch) + abs(got.roll) > abs(worst.pitch) + abs(worst.roll)
@@ -313,7 +338,7 @@ def look_ahead_from_elevation(
     length_m: float,
     track_m: float,
     look_ahead_m: float = 1.10,
-    n_samples: int = 4,
+    n_samples: int = 6,
     tip_roll_rad: float = 0.40,
     tip_pitch_rad: float = 0.45,
     slow_frac: float = 0.55,
@@ -343,6 +368,8 @@ def look_ahead_from_elevation(
         stop_frac=stop_frac,
         max_climb_slope_rad=max_climb_slope_rad,
         tip_lethal_frac=tip_lethal_frac,
+        include_here=False,
+        min_start_m=0.20,
     )
 
 
@@ -363,10 +390,18 @@ def _raster_sample_z(elev: np.ndarray, resolution_m: float) -> Callable[[float, 
     return height_at
 
 
-def look_ahead_advice(ahead: Optional[TiltClass]) -> str:
-    """Map a sit-probe to controller advice. Ahead tip-risk is reroute, not stop."""
+def look_ahead_advice(ahead: Optional[TiltClass], *, physics: bool = False) -> str:
+    """Map a sit-probe to controller advice.
+
+    Observer rasters are full of unknown zeros — a ghost cliff must not
+    become IMU tip-stop / limp. The true height field owns hard stop
+    (``physics=True`` or ``terrain_hazards``). Past-climb under tip stays
+    a contour / reroute so climbable hills still A* around.
+    """
     if ahead is None or ahead.kind == KIND_OK:
         return "ok"
+    if ahead.past_tip:
+        return "stop" if physics else "reroute"
     if ahead.kind == KIND_TIP:
         return "reroute"
     if ahead.kind == KIND_GRADE:
@@ -375,11 +410,11 @@ def look_ahead_advice(ahead: Optional[TiltClass]) -> str:
 
 
 def merge_look_ahead_kind(current_kind: str, ahead: Optional[TiltClass]) -> str:
-    """Look-ahead tip-risk is a contour, not an IMU reverse / no-go stamp."""
-    if ahead is None or ahead.kind == KIND_OK:
-        return current_kind
+    """Look-ahead risk is a contour. Seated / env tip-over already owns tip."""
     if current_kind == KIND_TIP:
         return current_kind
-    if ahead.kind in {KIND_GRADE, KIND_TIP}:
+    if ahead is None or ahead.kind == KIND_OK:
+        return current_kind
+    if ahead.kind in {KIND_GRADE, KIND_TIP} or ahead.past_tip:
         return KIND_GRADE
     return current_kind

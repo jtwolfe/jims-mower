@@ -45,7 +45,9 @@ from jims_mower.mission_flow import (
     scale_mission_budget,
     session_summary,
 )
+from jims_mower.kinematics import attitude_past_tip
 from jims_mower.path_overlay import build_path_overlay, mission_from_phase
+from jims_mower.planning.grade_tip import KIND_TIP
 from jims_mower.planning.observed import fog_rgba
 from jims_mower.profile import (
     YardProfile,
@@ -203,12 +205,15 @@ def owner_copy_for(
     charge_state: str = "",
     return_kind: str = "",
     tilt_kind: str = "",
+    tipped: bool = False,
 ) -> str:
     blob = fault if isinstance(fault, dict) else None
     if hw_estop or (blob and str(blob.get("code") or "") == "HW_ESTOP"):
         return OWNER_COPY["hw_estop"]
     if job_state == "estop":
         return OWNER_COPY["estop"]
+    if tipped:
+        return OWNER_COPY["immobilised"]
     if blob:
         code = str(blob.get("code") or "")
         if blob.get("retrieve") or code == "FAULT_IMMOBILISED":
@@ -236,6 +241,9 @@ def owner_copy_for(
         return OWNER_COPY["low_battery"]
     if charge_state == "resuming":
         return OWNER_COPY["resuming_explore"] if phase == "explore" else OWNER_COPY["resuming_mow"]
+    kind = str(tilt_kind or "")
+    if kind == "tip":
+        return OWNER_COPY["tip_risk"]
     # Idle after Reset (or parked): do not keep asking to start mow.
     if job_state == "idle" and phase not in {"complete", "teach", "calibrate_boundary"}:
         if isinstance(explore_reason, dict) and explore_reason.get("label"):
@@ -248,9 +256,6 @@ def owner_copy_for(
         return OWNER_COPY["review"]
     if phase == "explore" and isinstance(explore_reason, dict) and explore_reason.get("label"):
         return str(explore_reason["label"])
-    kind = str(tilt_kind or "")
-    if kind == "tip" and phase in {"explore", "mow", "calibrate_boundary"}:
-        return OWNER_COPY["tip_risk"]
     if kind == "grade" and phase in {"explore", "mow", "calibrate_boundary"}:
         return OWNER_COPY["steep_grade"]
     if phase == "safe":
@@ -260,6 +265,40 @@ def owner_copy_for(
             return OWNER_COPY["taught_idle"]
         return OWNER_COPY[job_state]
     return OWNER_COPY.get(phase, PHASE_LABELS.get(phase, phase))
+
+
+def pose_is_past_tip(
+    pose: Any,
+    tip_roll_rad: float,
+    tip_pitch_rad: float,
+) -> bool:
+    if pose is None:
+        return False
+    if isinstance(pose, dict):
+        return attitude_past_tip(
+            pose.get("roll", 0.0), pose.get("pitch", 0.0), tip_roll_rad, tip_pitch_rad
+        )
+    return attitude_past_tip(
+        getattr(pose, "roll", 0.0),
+        getattr(pose, "pitch", 0.0),
+        tip_roll_rad,
+        tip_pitch_rad,
+    )
+
+
+def snapshot_tilt_kind(
+    pose: Any,
+    *,
+    last_kind: str = "",
+    tip_roll_rad: float = 0.40,
+    tip_pitch_rad: float = 0.45,
+    tipover: bool = False,
+    tipped: bool = False,
+) -> str:
+    """Snapshot must not report ok while seated attitude is past tip."""
+    if tipped or tipover or pose_is_past_tip(pose, tip_roll_rad, tip_pitch_rad):
+        return KIND_TIP
+    return str(last_kind or "ok")
 
 
 def radio_path_for(phase: str, job_state: str = "running") -> dict[str, Any]:
@@ -450,6 +489,7 @@ class LiveSession:
         self.done = False
         self.started = False
         self.job_state = "idle"
+        self._tipped = False
         self.unattended = False
         self.estop = False
         pin = GYM_PAIR_PIN
@@ -533,6 +573,7 @@ class LiveSession:
         self.done = False
         self.started = True
         self.job_state = "idle"
+        self._tipped = False
         self.estop = False
         self._fault_overlay = {}
         self._t0_wall = 0.0
@@ -645,10 +686,11 @@ class LiveSession:
         if self.estop:
             self.info = dict(self.info or {})
             self.info["estop"] = True
+        self._sync_tip_latch()
         if terminated or truncated or self.policy.done:
             self.done = True
             self._capture_summary()
-            if self.policy.phase.value == "complete":
+            if self.policy.phase.value == "complete" and not self._tipped:
                 self.job_state = "idle"
         force_map = self.policy.phase.value != self._last_phase
         if self.policy.phase.value == "review" and self._last_phase != "review":
@@ -871,10 +913,21 @@ class LiveSession:
                 clear_blockages = bool(raw_clear)
             self.estop = False
             self.done = False
+            self._tipped = False
             self._fault_overlay = {}
             reset_info: dict[str, Any] = {}
+            home = None
             if self.policy is not None:
+                home = getattr(self.policy, "_home", None)
                 reset_info = self.policy.owner_reset(clear_blockages=clear_blockages)
+            if self.env is not None:
+                self.obs, self.info = self.env.retrieve_from_tip(home)
+                if bool((self.info or {}).get("chassis_tipped") or (self.info or {}).get("tipover")):
+                    self._tipped = True
+                    if self.policy is not None:
+                        self.policy.latch_chassis_tip()
+                if self.policy is not None:
+                    self._record_pose()
             self.job_state = "idle"
             self._stop.set()
             snap = self.snapshot()
@@ -966,6 +1019,29 @@ class LiveSession:
             return True
         info = self.info if isinstance(self.info, dict) else {}
         return bool(info.get("hw_estop") or info.get("hw_estop_latched"))
+
+    def _tip_thresholds(self) -> tuple[float, float]:
+        cfg = self.env.cfg if self.env is not None else None
+        if cfg is None:
+            return 0.40, 0.45
+        return float(cfg.robot.tip_roll_rad), float(cfg.robot.tip_pitch_rad)
+
+    def _sync_tip_latch(self) -> None:
+        """After physics, latch a past-tip sit so idle / stall cannot hide it."""
+        info = self.info if isinstance(self.info, dict) else {}
+        pose = info.get("pose") if info else None
+        tip_roll, tip_pitch = self._tip_thresholds()
+        past = (
+            bool(self._tipped)
+            or bool(info.get("tipover"))
+            or bool(info.get("chassis_tipped"))
+            or pose_is_past_tip(pose, tip_roll, tip_pitch)
+        )
+        if not past:
+            return
+        self._tipped = True
+        if self.policy is not None:
+            self.policy.latch_chassis_tip()
 
     def _current_fault(self) -> dict[str, Any]:
         if self.env is not None:
@@ -1593,7 +1669,11 @@ class LiveSession:
                 "not_a_benchmark": True,
             }
         status = policy.status(self.info)
-        pose = dict(self.poses[-1]) if self.poses else _pose_row((self.info or {}).get("pose"))
+        live_pose = _pose_row((self.info or {}).get("pose"))
+        if self.poses:
+            pose = {**dict(self.poses[-1]), **live_pose} if (self.info or {}).get("pose") else dict(self.poses[-1])
+        else:
+            pose = live_pose
         frontiers = [{"x": float(x), "y": float(y)} for x, y in policy._frontier_xy]
         explore = _downsample_xy(
             list(policy.explore_plan.waypoints) if policy.explore_plan else []
@@ -1636,6 +1716,34 @@ class LiveSession:
         teach_trail = []
         if self.teach_policy is not None and self.teach_policy.trail:
             teach_trail = list(self.teach_policy.trail)
+        tip_roll, tip_pitch = self._tip_thresholds()
+        info_blob = self.info if isinstance(self.info, dict) else {}
+        tipped = (
+            bool(self._tipped)
+            or bool(status.get("chassis_tipped"))
+            or bool(getattr(policy, "_chassis_tipped", False))
+            or bool(info_blob.get("tipover"))
+            or bool(info_blob.get("chassis_tipped"))
+            or pose_is_past_tip(pose, tip_roll, tip_pitch)
+        )
+        tilt_kind = snapshot_tilt_kind(
+            pose,
+            last_kind=str(status.get("tilt_kind") or getattr(policy, "last_tilt_kind", "") or ""),
+            tip_roll_rad=tip_roll,
+            tip_pitch_rad=tip_pitch,
+            tipover=bool(info_blob.get("tipover")),
+            tipped=tipped,
+        )
+        if tipped:
+            self._tipped = True
+            if not (isinstance(fault, dict) and str(fault.get("code") or "") not in {"", "ok"}):
+                fault = {
+                    "code": "FAULT_IMMOBILISED",
+                    "retrieve": True,
+                    "immobilised": True,
+                    "component": "chassis",
+                    "reason": "tipped — immobilised, retrieve",
+                }
         path_overlay = build_path_overlay(
             phase=phase,
             job_state=self.job_state,
@@ -1647,6 +1755,8 @@ class LiveSession:
             frontiers=frontiers,
             n_waypoints=int(status["n_waypoints"]),
             waypoint_index=int(status.get("waypoint_index") or 0),
+            tipped=tipped,
+            immobilised=tipped,
         )
         return {
             "schema": LIVE_SCHEMA,
@@ -1671,7 +1781,8 @@ class LiveSession:
                 explore_reason=status.get("explore_reason") if isinstance(status.get("explore_reason"), dict) else None,
                 charge_state=str(status.get("charge_state") or ""),
                 return_kind=str(status.get("return_kind") or ""),
-                tilt_kind=str(status.get("tilt_kind") or getattr(policy, "last_tilt_kind", "") or ""),
+                tilt_kind=tilt_kind,
+                tipped=tipped,
             ),
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
@@ -1693,7 +1804,8 @@ class LiveSession:
             "can_mow": not fence_unusable,
             "can_return": self.job_state in {"running", "paused", "hold"} or status["phase"] not in {"idle", "complete", ""},
             "explore_reason": status.get("explore_reason") or {},
-            "tilt_kind": str(status.get("tilt_kind") or getattr(policy, "last_tilt_kind", "") or ""),
+            "tilt_kind": tilt_kind,
+            "chassis_tipped": bool(tipped),
             "can_reset": True,
             "full_explore": bool(status.get("full_explore")),
             "charge_state": status.get("charge_state") or "",
@@ -1721,7 +1833,9 @@ class LiveSession:
             "mesh_seq": self._mesh_seq,
             "n_waypoints": int(status["n_waypoints"]),
             "waypoint_index": int(status.get("waypoint_index") or 0),
-            "mission": mission_from_phase(phase, self.job_state),
+            "mission": mission_from_phase(
+                phase, self.job_state, tipped=tipped, immobilised=tipped
+            ),
             "frontiers": frontiers,
             "explore": explore,
             "plan": plan,

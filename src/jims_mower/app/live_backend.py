@@ -158,7 +158,13 @@ class LiveBackend:
         faults = list(snap.get("faults") or [])
         faults = _ux_b_faults(info, faults)
         job_state = str(snap.get("job_state") or "idle")
-        mission = mission_from_phase(str(snap.get("phase") or "idle"), job_state)
+        tipped = bool(snap.get("chassis_tipped"))
+        mission = mission_from_phase(
+            str(snap.get("phase") or "idle"),
+            job_state,
+            tipped=tipped,
+            immobilised=tipped,
+        )
         radio = _overlay_radio_sim(
             _radio_status(self.yard.radio, pairing=self.session.pairing),
             _radio_sim_from_info(info),
@@ -194,7 +200,13 @@ class LiveBackend:
         )
         snap = self.session.snapshot()
         job_state = str(snap.get("job_state") or job_state)
-        mission = mission_from_phase(str(snap.get("phase") or "idle"), job_state)
+        tipped = bool(snap.get("chassis_tipped"))
+        mission = mission_from_phase(
+            str(snap.get("phase") or "idle"),
+            job_state,
+            tipped=tipped,
+            immobilised=tipped,
+        )
         return {
             "schema": APP_STATUS_SCHEMA,
             "backend": "live",
@@ -247,6 +259,8 @@ class LiveBackend:
             "can_mow": bool(snap.get("can_mow", snap.get("can_start_mow"))),
             "can_return": bool(snap.get("can_return")),
             "explore_reason": snap.get("explore_reason") or {},
+            "tilt_kind": snap.get("tilt_kind") or "",
+            "chassis_tipped": bool(snap.get("chassis_tipped")),
             "full_explore": bool(snap.get("full_explore")),
             "charge_state": snap.get("charge_state") or "",
             "return_kind": snap.get("return_kind") or "",

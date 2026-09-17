@@ -132,14 +132,30 @@ def normalize_phase(phase: str, job_state: str = "running") -> str:
     return key or "idle"
 
 
-def mode_banner_for(phase: str, job_state: str = "running") -> dict[str, Any]:
+def mode_banner_for(
+    phase: str,
+    job_state: str = "running",
+    *,
+    tipped: bool = False,
+    immobilised: bool = False,
+) -> dict[str, Any]:
     """Large owner chip: Mapping vs Mowing in plain words.
 
     Pause / hold / ESTOP stay visible as a hold badge but do not hide the
-    underlying phase.
+    underlying phase. A past-tip / immobilised chassis is SOS, never Ready.
     """
     key = normalize_phase(phase, job_state)
     state = str(job_state or "").strip().lower()
+    if tipped or immobilised:
+        row = MODE_ROWS["fault"]
+        return {
+            "label": "SOS — immobilised",
+            "tone": row["tone"],
+            "kind": row["kind"],
+            "hold": "SOS",
+            "phase": "fault" if key not in {"fault", "safe"} else key,
+            "job_state": state or "hold",
+        }
     if state == "idle" and key not in {"complete", "teach"}:
         row = MODE_ROWS["idle"]
         return {
@@ -173,12 +189,21 @@ def progress_kind_for(phase: str, job_state: str = "running") -> str:
     return "idle"
 
 
-def mission_from_phase(phase: str, job_state: str = "running") -> str:
+def mission_from_phase(
+    phase: str,
+    job_state: str = "running",
+    *,
+    tipped: bool = False,
+    immobilised: bool = False,
+) -> str:
     """Owner ``state.mission`` from phase — never ``running`` → mowing.
 
     Pause / hold / idle stay ``idle`` so schedule can re-arm. ESTOP stays
     ``estop``. A live explore / calibrate / review job is not ``mowing``.
+    A past-tip chassis is not an idle Ready job.
     """
+    if tipped or immobilised:
+        return "fault"
     state = str(job_state or "").strip().lower()
     if state == "estop":
         return "estop"
@@ -220,10 +245,12 @@ def build_path_overlay(
     frontiers: Optional[Iterable[Any]] = None,
     n_waypoints: int = 0,
     waypoint_index: int = 0,
+    tipped: bool = False,
+    immobilised: bool = False,
 ) -> dict[str, Any]:
     """SSE-cheap overlay: trail / plan / frontiers / pose / phase."""
     key = normalize_phase(phase, job_state)
-    mode = mode_banner_for(key, job_state)
+    mode = mode_banner_for(key, job_state, tipped=tipped, immobilised=immobilised)
     pose_row = _as_pose(pose)
     if trail:
         trail_xy = downsample_xy(trail, TRAIL_MAX_POINTS)
@@ -262,7 +289,9 @@ def build_path_overlay(
         "job_state": str(job_state or "idle"),
         "mode": mode,
         "progress_kind": progress_kind_for(key, job_state),
-        "mission": mission_from_phase(key, job_state),
+        "mission": mission_from_phase(
+            key, job_state, tipped=tipped, immobilised=immobilised
+        ),
         "path_remaining": remaining,
         "n_waypoints": int(n_waypoints),
         "waypoint_index": int(waypoint_index),

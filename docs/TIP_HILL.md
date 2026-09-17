@@ -14,7 +14,7 @@ acre mesh, speed, sensors), [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md)
 | --- | --- | --- | --- |
 | **IMU tip-stop** | Chassis roll / pitch (accel + fused pose) | Past `max_climb_slope_rad`, or at `robot.tip_roll_rad` / `tip_pitch_rad` (defaults 0.40 / 0.45 ≈ 23° / 26°) | **Tip risk — reversing.** Reverse, pivot, skip a short cluster. Do **not** keep reverse-looping. |
 | **Climbable grade** | Observer / prior slope vs `planner.max_climb_slope_rad` (default 0.32 ≈ 18°; acre demo 0.34) | Chassis ≤ climb cap; mapped cells between climb and the tip-safe margin | **Steep grade — contouring.** Slow on the face, A* prefers a contour. Climb if the path is still under the cap. |
-| **Physics tip-over** | True height-field sit | Full tip thresholds | Episode / job terminate. Software trips stay **below** the static chassis tip (do not raise them to “match” fab). |
+| **Physics tip-over** | True height-field sit | Full tip thresholds | **Latch tipped / immobilised.** Owner SOS, `tilt_kind=tip`, not Idle Ready. Gym episode may still terminate; live/mission must surface the latch until Reset / retrieve. Software trips stay **below** the static chassis tip (do not raise them to “match” fab). |
 
 IMU `stop` used to fire at `imu_stop_frac * tip` (0.85 × 0.40 = **0.34 rad**).
 That is the same number as acre-demo `max_climb_slope_rad`. A climbable
@@ -32,13 +32,21 @@ fixes that without moving the physics tip.
    / explore A* pay a high contour cost. Incomplete elevation must not
    invent a blocked wall. Owner line: *Steep grade — contouring*. Not a
    learned blockage.
-3. **Tip-stop (chassis IMU)** — attitude **past** `max_climb_slope_rad`,
-   or a true physics tip. This is urgent: a ridge can jump ~0.10 rad in
-   one physics step, so we do not wait for `imu_stop_frac`. Owner line:
-   *Tip risk — reversing*. Explore stamps a learned no-go only on this
-   path (same #46 blockage disk), not on a climbable hill. A single
-   non-urgent IMU spike still holds (see Filter).
-4. **Lethal / no-go** — slope ≥ tip-safe margin, drain lip / channel,
+3. **Tip-stop (chassis IMU)** — attitude **past** `max_climb_slope_rad`
+   but still **under** the physics tip. This is urgent: a ridge can jump
+   ~0.10 rad in one physics step, so we do not wait for `imu_stop_frac`.
+   Owner line: *Tip risk — reversing*. Explore stamps a learned no-go
+   only on this path (same #46 blockage disk), not on a climbable hill.
+   Sit look-ahead that would **exceed tip** is a hard stop — do not
+   keep driving into that face. A single non-urgent IMU spike still
+   holds (see Filter).
+4. **Past-tip / immobilise** — seated `|roll|` or `|pitch|` ≥
+   `tip_roll_rad` / `tip_pitch_rad`, or env `tipover`. Latch. Owner
+   line: *SOS — immobilised. Retrieve the mower.* `tilt_kind=tip`.
+   Job is not Ready. Survives idle, explore stall, and gym terminate
+   until explicit **Reset / retrieve**. Snapshot must not report
+   `tilt_kind=ok` while the pose is past tip.
+5. **Lethal / no-go** — slope ≥ tip-safe margin, drain lip / channel,
    hard structure, or a **learned** blockage from #46. Fence stays.
 
 Ridge / bank / drain-lip edges: a sharp **roll** on a bank is tip-risk.
@@ -61,7 +69,10 @@ Owner **Reset** (`POST /api/live/control` `cmd=reset`):
 * stops the job
 * clears tip cool-down, explore spin, software hold / safe, transient
   recovery
-* returns to idle, ready for **Explore**
+* clears the **tip latch** and reseats at home (retrieve). If that sit
+  is still past tip, SOS re-arms — Reset does not paint Ready over a
+  fallen-over chassis
+* returns to idle, ready for **Explore** only when attitude is under tip
 * **keeps** the taught fence
 * **keeps** learned blockages unless `clear_blockages=true`
 
@@ -85,8 +96,10 @@ Owner **Reset** (`POST /api/live/control` `cmd=reset`):
    `explore_cruise: 0.45` (≈ 0.54 m/s at `max_wheel_speed_mps: 1.2`).
    Further slow on `KIND_GRADE` / steep via `grade_speed_factor`.
 
-Owner lines stay **Steep grade — contouring** vs **Tip risk — reversing**.
-We did not move `tip_roll_rad` / `tip_pitch_rad` to “pass” the demo.
+Owner lines stay **Steep grade — contouring** vs **Tip risk — reversing**
+vs **SOS — immobilised** once past tip. We did not move `tip_roll_rad` /
+`tip_pitch_rad` to “pass” the demo. Still kinematic sit, not a full CG
+tip-moment engine.
 
 ## What this is not
 

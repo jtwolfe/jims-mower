@@ -131,7 +131,7 @@ planner:
   slow_speed_factor: 0.35
   grade_speed_factor: 0.50
   grade_look_ahead_m: 1.10
-  grade_look_ahead_samples: 4
+  grade_look_ahead_samples: 6
   strip_spacing_m: 0.28
   waypoint_stride_m: 0.32
   cruise_speed: 0.55

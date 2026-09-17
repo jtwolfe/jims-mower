@@ -15,7 +15,12 @@ from jims_mower.constants import (
     TERRAIN_ADVICE,
 )
 from jims_mower.geofence import GeofenceSpec, gps_world_from_enu
-from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wrap_angle
+from jims_mower.kinematics import (
+    attitude_past_tip,
+    unicycle_from_wheels,
+    wheels_from_unicycle,
+    wrap_angle,
+)
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
 from jims_mower.planning.fusion import make_pose_filter
@@ -183,6 +188,7 @@ class TerrainPolicy:
             hold_steps=int(cfg.planner.imu_stop_hold_steps),
         )
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> CoveragePlan:
         info = info or {}
@@ -215,6 +221,7 @@ class TerrainPolicy:
         self.last_budget = "ok"
         self._tilt_filter.reset()
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
         weather = info.get("weather") or {}
         self._wet = bool(weather.get("wet", False))
         if "battery_soc" in info:
@@ -227,6 +234,24 @@ class TerrainPolicy:
         self.plan = self._build_plan(obs, start, extra_blocked=None)
         self.index = _skip_arrived(self.plan.waypoints, start, self.cfg.planner.arrive_radius_m)
         return self.plan
+
+    def latch_chassis_tip(self, *, reason: str = "tip-over — immobilised") -> None:
+        self._chassis_tipped = True
+        self.last_tilt_kind = "tip"
+        self.last_advice = "stop"
+        self.help_requested = True
+        self.safe.enter_safe(reason)
+
+    def _pose_past_tip(self, pose: Pose, info: Optional[dict[str, Any]] = None) -> bool:
+        blob = info if isinstance(info, dict) else {}
+        if self._chassis_tipped or bool(blob.get("tipover")) or bool(blob.get("chassis_tipped")):
+            return True
+        return attitude_past_tip(
+            pose.roll,
+            pose.pitch,
+            self.cfg.robot.tip_roll_rad,
+            self.cfg.robot.tip_pitch_rad,
+        )
 
     def act(self, obs: dict[str, Any], info: dict[str, Any]) -> np.ndarray:
         pose_hint = _pose_from_obs(obs, info)
@@ -306,6 +331,9 @@ class TerrainPolicy:
         sensed = combine_advice(sensed, look_ahead_advice(ahead))
         chassis = combine_advice(chassis, look_ahead_advice(ahead))
         self.last_tilt_kind = merge_look_ahead_kind(self.last_tilt_kind, ahead)
+        if self._pose_past_tip(pose, info) or bool(info.get("tipover")):
+            self.last_tilt_kind = "tip"
+            self._chassis_tipped = True
         self._geofence = geofence_from_info(info, self.cfg)
         living = str(info.get("living_advice") or "ok")
         fence = str(info.get("geofence_advice") or "ok")
@@ -319,6 +347,10 @@ class TerrainPolicy:
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
         self.last_advice = advice
+
+        if self._pose_past_tip(pose, info):
+            self.latch_chassis_tip()
+            return self._finish_action(self._hold(), "stop", info)
 
         if estop_requested(obs, info):
             self.safe.request_estop("software/hardware estop")
@@ -425,8 +457,16 @@ class TerrainPolicy:
         """Tick ESTOP/limp/safe and scale the wheel command."""
         if self.help_requested:
             self.safe.enter_safe("call-for-help")
+        safe_advice = advice
+        if (
+            advice == "stop"
+            and not bool(info.get("tipover"))
+            and not bool(info.get("drain_drop"))
+            and not self._chassis_tipped
+        ):
+            safe_advice = "reroute"
         self.safe.tick(
-            advice=advice,
+            advice=safe_advice,
             estop=estop_requested(None, info),
             tipover=bool(info.get("tipover")),
             drain_drop=bool(info.get("drain_drop")),

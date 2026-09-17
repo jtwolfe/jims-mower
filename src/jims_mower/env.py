@@ -28,6 +28,7 @@ from jims_mower.structures import layer_from_terrain_labels, no_mow_from_labels
 from jims_mower.kinematics import (
     integrate_pose,
     sit_on_terrain,
+    static_tip_latch,
     trimmer_xy,
     trimmer_xyz,
     unicycle_from_wheels,
@@ -270,6 +271,7 @@ class MowerEnv(gym.Env):
         )
 
         self._pose = robot_start_pose(self.cfg.world.width_m, self.cfg.world.height_m)
+        self._tip_latched = False
         self._coverage = GrassCoverageMap(
             self.cfg.world.width_m,
             self.cfg.world.height_m,
@@ -378,6 +380,7 @@ class MowerEnv(gym.Env):
         if grow_cfg.enabled and self._had_episode:
             previous_cut = self._coverage.cut.copy()
         self._pose = robot_start_pose(self.cfg.world.width_m, self.cfg.world.height_m)
+        self._tip_latched = False
         if self._yard_profile is not None:
             self._pose = self._yard_profile.home_pose()
         counts = {
@@ -613,6 +616,7 @@ class MowerEnv(gym.Env):
             self.cfg.robot.length_m,
             self.cfg.robot.track_m,
         )
+        self._latch_chassis_if_tipped()
         v, omega = unicycle_from_wheels(left_n * vmax, right_n * vmax, self.cfg.robot.wheelbase_m)
         self._last_v = v
         self._last_omega = omega
@@ -721,6 +725,7 @@ class MowerEnv(gym.Env):
             (hit is not None and not recoverable_hit)
             or oob
             or terrain_ev.tipover
+            or bool(self._tip_latched)
             or terrain_ev.drain_drop
             or breakdown.done_success
         )
@@ -740,7 +745,8 @@ class MowerEnv(gym.Env):
                 "reward_collision": breakdown.collision,
                 "reward_terrain": breakdown.terrain,
                 "success": breakdown.done_success,
-                "tipover": terrain_ev.tipover,
+                "tipover": terrain_ev.tipover or bool(self._tip_latched),
+                "chassis_tipped": bool(self._tip_latched),
                 "drain_drop": terrain_ev.drain_drop,
                 "steep": terrain_ev.steep,
                 "terrain_advice": terrain_ev.advice,
@@ -778,6 +784,50 @@ class MowerEnv(gym.Env):
                 fault=fault if isinstance(fault, dict) else {},
             )
         return obs, float(breakdown.total), terminated, truncated, info
+
+    def _latch_chassis_if_tipped(self) -> bool:
+        """Once sit exceeds tip, latch immobilised. Do not re-seat as driveable."""
+        tipped = static_tip_latch(
+            self._pose,
+            tip_roll_rad=self.cfg.robot.tip_roll_rad,
+            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+            latched=self._tip_latched,
+        )
+        if tipped:
+            self._tip_latched = True
+            self.fault_bus.latch_tipover()
+        return bool(self._tip_latched)
+
+    def retrieve_from_tip(self, home: Optional[Any] = None) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Owner Reset / retrieve: clear the tip latch and reseat at home.
+
+        If the retrieve pose still sits past tip, the latch re-arms — a
+        past-tip chassis cannot look driveable.
+        """
+        from jims_mower.types import Pose
+        from jims_mower.world import robot_start_pose
+
+        self._tip_latched = False
+        self.fault_bus.clear_tipover()
+        if home is None:
+            target = robot_start_pose(self.cfg.world.width_m, self.cfg.world.height_m)
+        elif isinstance(home, Pose):
+            target = home
+        else:
+            target = Pose(
+                float(getattr(home, "x", 0.0)),
+                float(getattr(home, "y", 0.0)),
+                float(getattr(home, "theta", 0.0)),
+            )
+        self._pose = sit_on_terrain(
+            target,
+            self._terrain,
+            self.cfg.robot.length_m,
+            self.cfg.robot.track_m,
+        )
+        self._prev_pose = self._pose
+        self._latch_chassis_if_tipped()
+        return self._observe()
 
     def inject_fault(
         self,
@@ -1329,7 +1379,8 @@ class MowerEnv(gym.Env):
             "terrain_source": terrain_est.source,
             "terrain_advice": terrain_ev.advice,
             "terrain_reason": terrain_ev.reason,
-            "tipover": terrain_ev.tipover,
+            "tipover": terrain_ev.tipover or bool(self._tip_latched),
+            "chassis_tipped": bool(self._tip_latched),
             "drain_drop": terrain_ev.drain_drop,
             "steep": terrain_ev.steep,
             "nearest_person_m": self._nearest_person_m(),

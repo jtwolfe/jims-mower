@@ -24,7 +24,7 @@ import numpy as np
 from jims_mower.config import EnvConfig, MissionConfig
 from jims_mower.faults import fault_is_immobilised, fault_is_retrieve
 from jims_mower.geofence import GeofenceSpec, gps_world_from_enu
-from jims_mower.kinematics import unicycle_from_wheels
+from jims_mower.kinematics import attitude_past_tip, unicycle_from_wheels
 from jims_mower.planning.controller import (
     combine_advice,
     geofence_from_info,
@@ -179,6 +179,7 @@ class MissionPolicy:
         self.replans = 0
         self.last_advice = "ok"
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
         self._tilt_filter = TipHoldFilter(
             window=int(cfg.planner.imu_tilt_window),
             hold_steps=int(cfg.planner.imu_stop_hold_steps),
@@ -355,6 +356,7 @@ class MissionPolicy:
         self._detour_index = 0
         self.last_advice = "ok"
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
         self._tilt_filter.reset()
         self.safe.clear()
         cleared = 0
@@ -397,6 +399,27 @@ class MissionPolicy:
             "kept_fence": self.profile is not None,
             "kept_blockages": not clear_blockages,
         }
+
+    def latch_chassis_tip(self, *, reason: str = "tip-over — immobilised") -> None:
+        """Sticky past-tip: SOS / FAULT until owner Reset / retrieve."""
+        self._chassis_tipped = True
+        self.last_tilt_kind = KIND_TIP
+        self.last_advice = "stop"
+        self.help_requested = True
+        self.safe.enter_safe(reason)
+        if self.phase not in {MissionPhase.FAULT, MissionPhase.COMPLETE}:
+            self._transition(MissionPhase.FAULT)
+
+    def _pose_past_tip(self, pose: Pose, info: Optional[dict[str, Any]] = None) -> bool:
+        blob = info if isinstance(info, dict) else {}
+        if self._chassis_tipped or bool(blob.get("tipover")) or bool(blob.get("chassis_tipped")):
+            return True
+        return attitude_past_tip(
+            pose.roll,
+            pose.pitch,
+            self.cfg.robot.tip_roll_rad,
+            self.cfg.robot.tip_pitch_rad,
+        )
 
     def apply_full_explore_mode(self, enabled: bool = True) -> bool:
         if enabled:
@@ -566,6 +589,7 @@ class MissionPolicy:
         self.replans = 0
         self.last_advice = "ok"
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
         self._tilt_filter.reset()
         self.help_requested = False
         self.plan = None
@@ -658,6 +682,11 @@ class MissionPolicy:
 
         advice = self._sense_advice(obs, info, fused, pose_hint)
         self.last_advice = advice
+        if self._pose_past_tip(pose, info):
+            self.latch_chassis_tip()
+            self.step += 1
+            self.phase_step += 1
+            return self._finish(self._hold(), "stop", info)
         if estop_requested(obs, info):
             self.safe.request_estop("software/hardware estop")
         if self._owner_hold and self.safe.mode != "estop":
@@ -750,6 +779,7 @@ class MissionPolicy:
             "resume_index": int(self._resume_index),
             "area_legend": ObservedMap.area_legend(),
             "tilt_kind": self.last_tilt_kind,
+            "chassis_tipped": bool(self._chassis_tipped),
             "not_a_benchmark": True,
         }
 
@@ -924,8 +954,11 @@ class MissionPolicy:
         sensed = combine_advice(sensed, look_ahead_advice(ahead))
         chassis = combine_advice(chassis, look_ahead_advice(ahead))
         self.last_tilt_kind = merge_look_ahead_kind(self.last_tilt_kind, ahead)
-        if env_advice == "stop" and bool(info.get("tipover")):
+        if self._pose_past_tip(pose_hint, info) or (
+            env_advice == "stop" and bool(info.get("tipover"))
+        ):
             self.last_tilt_kind = KIND_TIP
+            self._chassis_tipped = True
         living = str(info.get("living_advice") or "ok")
         fence = str(info.get("geofence_advice") or "ok")
         power = budget_advice(info)
@@ -1371,7 +1404,7 @@ class MissionPolicy:
                 pose,
                 cruise=float(self.settings.mow_cruise),
                 advice=advice,
-                trimmer=1.0 if advice in {"ok", "slow"} else 0.0,
+                trimmer=1.0 if advice in {"ok", "slow"} or self.last_tilt_kind == KIND_GRADE else 0.0,
                 index_attr="_detour_index",
             )
             if self._detour_index >= len(self._detour):
@@ -1383,7 +1416,7 @@ class MissionPolicy:
             pose,
             cruise=float(self.settings.mow_cruise),
             advice=advice,
-            trimmer=1.0 if advice in {"ok", "slow"} else 0.0,
+            trimmer=1.0 if advice in {"ok", "slow"} or self.last_tilt_kind == KIND_GRADE else 0.0,
         )
         if self.index >= len(self.global_plan.waypoints):
             self._emit("mow_complete", self.global_plan.as_metrics())
@@ -2157,15 +2190,25 @@ class MissionPolicy:
         self._sync_env_charge(self.phase == MissionPhase.CHARGING)
         if self.help_requested:
             self.safe.enter_safe("call-for-help")
-        # Ridge IMU stop during mow is a skip/replan, not a limp-park.
+        # Seated past-tip / drain still immobilise. Predicted look-ahead
+        # stop and IMU tip-risk must not limp-park the acre fence lap.
         safe_advice = advice
         if (
-            self.phase in {MissionPhase.MOW, MissionPhase.RETURN_HOME}
-            and advice == "stop"
+            advice == "stop"
             and not bool(info.get("tipover"))
             and not bool(info.get("drain_drop"))
+            and not self._chassis_tipped
+            and not (
+                self._last_pose is not None
+                and attitude_past_tip(
+                    self._last_pose.roll,
+                    self._last_pose.pitch,
+                    self.cfg.robot.tip_roll_rad,
+                    self.cfg.robot.tip_pitch_rad,
+                )
+            )
         ):
-            safe_advice = "slow"
+            safe_advice = "reroute" if self.phase == MissionPhase.CALIBRATE_BOUNDARY else "slow"
         self.safe.tick(
             advice=safe_advice,
             estop=estop_requested(None, info),
