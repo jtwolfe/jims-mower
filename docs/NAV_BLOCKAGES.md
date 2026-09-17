@@ -34,7 +34,7 @@ The gym can also **block without painting an obstacle disk**:
 | --- | --- |
 | Authored shed / bed / pond height (`sit_on_terrain`, tip / pond-stop) | Only after those cells are *observed* and ingest copies structure |
 | Drain channel / lip | Only after observer hazard lands on seen cells |
-| Tree / furniture body collision | Terminates the gym episode; live job ends — not the 21% thrash |
+| Tree / furniture body collision | During a mission job (`explore` / `mow` / …) the penetrating step is undone, a blockage is stamped, and the job continues. A non-mission gym episode still terminates. |
 | Geofence keep-in / keep-out | Costmap + fence advice, not a “blocked” raster |
 | Gentle swale / grade (acre undulation) | IMU tip-stop / slow; no learned no-go until this change |
 | Camera ground-plane miss (wall, not dirt) | Seen mask does not grow; structure stays fog |

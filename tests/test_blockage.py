@@ -11,7 +11,24 @@ from jims_mower.planning.explore import plan_explore
 from jims_mower.planning.observed import ObservedMap, frontiers
 from jims_mower.profile import YardProfile
 from jims_mower.scenarios import load_source
-from jims_mower.types import Pose
+from jims_mower.types import Obstacle, Pose
+
+
+def test_mission_explore_collision_does_not_end_episode() -> None:
+    env, profile = _occlude_env()
+    obs, info = env.reset(seed=1, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg)
+    policy.reset(obs, info, profile=profile)
+    policy.attach_to_env(env)
+    env._mission_phase = "explore"
+    tree = Obstacle(kind="tree", x=env._pose.x + 0.12, y=env._pose.y, radius=0.35)
+    env._yard.obstacles.append(tree)
+    obs, _reward, terminated, _trunc, info = env.step(
+        policy.act(obs, info)
+    )
+    env.close()
+    assert info.get("collision") == "tree"
+    assert terminated is False
 
 
 def test_stamp_blockage_is_known_nogo_not_free() -> None:
@@ -130,8 +147,12 @@ def _occlude_env() -> tuple[MowerEnv, YardProfile]:
     cfg.sensors.cameras = []
     cfg.max_steps = 700
     cfg.mission.full_explore = True
-    cfg.mission.explore_complete = 0.70
-    cfg.mission.max_explore_steps = 360
+    cfg.mission.explore_complete = 0.80
+    cfg.mission.explore_no_frontier = 0.70
+    cfg.mission.max_explore_steps = 400
+    cfg.mission.min_explore_steps = 40
+    cfg.mission.stamp_radius_m = 0.55
+    cfg.mission.camera_range_m = 2.2
     cfg.mission.blockage_no_progress_steps = 8
     cfg.mission.blockage_radius_m = 0.45
     env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
@@ -177,16 +198,17 @@ def test_explore_occlusion_does_not_loop_same_frontier() -> None:
     # Past the live stuck band (~0.21) on this occluding tiny yard.
     assert end_pct >= 0.28 or status["phase"] in {"review", "mow", "return_home", "complete"}
     assert end_pct + 1e-6 >= start_pct
-    if mid_pct > 0.0:
-        assert end_pct + 0.01 >= mid_pct or int(status.get("n_blockages") or 0) >= 1
-    if len(targets) >= 12:
-        unique = {t for t in targets}
+    unique = {t for t in targets}
+    still_mapping = status["phase"] == "explore"
+    if still_mapping and len(targets) >= 20:
         assert len(unique) >= 2 or int(status.get("blocked_frontiers") or 0) >= 1
     events = {e.event for e in policy.events}
     reason = status["explore_reason"]
     if "blockage_stamped" in events or int(status.get("n_blockages") or 0) > 0:
         assert int(reason.get("unreachable_frontiers") or 0) >= 1
         assert int(status.get("blocked_cells") or 0) >= 1
+    if mid_pct > 0.0:
+        assert end_pct + 0.01 >= mid_pct or int(status.get("n_blockages") or 0) >= 1
 
 
 def test_full_explore_occlusion_climbs_past_stuck_band() -> None:

@@ -906,6 +906,18 @@ class MissionPolicy:
             self._transition(MissionPhase.REVIEW)
             return self._hold()
 
+        if info.get("collision") and self._explore_recover_cool <= 0:
+            self._stamp_learned_blockage(pose, info, reason="collision")
+            remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
+            self.explore_reason = self._build_explore_reason(
+                completion,
+                info,
+                n_frontiers=len(thin),
+                code="remapping" if remapping else "blockage_stamped",
+            )
+            self._explore_recover_cool = 3
+            return self._reverse_nudge(pose)
+
         if self._explore_recover_cool > 0:
             self._explore_recover_cool -= 1
             remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
