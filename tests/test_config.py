@@ -35,9 +35,18 @@ def test_load_default_has_six_cameras() -> None:
     cfg = load_config()
     cams = cfg.resolved_cameras()
     assert len(cams) == 6
-    assert cfg.robot.length_m == pytest.approx(0.5)
-    assert cfg.robot.width_m == pytest.approx(0.5)
-    assert cfg.robot.height_m == pytest.approx(0.5)
+    assert cfg.robot.length_m == pytest.approx(0.70)
+    assert cfg.robot.width_m == pytest.approx(0.70)
+    assert cfg.robot.height_m == pytest.approx(0.40)
+    assert cfg.robot.track_m == pytest.approx(0.55)
+    assert cfg.robot.wheelbase_m == pytest.approx(0.55)
+    assert cfg.robot.h_cg_m == pytest.approx(0.14)
+    assert cfg.robot.collision_radius_m == pytest.approx(0.40)
+    assert cfg.robot.tip_roll_rad == pytest.approx(0.55)
+    assert cfg.robot.tip_pitch_rad == pytest.approx(0.55)
+    assert cfg.robot.trimmer.offset_m == pytest.approx(0.42)
+    for cam in cams:
+        assert cam.z < cfg.robot.height_m + 1e-9
 
 
 def test_camera_count_presets() -> None:
@@ -238,6 +247,43 @@ def test_rejects_bad_grade_speed_and_look_ahead() -> None:
         load_config({"planner": {"grade_look_ahead_m": -0.1}})
     with pytest.raises(ConfigError):
         load_config({"planner": {"grade_look_ahead_samples": 0}})
+
+
+def test_rejects_software_tip_at_or_above_static() -> None:
+    with pytest.raises(ConfigError, match="static"):
+        load_config({"robot": {"tip_roll_rad": 1.20, "tip_pitch_rad": 0.55}})
+
+
+def test_rejects_camera_above_lid() -> None:
+    with pytest.raises(ConfigError, match="height"):
+        load_config(
+            {
+                "sensors": {
+                    "cameras": [
+                        {
+                            "name": "front",
+                            "x": 0.2,
+                            "y": 0.0,
+                            "z": 0.50,
+                            "yaw_deg": 0.0,
+                            "pitch_deg": -10.0,
+                        }
+                    ]
+                    + [
+                        {
+                            "name": f"c{i}",
+                            "x": 0.0,
+                            "y": 0.0,
+                            "z": 0.30,
+                            "yaw_deg": 0.0,
+                            "pitch_deg": 0.0,
+                        }
+                        for i in range(3)
+                    ],
+                    "camera_count": 4,
+                }
+            }
+        )
 
 
 def test_rejects_bad_max_climb() -> None:

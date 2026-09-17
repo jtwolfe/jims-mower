@@ -92,6 +92,8 @@ def classify_tilt(
     stop_frac: float,
     max_climb_slope_rad: Optional[float] = None,
     tip_lethal_frac: float = 0.95,
+    static_tip_roll_rad: Optional[float] = None,
+    static_tip_pitch_rad: Optional[float] = None,
 ) -> TiltClass:
     """Map chassis attitude onto ok / slow / reroute / stop.
 
@@ -104,6 +106,11 @@ def classify_tilt(
     * the costmap still *contours* mapped cells between climb and the
       tip-safe margin — that is planning, not chassis IMU.
 
+    ``tip_roll_rad`` / ``tip_pitch_rad`` are the **software** trips.
+    ``past_tip`` is true only at the geometric static α when
+    ``static_tip_*`` are passed; otherwise it stays the software trip
+    (unit tests that omit static keep the old meaning).
+
     When ``max_climb_slope_rad`` is omitted, keep the legacy fractional
     trips so unit tests and older callers still see stop at ``stop_frac``.
     """
@@ -112,14 +119,18 @@ def classify_tilt(
     abs_r, abs_p = abs(roll_a), abs(pitch_a)
     tip_r = float(tip_roll_rad)
     tip_p = float(tip_pitch_rad)
+    static_r = float(static_tip_roll_rad) if static_tip_roll_rad is not None else tip_r
+    static_p = float(static_tip_pitch_rad) if static_tip_pitch_rad is not None else tip_p
     slow_r = float(slow_frac) * tip_r
     slow_p = float(slow_frac) * tip_p
     stop_r = float(stop_frac) * tip_r
     stop_p = float(stop_frac) * tip_p
 
-    # Always trip at the physics tip — do not wait for a filter on this path.
-    if abs_r >= tip_r or abs_p >= tip_p:
+    # Static α first: true tip-over. Then the earlier software trip.
+    if abs_r >= static_r or abs_p >= static_p:
         return TiltClass("stop", KIND_TIP, roll_a, pitch_a, urgent=True, past_tip=True)
+    if abs_r >= tip_r or abs_p >= tip_p:
+        return TiltClass("stop", KIND_TIP, roll_a, pitch_a, urgent=True, past_tip=False)
 
     if max_climb_slope_rad is None:
         if abs_r >= stop_r or abs_p >= stop_p:
@@ -252,6 +263,8 @@ def probe_forward_grade(
     tip_lethal_frac: float = 0.95,
     include_here: bool = True,
     min_start_m: float = 0.06,
+    static_tip_roll_rad: Optional[float] = None,
+    static_tip_pitch_rad: Optional[float] = None,
 ) -> TiltClass:
     """Sit-model pitch/roll if the chassis were translated forward.
 
@@ -261,43 +274,26 @@ def probe_forward_grade(
     """
     reach = max(float(look_ahead_m), 0.0)
     samples = max(1, int(n_samples))
+    cls_kw = dict(
+        tip_roll_rad=tip_roll_rad,
+        tip_pitch_rad=tip_pitch_rad,
+        slow_frac=slow_frac,
+        stop_frac=stop_frac,
+        max_climb_slope_rad=max_climb_slope_rad,
+        tip_lethal_frac=tip_lethal_frac,
+        static_tip_roll_rad=static_tip_roll_rad,
+        static_tip_pitch_rad=static_tip_pitch_rad,
+    )
     if reach <= 1e-6:
         seated = sit_on_height_fn(pose, sample_z, length_m, track_m)
-        return classify_tilt(
-            seated.roll,
-            seated.pitch,
-            tip_roll_rad=tip_roll_rad,
-            tip_pitch_rad=tip_pitch_rad,
-            slow_frac=slow_frac,
-            stop_frac=stop_frac,
-            max_climb_slope_rad=max_climb_slope_rad,
-            tip_lethal_frac=tip_lethal_frac,
-        )
+        return classify_tilt(seated.roll, seated.pitch, **cls_kw)
     heading = float(pose.theta)
     c, s = math.cos(heading), math.sin(heading)
     if include_here:
         here = sit_on_height_fn(pose, sample_z, length_m, track_m)
-        worst = classify_tilt(
-            here.roll,
-            here.pitch,
-            tip_roll_rad=tip_roll_rad,
-            tip_pitch_rad=tip_pitch_rad,
-            slow_frac=slow_frac,
-            stop_frac=stop_frac,
-            max_climb_slope_rad=max_climb_slope_rad,
-            tip_lethal_frac=tip_lethal_frac,
-        )
+        worst = classify_tilt(here.roll, here.pitch, **cls_kw)
     else:
-        worst = classify_tilt(
-            0.0,
-            0.0,
-            tip_roll_rad=tip_roll_rad,
-            tip_pitch_rad=tip_pitch_rad,
-            slow_frac=slow_frac,
-            stop_frac=stop_frac,
-            max_climb_slope_rad=max_climb_slope_rad,
-            tip_lethal_frac=tip_lethal_frac,
-        )
+        worst = classify_tilt(0.0, 0.0, **cls_kw)
     rank = {"ok": 0, "slow": 1, "reroute": 2, "stop": 3}
     # Physics probes from just in front of the hub. Observer rasters
     # start a little farther so unknown-zero cells are not a ghost cliff.
@@ -309,16 +305,7 @@ def probe_forward_grade(
             pose.theta,
         )
         seated = sit_on_height_fn(ghost, sample_z, length_m, track_m)
-        got = classify_tilt(
-            seated.roll,
-            seated.pitch,
-            tip_roll_rad=tip_roll_rad,
-            tip_pitch_rad=tip_pitch_rad,
-            slow_frac=slow_frac,
-            stop_frac=stop_frac,
-            max_climb_slope_rad=max_climb_slope_rad,
-            tip_lethal_frac=tip_lethal_frac,
-        )
+        got = classify_tilt(seated.roll, seated.pitch, **cls_kw)
         if got.past_tip and not worst.past_tip:
             worst = got
         elif rank.get(got.advice, 0) > rank.get(worst.advice, 0):
@@ -345,6 +332,8 @@ def look_ahead_from_elevation(
     stop_frac: float = 0.85,
     max_climb_slope_rad: Optional[float] = None,
     tip_lethal_frac: float = 0.95,
+    static_tip_roll_rad: Optional[float] = None,
+    static_tip_pitch_rad: Optional[float] = None,
 ) -> Optional[TiltClass]:
     """Forward sit-probe on an observer / stereo+ToF elevation raster."""
     if elevation is None:
@@ -370,6 +359,8 @@ def look_ahead_from_elevation(
         tip_lethal_frac=tip_lethal_frac,
         include_here=False,
         min_start_m=0.20,
+        static_tip_roll_rad=static_tip_roll_rad,
+        static_tip_pitch_rad=static_tip_pitch_rad,
     )
 
 

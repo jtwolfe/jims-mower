@@ -317,6 +317,8 @@ def terrain_hazards(
     look_ahead_m: float = 1.10,
     look_ahead_samples: int = 4,
     max_climb_slope_rad: Optional[float] = None,
+    static_tip_roll_rad: Optional[float] = None,
+    static_tip_pitch_rad: Optional[float] = None,
 ) -> TerrainSafety:
     """Physics-side terrain safety (true height field, not the observer maps).
 
@@ -345,7 +347,10 @@ def terrain_hazards(
         in_channel.append(bool(lab == TERRAIN_DRAIN or dropped and lab in {TERRAIN_DRAIN, TERRAIN_DRAIN_EDGE}))
     wheels_in = (in_channel[0], in_channel[1], in_channel[2], in_channel[3])
     drain_drop = any(in_channel)
-    tipover = abs(seated.roll) >= tip_roll_rad or abs(seated.pitch) >= tip_pitch_rad
+    static_r = float(static_tip_roll_rad) if static_tip_roll_rad is not None else float(tip_roll_rad)
+    static_p = float(static_tip_pitch_rad) if static_tip_pitch_rad is not None else float(tip_pitch_rad)
+    # True tip-over is the geometric static α. Software trips stay earlier.
+    tipover = abs(seated.roll) >= static_r or abs(seated.pitch) >= static_p
     slope_here = height_field.sample_slope(seated.x, seated.y)
     steep = (not tipover) and (
         slope_here >= steep_slope_rad
@@ -370,6 +375,8 @@ def terrain_hazards(
         tip_roll_rad=tip_roll_rad,
         tip_pitch_rad=tip_pitch_rad,
         max_climb_slope_rad=climb,
+        static_tip_roll_rad=static_r,
+        static_tip_pitch_rad=static_p,
     )
 
     if tipover:

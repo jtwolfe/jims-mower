@@ -2,8 +2,8 @@
 
 Gymnasium environment for a **camera-driven zero-turn string-trimmer mower**.
 
-The robot is a ~50×50×50 cm body with differential-drive wheels and a
-**front-mounted whipper-snipper** (not under-deck blades). Perception is 4–6
+The robot is a ~70×70×40 cm body with rear direct-drive wheels, front
+castors, and a **front-mounted whipper-snipper** (not under-deck blades). Perception is 4–6
 RGB cameras with poses in YAML, plus a simulated **IMU**, **GNSS**, and
 optional downward **ToF** array. v1 uses a lightweight geometric renderer and
 **pluggable detectors / terrain observers** — mock and oracle in sim, working
@@ -174,8 +174,8 @@ Headless CI runs `pytest` (no display). The same path works on a laptop.
 
 | Piece | Constraint |
 | --- | --- |
-| Body | ~0.50 × 0.50 × 0.50 m |
-| Drive | Zero-turn differential drive (no holonomic strafe) |
+| Body | ~0.70 × 0.70 × 0.40 m (track ≈ wheelbase 0.55 m) |
+| Drive | Zero-turn; rear direct-drive hubs + front castors |
 | Cutter | Front-mounted string trimmer, safety interlock near people/animals |
 | Compute | Jetson Orin Nano class — keep the observation contract light |
 | Cameras | 4–6 RGB, default rig in `configs/default.yaml` |
@@ -473,12 +473,12 @@ pitched a bit more down than v0 so drain lips sit in frame:
 
 | Name | Position (m) | Yaw | Pitch |
 | --- | --- | --- | --- |
-| `front` | (0.25, 0.00, 0.38) | 0° | −22° |
-| `front_left` | (0.20, 0.20, 0.38) | +40° | −18° |
-| `front_right` | (0.20, −0.20, 0.38) | −40° | −18° |
-| `rear` | (−0.25, 0.00, 0.38) | 180° | −12° |
-| `left` | (0.00, 0.25, 0.38) | +90° | −12° |
-| `right` | (0.00, −0.25, 0.38) | −90° | −12° |
+| `front` | (0.33, 0.00, 0.34) | 0° | −22° |
+| `front_left` | (0.26, 0.26, 0.34) | +40° | −18° |
+| `front_right` | (0.26, −0.26, 0.34) | −40° | −18° |
+| `rear` | (−0.33, 0.00, 0.34) | 180° | −12° |
+| `left` | (0.00, 0.33, 0.34) | +90° | −12° |
+| `right` | (0.00, −0.33, 0.34) | −90° | −12° |
 
 `sensors.camera_count: 4` or `5` drops to the cardinal subset (plus `front_left`
 for 5). You can also list explicit camera poses in YAML.

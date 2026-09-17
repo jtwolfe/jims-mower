@@ -243,8 +243,11 @@ def test_acre_and_default_speed_caps() -> None:
     assert acre.world.resolution_m == pytest.approx(0.25)
     assert acre.mission.explore_cruise <= 0.60
     assert acre.planner.grade_look_ahead_m >= 0.80
-    assert EnvConfig().robot.tip_roll_rad == pytest.approx(0.40)
-    assert EnvConfig().robot.tip_pitch_rad == pytest.approx(0.45)
+    robot = EnvConfig().robot
+    assert robot.tip_roll_rad == pytest.approx(0.55)
+    assert robot.tip_pitch_rad == pytest.approx(0.55)
+    assert robot.tip_roll_rad < robot.static_tip_roll_rad()
+    assert robot.tip_pitch_rad < robot.static_tip_pitch_rad()
 
 
 def test_gentle_hill_bank_drain_fixtures_do_not_hard_tip() -> None:

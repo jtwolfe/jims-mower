@@ -3,19 +3,21 @@ dt: 0.10
 max_steps: 500
 
 robot:
-  length_m: 0.50
-  width_m: 0.50
-  height_m: 0.50
-  wheelbase_m: 0.40
-  track_m: 0.40
+  length_m: 0.70
+  width_m: 0.70
+  height_m: 0.40
+  wheelbase_m: 0.55
+  track_m: 0.55
   max_wheel_speed_mps: 1.2
-  collision_radius_m: 0.28
-  tip_roll_rad: 0.40
-  tip_pitch_rad: 0.45
+  collision_radius_m: 0.40
+  tip_roll_rad: 0.55
+  tip_pitch_rad: 0.55
+  h_cg_m: 0.14
+  software_tip_frac: 0.50
   wheel_drop_m: 0.08
   steep_slope_rad: 0.28
   trimmer:
-    offset_m: 0.32
+    offset_m: 0.42
     radius_m: 0.16
     safety_radius_m: 1.50
     height_m: 0.12

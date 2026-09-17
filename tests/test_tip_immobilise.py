@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from jims_mower.config import EnvConfig
 from jims_mower.env import MowerEnv
 from jims_mower.kinematics import attitude_past_tip, sit_on_terrain, static_tip_latch
 from jims_mower.scenarios import load_source
@@ -29,8 +30,8 @@ from jims_mower.types import Pose
 
 
 def _ridge_field() -> HeightField:
-    # Side bank: sit roll = atan(0.55) ≈ 0.50 > tip_roll 0.40.
-    return HeightField.from_function(8.0, 6.0, 0.10, lambda x, y: 0.55 * y)
+    # Side bank past static α: sit roll = atan(2.2) ≈ 1.14 > α ≈ 1.10.
+    return HeightField.from_function(8.0, 6.0, 0.10, lambda x, y: 2.2 * y)
 
 
 def _climbable_field() -> HeightField:
@@ -41,10 +42,17 @@ def _climbable_field() -> HeightField:
 
 def test_sit_on_ridge_exceeds_tip_roll() -> None:
     hf = _ridge_field()
-    pose = sit_on_terrain(Pose(4.0, 3.0, 0.0), hf, 0.50, 0.40)
-    assert abs(pose.roll) >= 0.40
-    assert attitude_past_tip(pose.roll, pose.pitch, 0.40, 0.45)
-    assert static_tip_latch(pose, tip_roll_rad=0.40, tip_pitch_rad=0.45) is True
+    robot = EnvConfig().robot
+    pose = sit_on_terrain(Pose(4.0, 3.0, 0.0), hf, 0.70, 0.55)
+    assert abs(pose.roll) >= robot.static_tip_roll_rad()
+    assert attitude_past_tip(
+        pose.roll, pose.pitch, robot.static_tip_roll_rad(), robot.static_tip_pitch_rad()
+    )
+    assert static_tip_latch(
+        pose,
+        tip_roll_rad=robot.static_tip_roll_rad(),
+        tip_pitch_rad=robot.static_tip_pitch_rad(),
+    ) is True
 
 
 def test_snapshot_tilt_kind_cannot_be_ok_when_past_tip() -> None:
@@ -80,7 +88,7 @@ def test_live_snapshot_ridge_is_tip_not_ok_ready(tmp_path: Path) -> None:
     session.obs, session.info = session.env._observe()
     session._record_pose()
     snap = session.snapshot()
-    assert abs(float(snap["pose"]["roll"])) >= 0.40
+    assert abs(float(snap["pose"]["roll"])) >= EnvConfig().robot.static_tip_roll_rad()
     assert snap["tilt_kind"] == "tip"
     assert snap["tilt_kind"] != "ok"
     assert snap.get("chassis_tipped") is True
@@ -210,7 +218,7 @@ def test_mission_past_tip_holds_not_reverse() -> None:
     obs, info = env.reset(seed=2, options={"yard_profile": profile, "resize_world": False})
     policy = MissionPolicy(env.cfg, fast=True)
     policy.reset(obs, info, profile=profile)
-    roll = 0.42
+    roll = 1.15
     g = float(GRAVITY_MPS2)
     info = dict(info)
     info["terrain_advice"] = "stop"

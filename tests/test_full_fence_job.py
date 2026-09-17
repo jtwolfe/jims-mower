@@ -202,9 +202,9 @@ def test_mission_mow_tipover_does_not_end_episode() -> None:
     from jims_mower.kinematics import sit_on_terrain
     from jims_mower.terrain import HeightField
 
-    hf = HeightField.from_function(8.0, 6.0, 0.10, lambda x, y: 0.55 * y)
+    hf = HeightField.from_function(8.0, 6.0, 0.10, lambda x, y: 2.2 * y)
     env._terrain = hf
-    env._pose = sit_on_terrain(Pose(4.0, 3.0, 0.0), hf, 0.50, 0.40)
+    env._pose = sit_on_terrain(Pose(4.0, 3.0, 0.0), hf, 0.70, 0.55)
     obs, _reward, terminated, _trunc, info = env.step(np.array([0.4, 0.4, 0.0], dtype=np.float32))
     env.close()
     assert info.get("tipover") is True

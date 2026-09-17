@@ -108,7 +108,7 @@ Recommended stack (photogrammetry *ideas*, robot-shaped):
 
 Default gym `front_left` / `front_right` (40° yaw, ~40 cm) are
 look-arounds, **not** a stereo pair. Field preference: calibrated
-forward baseline **~6–12 cm** on a 50 cm body + side / rear mono. See
+forward baseline **~6–12 cm** on a 70 cm body + side / rear mono. See
 [`configs/orin/extrinsics_stereo.yaml`](../configs/orin/extrinsics_stereo.yaml)
 and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 
@@ -142,7 +142,7 @@ and [`HARDWARE_DESIGN.md`](HARDWARE_DESIGN.md) §7.
 | --- | --- | --- | --- | --- | --- |
 | PLN-1 | Explore | **partial** (gym regression this PR) | Frontier walk on ObservedMap. `tests/test_pln_regression.py` runs explore → MAP READY on `mission_tiny` with a taught profile. Needs real maps in the field. | MAP READY on a real lawn without counting fog islands as unreachable (already true in sim). | MAP-1 |
 | PLN-2 | Coverage | **partial** (gym regression this PR) | Boustrophedon + A* on observer costmap; energy strip order uses stub SOC. Regression freezes the observed map then mows. | Leftover uncut vs planned cells on a marked 10×10 m patch. | MAP-1, CV-2 |
-| PLN-3 | Tip recovery | **partial** (gym regression this PR) | Reverse → pivot → help; IMU tip-skip continues paint in sim. Thresholds (`tip_roll_rad=0.40`) are gym constants — **not retuned**. | Tip the chassis to the software trip on a known ramp; wheels stop; recover without drain entry. | RT-2 IMU, HD-mass |
+| PLN-3 | Tip recovery | **partial** (gym regression) | Reverse → pivot → help; IMU tip-skip continues paint in sim. Software `tip_roll_rad`/`tip_pitch_rad` stay **below** static \(\alpha(t,b,h_\mathrm{cg})\). True tip-over latches at static \(\alpha\). | Tip the chassis to the software trip on a known ramp; wheels stop. Past static \(\alpha\): SOS / immobilise. | RT-2 IMU, HD-mass |
 | PLN-4 | Living-thing interlock | **partial** (dets-from-camera this PR) | Mock + `interlock_source: obstacles` (default) still uses the oracle list. `appearance` / `interlock_source: detections` trips on a living blob in a **forward camera** only — a person on the oracle list behind the robot does not fire. No invented metres. | Gym: painted front-camera person → trimmer off; behind / out of view → trimmer stays. Field: person in the radius on the rig. | CV-3, CV-4 |
 | PLN-5 | Resume after stop | **partial** (this PR) | Mission save/load + owner Pause/Resume in live + cold `restore_session`. Schedule duration-stop unchanged. Field “battery died mid-strip” is untested. | Pause 10 min, resume; uncut cells still planned. Gym: `tests/test_pln_regression.py`. | MAP-4, SCH-1 |
 
