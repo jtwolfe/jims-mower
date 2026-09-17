@@ -212,8 +212,11 @@ set so a taught acre rectangle does not report hundreds of fake
 unreachable cells. Strip heading uses the mowable principal axis,
 rotated toward the contour when a mean grade is present.
 
-IMU tip-stop on a ridge during `mow` reverses, pivot-reverses, then
-skips a short waypoint cluster and local-replans. Ridge IMU is treated
+IMU tip-stop on a ridge during `mow` retraces the pose trail (or
+reverses one step if the trail is short), pivot-reverses, then
+skips a short waypoint cluster and local-replans. Climbable grade
+does not stamp a learned no-go. Owner terrain is one fused state
+(`ok | contour | tip_reverse | retrace | blocked_nogo | immobilised`). Ridge IMU is treated
 as `slow` for the limp machine so the job does not park. Abort-to-home
 needs 48 skips **and** 80 mow steps.
 

@@ -11,6 +11,7 @@ from jims_mower.planning.explore import plan_explore
 from jims_mower.planning.observed import ObservedMap, frontiers
 from jims_mower.profile import YardProfile
 from jims_mower.scenarios import load_source
+from jims_mower.planning.grade_tip import KIND_GRADE
 from jims_mower.types import Obstacle, Pose
 
 
@@ -240,3 +241,67 @@ def test_full_explore_occlusion_climbs_past_stuck_band() -> None:
         assert pct >= 0.32 or int(status.get("n_frontiers") or 0) == 0
     if int(status.get("n_blockages") or 0) > 0:
         assert int(status["explore_reason"].get("unreachable_frontiers") or 0) >= 1
+
+
+def test_gentle_grade_no_progress_does_not_stamp() -> None:
+    cfg, scenario = load_source("mission_tiny")
+    cfg.sensors.width = 32
+    cfg.sensors.height = 24
+    cfg.sensors.camera_count = 4
+    cfg.sensors.cameras = []
+    env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
+    profile = YardProfile(
+        name="grade_stamp",
+        width_m=env.cfg.world.width_m,
+        height_m=env.cfg.world.height_m,
+        resolution_m=env.cfg.world.resolution_m,
+        keep_in=[(0.7, 0.7), (5.0, 0.7), (5.0, 4.0), (0.7, 4.0)],
+        home={"x": 1.2, "y": 1.2, "theta": 0.0},
+    )
+    obs, info = env.reset(seed=2, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg, settings=MissionConfig(blockage_no_progress_steps=6))
+    policy.reset(obs, info, profile=profile)
+    policy.phase = MissionPhase.EXPLORE
+    policy.last_tilt_kind = KIND_GRADE
+    policy.last_advice = "slow"
+    pose = Pose(1.4, 1.4, 0.0)
+    added = policy._stamp_learned_blockage(pose, info, reason="no_progress")
+    env.close()
+    assert added == 0
+    assert policy._blockage_events == 0
+
+
+def test_collision_and_lip_still_stamp() -> None:
+    cfg, scenario = load_source("mission_tiny")
+    cfg.sensors.width = 32
+    cfg.sensors.height = 24
+    cfg.sensors.camera_count = 4
+    cfg.sensors.cameras = []
+    env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
+    profile = YardProfile(
+        name="lip_stamp",
+        width_m=env.cfg.world.width_m,
+        height_m=env.cfg.world.height_m,
+        resolution_m=env.cfg.world.resolution_m,
+        keep_in=[(0.7, 0.7), (5.0, 0.7), (5.0, 4.0), (0.7, 4.0)],
+        home={"x": 1.2, "y": 1.2, "theta": 0.0},
+    )
+    obs, info = env.reset(seed=2, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg)
+    policy.reset(obs, info, profile=profile)
+    policy.phase = MissionPhase.EXPLORE
+    policy.last_tilt_kind = KIND_GRADE
+    pose = Pose(1.5, 1.5, 0.0)
+    added = policy._stamp_learned_blockage(
+        pose, {**info, "collision": "tree"}, reason="collision"
+    )
+    first_events = policy._blockage_events
+    # Cooldown: a second stamp on the same lip must not explode.
+    added_again = policy._stamp_learned_blockage(
+        pose, {**info, "collision": "tree"}, reason="collision"
+    )
+    env.close()
+    assert added > 0
+    assert first_events == 1
+    assert added_again == 0
+    assert policy._blockage_events == 1

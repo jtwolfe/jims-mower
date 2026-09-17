@@ -486,6 +486,14 @@ class MissionConfig:
     blockage_radius_m: float = 0.55
     blockage_cluster_cells: int = 4
     blockage_replan_after: int = 6
+    # One stall must not mint thousands of blockage events (live stuck
+    # painted 3263 stamps on a climbable face). Cool + min separation.
+    blockage_stamp_cooldown_steps: int = 20
+    blockage_stamp_min_sep_m: float = 0.90
+    # Breadcrumb retrace on stall / tip-risk (not a one-step reverse).
+    retrace_length_m: float = 2.8
+    retrace_stride_m: float = 0.30
+    trail_max_points: int = 400
 
 
 @dataclass
@@ -1100,6 +1108,16 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("mission.blockage_cluster_cells must be >= 1")
     if int(mission.blockage_replan_after) < 1:
         raise ConfigError("mission.blockage_replan_after must be >= 1")
+    if int(mission.blockage_stamp_cooldown_steps) < 1:
+        raise ConfigError("mission.blockage_stamp_cooldown_steps must be >= 1")
+    if float(mission.blockage_stamp_min_sep_m) <= 0.0:
+        raise ConfigError("mission.blockage_stamp_min_sep_m must be > 0")
+    if float(mission.retrace_length_m) <= 0.0:
+        raise ConfigError("mission.retrace_length_m must be > 0")
+    if float(mission.retrace_stride_m) <= 0.0:
+        raise ConfigError("mission.retrace_stride_m must be > 0")
+    if int(mission.trail_max_points) < 8:
+        raise ConfigError("mission.trail_max_points must be >= 8")
     if cfg.sensors.width < 8 or cfg.sensors.height < 8:
         raise ConfigError("camera resolution must be at least 8x8")
     cams = cfg.resolved_cameras()

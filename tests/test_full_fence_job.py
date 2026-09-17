@@ -97,6 +97,9 @@ def _run_taught_tiny_job() -> dict[str, object]:
         "leftover_passes": int(policy._leftover_replans),
         "leftover_events": leftover,
         "tilt_kind": last_status.get("tilt_kind"),
+        "terrain_state": last_status.get("terrain_state"),
+        "n_blockages": int(last_status.get("n_blockages") or 0),
+        "blocked_cells": int(last_status.get("blocked_cells") or 0),
         "chassis_tipped": bool(last_status.get("chassis_tipped")),
         "terminated": term,
         "truncated": trunc,
@@ -117,6 +120,7 @@ def test_taught_tiny_explore_mow_near_complete() -> None:
     assert "return_home" in summary["seen"] or summary["phase"] == "complete", summary
     assert summary["chassis_tipped"] is not True, summary
     assert summary["terminated"] is not True, summary
+    assert int(summary.get("n_blockages") or 0) < 80, summary
 
 
 def test_mow_grade_stop_does_not_skip_plan() -> None:

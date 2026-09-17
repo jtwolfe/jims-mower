@@ -79,6 +79,7 @@ def test_explore_reason_field_on_status() -> None:
         "frontier_skipped",
         "remapping",
         "steep_grade",
+        "retrace",
     }
     assert "map" in reason["label"]
     assert "step" in reason["label"]
