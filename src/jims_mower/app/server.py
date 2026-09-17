@@ -13,6 +13,10 @@ from jims_mower.app.backend import AppBackend, viewer_manifest
 from jims_mower.viewer import static_dir as viewer_static_dir
 from jims_mower.yard_profile import YardProfileError, yard_profile_from_dict
 
+# Bump when owner-phone static files change so browsers drop a stale app.js.
+UI_BUILD = "owner-ui-3"
+STATIC_CACHE_CONTROL = "no-store, no-cache, must-revalidate"
+
 
 def _live_session(backend: AppBackend) -> Any:
     return getattr(backend, "session", None)
@@ -39,7 +43,9 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", STATIC_CACHE_CONTROL)
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
             if extra:
                 for key, value in extra.items():
                     self.send_header(key, value)
@@ -331,8 +337,8 @@ def make_handler(backend: AppBackend, *, assets: Optional[Path] = None) -> type[
         def _serve_viewer_index(self) -> None:
             dest = viewer_static_dir() / "index.html"
             html = dest.read_text(encoding="utf-8")
-            html = html.replace('href="/style.css"', 'href="/viewer/style.css"')
-            html = html.replace('src="/app.js"', 'src="/viewer/app.js"')
+            html = html.replace('href="/style.css', 'href="/viewer/style.css')
+            html = html.replace('src="/app.js', 'src="/viewer/app.js')
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8")
 
         def _serve_viewer_asset(self, rel: str) -> None:

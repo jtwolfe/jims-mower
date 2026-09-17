@@ -26,6 +26,13 @@ body {
   margin: 10px 0 24px;
 }
 
+.ui-build {
+  margin: -4px 0 12px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: #7d8678;
+}
+
 .phone {
   width: min(var(--phone), 100vw);
   min-height: 760px;
