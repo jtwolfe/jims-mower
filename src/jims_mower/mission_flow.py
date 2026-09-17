@@ -2795,6 +2795,14 @@ class MissionPolicy:
         """
         if self._chassis_tipped:
             return self._hold()
+        if self.phase == MissionPhase.MOW:
+            # Explore owns trail retrace. Mow on a 6×5 / 70 cm body walked
+            # OOB when following breadcrumbs near the keep-in lip.
+            back_x = pose.x - 0.40 * math.cos(float(pose.theta))
+            back_y = pose.y - 0.40 * math.sin(float(pose.theta))
+            if not self._in_work_area(back_x, back_y):
+                return self._lateral_nudge(pose)
+            return self._reverse_nudge(pose)
         if self._retrace_wps:
             action = self._tick_retrace(pose, self.last_advice)
             if action is not None:
