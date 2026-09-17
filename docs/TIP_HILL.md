@@ -12,7 +12,7 @@ acre mesh, speed, sensors), [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md)
 
 | Layer | What it measures | Trip | What the robot should do |
 | --- | --- | --- | --- |
-| **IMU tip-stop** | Chassis roll / pitch (accel + fused pose) | Past `max_climb_slope_rad`, or at `robot.tip_roll_rad` / `tip_pitch_rad` (defaults 0.55 / 0.55 ≈ 31.5°, about half of static \(\alpha\)) | **Tip risk — reversing.** Reverse, pivot, skip a short cluster. Do **not** keep reverse-looping. |
+| **IMU tip-stop** | Chassis roll / pitch (accel + fused pose) | Past `max_climb_slope_rad`, or at `robot.tip_roll_rad` / `tip_pitch_rad` (defaults 0.55 / 0.55 ≈ 31.5°, about half of static \(\alpha\)) | **Tip risk — reversing.** Retrace the pose trail (not a one-step nudge), then replan. Do **not** stamp a climbable face. Do **not** keep reverse-looping. |
 | **Climbable grade** | Observer / prior slope vs `planner.max_climb_slope_rad` (default 0.32 ≈ 18°; acre demo 0.34) | Chassis ≤ climb cap; mapped cells between climb and the tip-safe margin | **Steep grade — contouring.** Slow on the face, A* prefers a contour. Climb if the path is still under the cap. |
 | **Physics tip-over** | True height-field sit vs static \(\alpha(t,b,h_\mathrm{cg})\) | \(\alpha = \mathrm{atan}((t/2)/h_\mathrm{cg})\) ≈ **63°** when \(t=b=0.55\) m and assumed \(h_\mathrm{cg}=0.14\) m | **Latch tipped / immobilised.** Owner SOS, `tilt_kind=tip`, not Idle Ready. Gym episode may still terminate; live/mission must surface the latch until Reset / retrieve. Software trips stay **below** this static \(\alpha\) (do not raise them to 63°). |
 
@@ -36,8 +36,10 @@ Do not collapse those two numbers.
 3. **Tip-stop (chassis IMU)** — attitude **past** `max_climb_slope_rad`
    but still **under** the physics tip. This is urgent: a ridge can jump
    ~0.10 rad in one physics step, so we do not wait for `imu_stop_frac`.
-   Owner line: *Tip risk — reversing*. Explore stamps a learned no-go
-   only on this path (same #46 blockage disk), not on a climbable hill.
+   Owner line: *Tip risk — reversing*. Software tip **retraces** then
+   replans. Explore stamps a learned no-go only for collision,
+   static-α, drain/lip, hard structure, or non-grade zero-travel — not
+   on a climbable hill.
    Sit look-ahead that would **exceed tip** is a hard stop on the
    physics command (do not drive *into* that face). During `mow` that
    is **contour / reroute**, not a waypoint-cluster skip — skipping

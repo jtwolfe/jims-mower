@@ -14,6 +14,8 @@ Wave notes and the on-box message contract live here.
 | [`TERRAIN_MAPS.md`](TERRAIN_MAPS.md) | Observer-vs-physics grade, paths/structures, golf + acre yards |
 | [`MISSION_FLOW.md`](MISSION_FLOW.md) | Calibrate → explore → freeze map → global mow; live SSE + fog-of-war |
 | [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md) | Unknown vs free vs learned no-go; why full explore thrashed at ~20% |
+| [`TERRAIN_RECOVERY.md`](TERRAIN_RECOVERY.md) | Grade-aware stamp, trail retrace, fused owner state; Phase 0 baseline to beat |
+| [`PHASE4_GATES.md`](PHASE4_GATES.md) | Sign-off checklist (map / blockage / hill / tip / cut / Reset) |
 | [`TIP_HILL.md`](TIP_HILL.md) | IMU tip-stop vs climbable grade; contour vs climb vs no-go; owner Reset |
 | [`CHASSIS_PHYSICS.md`](CHASSIS_PHYSICS.md) | Kinematic sit + static-α latch; 70×70×40 belly CG; acre 0.25 m mesh; explore speed |
 | [`UX.md`](UX.md) | World Viewer + Teach Boundary (low-poly mesh, no mAP/FPS) |

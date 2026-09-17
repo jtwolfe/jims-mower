@@ -361,6 +361,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     safe: { label: "Hold — safe", tone: "idle", kind: "idle" },
     tip_risk: { label: "Tip risk — reversing", tone: "home", kind: "mowing" },
     steep_grade: { label: "Steep grade — contouring", tone: "map", kind: "mapping" },
+    retrace: { label: "Retracing last metres", tone: "home", kind: "mapping" },
+    blocked_nogo: { label: "Blocked — remapping around obstacle", tone: "map", kind: "mapping" },
   };
 
   function asXYList(raw) {

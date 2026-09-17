@@ -35,6 +35,7 @@ def test_reset_is_a_live_control() -> None:
     assert "reset" in LIVE_CONTROL_CMDS
     assert OWNER_COPY["tip_risk"] == "Tip risk — reversing"
     assert OWNER_COPY["steep_grade"] == "Steep grade — contouring"
+    assert OWNER_COPY["retrace"] == "Retracing last metres"
 
 
 def test_policy_owner_reset_clears_tip_cool_and_keeps_fence() -> None:

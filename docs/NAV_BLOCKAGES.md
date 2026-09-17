@@ -68,9 +68,15 @@ fog, drain, and sheds:
 * A no-progress watchdog (explore or mow) watches distance to the
   current waypoint, pose travel, map % growth, collision / tip, and
   “commanded forward but almost no travel” (wheel-slip proxy).
-* After `mission.blockage_no_progress_steps` (default 16) it stamps a
-  disk (`stamp_blockage`) **ahead of the chassis** — never under the
-  robot — as observed + blockage + high occupancy.
+* After `mission.blockage_no_progress_steps` (default 16) it *may*
+  stamp a disk (`stamp_blockage`) **ahead of the chassis** — never
+  under the robot — as observed + blockage + high occupancy.
+* **Do not stamp** a climbable grade (`KIND_GRADE`, look-ahead
+  climbable, attitude inside `max_climb`). Stamp only collision,
+  static-α tip, drain/lip, hard structure, or repeated zero-travel
+  with **non-grade** advice. A cooldown + min-separation stops one
+  stall minting thousands of events (live stuck: 3263 stamps @ 40%
+  map). See [`TERRAIN_RECOVERY.md`](TERRAIN_RECOVERY.md).
 * Those cells paint **Blocked / no-go learned** (`#c44c7a`) on the
   phone area overlay and enter `area_legend`.
 * Persist with the mission bundle (`omap_blockage` / `blockage` in
@@ -87,8 +93,10 @@ transit it.
    `plan_explore` will not retry it.
 3. **Count** skipped + A*-failed + leftover untried frontiers as
    `unreachable_frontiers` (no more honest `0` while 40 lips remain).
-4. **Recover** — reverse, pivot (same idea as mow tip-recovery), then
-   replan. Prefer a frontier *away* from the last stamp.
+4. **Recover** — retrace N metres along the pose trail (reverse
+   path), then replan. A one-step reverse nudge is the fallback when
+   the trail is too short. Immobilise / SOS does not reverse.
+   Prefer a frontier *away* from the last stamp.
 5. After `blockage_replan_after` (default 6) blocked frontiers with
    stale map growth, owner copy / `explore_reason` reads
    **“Blocked — remapping around obstacle”**. Manual **Return** stays
@@ -110,6 +118,7 @@ skipped or failed lips. Codes:
 | `frontier_skipped` | Frontier unreachable — skipping · … |
 | `tip_recovery` | Tip risk — reversing · … |
 | `steep_grade` | Steep grade — contouring · … |
+| `retrace` | Retracing last metres · … |
 | `path_blocked` | Path blocked — looking around · … |
 
 ## What this is not

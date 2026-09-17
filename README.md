@@ -67,7 +67,10 @@ jims-mower-live --config acre_yard
 jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
 # Local full-acre explore→mow (not CI):
 jims-mower-live --config acre_yard --speed max --prepare-only --steps 20000 --out live_acre_full
+# Owner phone on :8766 (Jamie live acre — same as Phase 0 baseline):
+# jims-mower-owner --live --config acre_yard_demo --port 8766
 # CI / laptop smoke uses --fast (mission_tiny). Full acre mow is manual.
+# Terrain recovery plan: docs/TERRAIN_RECOVERY.md (grade stamp, retrace, Phase 4 gates).
 
 # Keep the old scripted creep or random wheels:
 python -m jims_mower.demo --policy scripted --out demo_scripted

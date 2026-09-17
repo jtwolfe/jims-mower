@@ -52,6 +52,7 @@ OWNER_LABELS = (
     "Reset",
     "Tip risk — reversing",
     "Steep grade — contouring",
+    "Retracing last metres",
     "SOS — immobilised",
 )
 

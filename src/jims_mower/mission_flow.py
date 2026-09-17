@@ -47,6 +47,7 @@ from jims_mower.planning.grade_tip import (
 )
 from jims_mower.constants import (
     HAZARD_DRAIN,
+    HAZARD_DRAIN_EDGE,
     MISSION_FLOW_SCHEMA,
     MISSION_PHASES,
     SESSION_SCHEMA,
@@ -56,6 +57,19 @@ from jims_mower.constants import (
     STRUCTURE_GREEN,
     STRUCTURE_POND,
     TERRAIN_ADVICE,
+)
+from jims_mower.planning.terrain_decision import (
+    TERRAIN_CONTOUR,
+    TERRAIN_OK,
+    TERRAIN_REASON_CODE,
+    TERRAIN_RETRACE,
+    TERRAIN_TIP_REVERSE,
+    climbable_grade,
+    fuse_terrain_state,
+    look_ahead_reason_blob,
+    may_stamp_blockage,
+    retrace_waypoints,
+    stamp_on_cooldown,
 )
 from jims_mower.planning.coverage import (
     CoveragePlan,
@@ -234,6 +248,19 @@ class MissionPolicy:
         self._demo_mow_frac: Optional[float] = None
         self._demo_max_mow: Optional[int] = None
         self._leftover_replans = 0
+        self.terrain_state = TERRAIN_OK
+        self._pose_trail: list[tuple[float, float, float]] = []
+        self._retrace_wps: list[tuple[float, float]] = []
+        self._retrace_index = 0
+        self._retrace_reason = ""
+        self._blockage_cool = 0
+        self._last_blockage_step = -10_000
+        self._look_ahead_kind = ""
+        self._look_ahead_advice = ""
+        self._look_ahead_pitch = 0.0
+        self._look_ahead_roll = 0.0
+        self._deferred_once: set[tuple[int, int]] = set()
+        self._retrace_cool = 0
 
     @property
     def waypoints(self) -> list[tuple[float, float]]:
@@ -350,6 +377,17 @@ class MissionPolicy:
         self._explore_spin = 0
         self._explore_blocked = 0
         self._explore_recover_cool = 0
+        self._clear_retrace()
+        self._pose_trail = []
+        self.terrain_state = TERRAIN_OK
+        self._blockage_cool = 0
+        self._last_blockage_step = -10_000
+        self._look_ahead_kind = ""
+        self._look_ahead_advice = ""
+        self._look_ahead_pitch = 0.0
+        self._look_ahead_roll = 0.0
+        self._deferred_once = set()
+        self._retrace_cool = 0
         self._progress_stall = 0
         self._progress_best = 1e9
         self._progress_pose = None
@@ -650,6 +688,17 @@ class MissionPolicy:
         self._last_info = {}
         self._last_pose = None
         self._leftover_replans = 0
+        self._clear_retrace()
+        self._pose_trail = []
+        self.terrain_state = TERRAIN_OK
+        self._blockage_cool = 0
+        self._last_blockage_step = -10_000
+        self._look_ahead_kind = ""
+        self._look_ahead_advice = ""
+        self._look_ahead_pitch = 0.0
+        self._look_ahead_roll = 0.0
+        self._deferred_once = set()
+        self._retrace_cool = 0
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self._wet = bool((info.get("weather") or {}).get("wet", False))
@@ -699,6 +748,11 @@ class MissionPolicy:
         self._last_pose = pose
         self._geofence = geofence_from_info(info, self.cfg)
         self._wet = bool((info.get("weather") or {}).get("wet", False))
+        if self._blockage_cool > 0:
+            self._blockage_cool -= 1
+        if self._retrace_cool > 0:
+            self._retrace_cool -= 1
+        self._record_pose_trail(pose)
         self._stamp(obs, info, pose, explored=True)
         if self._resume_copy_steps > 0:
             self._resume_copy_steps -= 1
@@ -751,6 +805,7 @@ class MissionPolicy:
             action = self._tick_charge(obs, info, pose)
         else:
             action = self._hold()
+        self._refresh_terrain_state(info, advice=advice)
         self.step += 1
         self.phase_step += 1
         return self._finish(action, advice, info)
@@ -804,6 +859,8 @@ class MissionPolicy:
             "area_legend": ObservedMap.area_legend(),
             "tilt_kind": self.last_tilt_kind,
             "chassis_tipped": bool(self._chassis_tipped),
+            "terrain_state": self.terrain_state,
+            "look_ahead_reason": self._look_ahead_reason(),
             "not_a_benchmark": True,
         }
 
@@ -982,6 +1039,16 @@ class MissionPolicy:
         sensed = combine_advice(sensed, look_ahead_advice(ahead))
         chassis = combine_advice(chassis, look_ahead_advice(ahead))
         self.last_tilt_kind = merge_look_ahead_kind(self.last_tilt_kind, ahead)
+        if ahead is not None:
+            self._look_ahead_kind = str(ahead.kind or "")
+            self._look_ahead_advice = look_ahead_advice(ahead)
+            self._look_ahead_pitch = float(ahead.pitch)
+            self._look_ahead_roll = float(ahead.roll)
+        else:
+            self._look_ahead_kind = ""
+            self._look_ahead_advice = ""
+            self._look_ahead_pitch = 0.0
+            self._look_ahead_roll = 0.0
         if self._pose_past_tip(pose_hint, info) or (
             env_advice == "stop" and bool(info.get("tipover"))
         ):
@@ -1011,6 +1078,7 @@ class MissionPolicy:
             and not bool(info.get("tipover"))
             and not bool(info.get("chassis_tipped"))
             and not self._chassis_tipped
+            and not self._drain_hazard(info)
         ):
             advice = "reroute"
         return advice
@@ -1086,8 +1154,27 @@ class MissionPolicy:
         thin = downsample_frontiers(raw, min_sep=2, limit=40)
         self._frontier_xy = [self.observed.cell_to_world(r, c) for r, c in thin]
         completion = self.observed.completion(keep)
+        if completion > self._progress_map + 0.003:
+            self._progress_map = float(completion)
+            self._progress_map_stall = 0
+        else:
+            self._progress_map_stall += 1
         skip = set(self._skipped_frontiers)
         reachable_thin = [cell for cell in thin if cell not in skip]
+        drain_stamped = any(
+            ev.event == "blockage_stamped" and str((ev.detail or {}).get("reason") or "") == "drain"
+            for ev in self.events
+        )
+        if (
+            completion >= 0.95
+            and self._progress_map_stall > 16
+            and reachable_thin
+            and drain_stamped
+        ):
+            for cell in reachable_thin:
+                if cell not in self._skipped_frontiers:
+                    self._skipped_frontiers.append(cell)
+            reachable_thin = []
         ready = self._explore_ready(completion, bool(reachable_thin))
         timed_out = self.phase_step + 1 >= int(self.settings.max_explore_steps)
         # Full explore: a step cap is not MAP READY while reachable
@@ -1120,6 +1207,25 @@ class MissionPolicy:
             self._transition(MissionPhase.REVIEW)
             return self._hold()
 
+        retrace_action = self._tick_retrace(pose, advice)
+        if retrace_action is not None:
+            self.explore_reason = self._build_explore_reason(
+                completion, info, n_frontiers=len(thin), code="retrace"
+            )
+            return retrace_action
+
+        if self._drain_hazard(info) and self._explore_recover_cool <= 0:
+            self._stamp_learned_blockage(pose, info, reason="drain")
+            remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
+            self.explore_reason = self._build_explore_reason(
+                completion,
+                info,
+                n_frontiers=len(thin),
+                code="remapping" if remapping else "blockage_stamped",
+            )
+            self._explore_recover_cool = 4
+            return self._retrace_or_nudge(pose, reason="drain")
+
         if info.get("collision") and self._explore_recover_cool <= 0:
             self._stamp_learned_blockage(pose, info, reason="collision")
             remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
@@ -1130,19 +1236,24 @@ class MissionPolicy:
                 code="remapping" if remapping else "blockage_stamped",
             )
             self._explore_recover_cool = 3
-            return self._reverse_nudge(pose)
+            return self._retrace_or_nudge(pose, reason="collision")
 
         if self._explore_recover_cool > 0:
             self._explore_recover_cool -= 1
             remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
+            code = "retrace" if self._retrace_wps else ("remapping" if remapping else "blockage_stamped")
             self.explore_reason = self._build_explore_reason(
                 completion,
                 info,
                 n_frontiers=len(thin),
-                code="remapping" if remapping else "blockage_stamped",
+                code=code,
             )
+            if self._retrace_wps:
+                action = self._tick_retrace(pose, advice)
+                if action is not None:
+                    return action
             if self._explore_recover_cool >= 2:
-                return self._reverse_nudge(pose)
+                return self._retrace_or_nudge(pose, reason="recover")
             if self._explore_recover_cool == 1:
                 return self._lateral_nudge(pose)
             self.explore_plan = None
@@ -1152,14 +1263,16 @@ class MissionPolicy:
         if stalled:
             self._stamp_learned_blockage(pose, info, reason="no_progress")
             remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
+            grade = self._grade_like(advice)
+            code = "retrace" if grade else ("remapping" if remapping else "blockage_stamped")
             self.explore_reason = self._build_explore_reason(
                 completion,
                 info,
                 n_frontiers=len(thin),
-                code="remapping" if remapping else "blockage_stamped",
+                code=code,
             )
             self._explore_recover_cool = 3
-            return self._reverse_nudge(pose)
+            return self._retrace_or_nudge(pose, reason="no_progress")
 
         need_new = (
             self.explore_plan is None
@@ -1205,17 +1318,15 @@ class MissionPolicy:
             if self._explore_spin >= 4:
                 self._stamp_learned_blockage(pose, info, reason="tip_collision")
                 self.explore_reason = self._build_explore_reason(
-                    completion, info, n_frontiers=len(thin), code="blockage_stamped"
+                    completion, info, n_frontiers=len(thin), code="tip_recovery"
                 )
                 self._explore_spin = 0
                 self._explore_recover_cool = 3
-                return self._reverse_nudge(pose)
+                return self._retrace_or_nudge(pose, reason="tip_risk")
             self.explore_reason = self._build_explore_reason(
                 completion, info, n_frontiers=len(thin), code="tip_recovery"
             )
-            if self._explore_spin % 2 == 1:
-                return self._reverse_nudge(pose)
-            return self._look_around(pose)
+            return self._retrace_or_nudge(pose, reason="tip_risk")
         self._explore_spin = 0
         if self.explore_plan is None or not self.explore_plan.waypoints:
             # Frontiers exist but A* cannot connect, or none remain.
@@ -1265,7 +1376,13 @@ class MissionPolicy:
         self._explore_blocked = 0
         remapping = self._blocked_frontier_count >= int(self.settings.blockage_replan_after)
         code = "remapping" if remapping and self._progress_map_stall > 8 else "seeking_frontier"
-        if self.last_tilt_kind == KIND_GRADE and not remapping:
+        if self.terrain_state == TERRAIN_RETRACE:
+            code = "retrace"
+        elif self.terrain_state == TERRAIN_TIP_REVERSE:
+            code = "tip_recovery"
+        elif self.last_tilt_kind == KIND_GRADE and not remapping:
+            code = "steep_grade"
+        elif self.terrain_state == TERRAIN_CONTOUR and not remapping:
             code = "steep_grade"
         self.explore_reason = self._build_explore_reason(
             completion, info, n_frontiers=len(thin), code=code
@@ -1394,7 +1511,7 @@ class MissionPolicy:
             # short cluster and keep tracking. Do not limp-park here.
             self._calibrate_stall += 1
             if self._calibrate_stall == 1:
-                return self._reverse_nudge(pose)
+                return self._retrace_or_nudge(pose, reason="mow_tip")
             if self._calibrate_stall == 2:
                 return self._lateral_nudge(pose)
             skipped_now = False
@@ -1678,19 +1795,23 @@ class MissionPolicy:
             if dist + 0.05 < self._progress_best:
                 self._progress_best = dist
                 progressed = True
-        if moved >= 0.06:
+        grade_like = self._grade_like(advice)
+        if moved >= 0.06 or (grade_like and moved >= 0.012):
             progressed = True
         if progressed:
             self._progress_stall = 0
             return False
         self._progress_stall += 1
-        if advice == "stop" or bool(info.get("collision")) or bool(info.get("tipover")):
+        hard_stop = bool(info.get("collision")) or bool(info.get("tipover"))
+        if (advice == "stop" or hard_stop) and not (grade_like and not hard_stop):
             self._progress_stall += 2
         commanded = abs(self._last_v) > 0.05
         pivoting = abs(self._last_omega) > 0.35
-        if commanded and (not pivoting) and moved < 0.03:
+        if commanded and (not pivoting) and moved < 0.03 and not grade_like:
             self._progress_stall += 1
         limit = max(4, int(self.settings.blockage_no_progress_steps))
+        if grade_like:
+            limit = max(limit, int(self.settings.blockage_no_progress_steps) + 8)
         return self._progress_stall >= limit
 
     def _mow_no_progress(self, pose: Pose, info: dict[str, Any], advice: str) -> bool:
@@ -1748,14 +1869,50 @@ class MissionPolicy:
         *,
         reason: str,
     ) -> int:
-        """Paint a local no-go, skip the current frontier, and force a replan."""
-        _ = info
+        """Paint a local no-go, skip the current frontier, and force a replan.
+
+        Climbable grade / look-ahead hills are not learned no-go. One stall
+        cannot mint thousands of events (cooldown + min separation).
+        """
+        blob = info if isinstance(info, dict) else {}
         if self.observed is None:
             return 0
+        allow = may_stamp_blockage(
+            reason=reason,
+            tilt_kind=self.last_tilt_kind,
+            advice=self.last_advice,
+            look_ahead_kind=self._look_ahead_kind,
+            collision=bool(blob.get("collision")) or reason == "collision",
+            drain_drop=bool(blob.get("drain_drop")) or reason == "drain" or self._drain_hazard(blob),
+            tipover=bool(blob.get("tipover")),
+            chassis_tipped=bool(self._chassis_tipped or blob.get("chassis_tipped")),
+            hard_structure=self._ahead_is_hard_structure(pose),
+            drain_lip=self._ahead_is_drain(pose),
+        )
+        if not allow:
+            self._defer_current_frontier(force=reason in {"drain", "collision", "path_blocked"})
+            self._emit(
+                "blockage_skipped",
+                {"reason": reason, "why": "climbable_grade", "tilt_kind": self.last_tilt_kind},
+            )
+            return 0
         x, y = self._blockage_stamp_xy(pose)
+        if stamp_on_cooldown(
+            cool_left=self._blockage_cool,
+            last_xy=self._last_blockage_xy,
+            stamp_xy=(x, y),
+            step=self.step,
+            last_step=self._last_blockage_step,
+            cooldown_steps=int(self.settings.blockage_stamp_cooldown_steps),
+            min_sep_m=float(self.settings.blockage_stamp_min_sep_m),
+        ):
+            self._emit("blockage_skipped", {"reason": reason, "why": "cooldown"})
+            return 0
         radius = float(self.settings.blockage_radius_m)
         added = self.observed.stamp_blockage(x, y, radius)
         self._last_blockage_xy = (x, y)
+        self._last_blockage_step = int(self.step)
+        self._blockage_cool = max(1, int(self.settings.blockage_stamp_cooldown_steps))
         self._blockage_events += 1
         target = self.explore_plan.target if self.explore_plan is not None else None
         if target is not None:
@@ -1766,8 +1923,10 @@ class MissionPolicy:
             if cell is not None:
                 self._skipped_frontiers.append(cell)
                 self._blocked_frontier_count += 1
-        if len(self._skipped_frontiers) > 32:
-            self._skipped_frontiers = self._skipped_frontiers[-32:]
+        if reason in {"drain", "collision", "lip"}:
+            self._skip_frontiers_near(x, y, radius_m=max(1.4, radius * 2.4))
+        if len(self._skipped_frontiers) > 48:
+            self._skipped_frontiers = self._skipped_frontiers[-48:]
         # Explore must drop the current frontier plan. Mow must keep the
         # coverage index — resetting to 0 was re-skipping the first strip
         # and aborting the tiny job at ~50–80% cut.
@@ -1825,6 +1984,8 @@ class MissionPolicy:
         if not code:
             if self.phase != MissionPhase.EXPLORE:
                 code = "idle"
+            elif self.terrain_state in TERRAIN_REASON_CODE and self.terrain_state != TERRAIN_OK:
+                code = TERRAIN_REASON_CODE[self.terrain_state]
             elif self.last_tilt_kind == KIND_GRADE:
                 code = "steep_grade"
             elif self.last_advice == "stop":
@@ -1844,6 +2005,7 @@ class MissionPolicy:
             "path_blocked": "Path blocked — looking around",
             "tip_recovery": "Tip risk — reversing",
             "steep_grade": "Steep grade — contouring",
+            "retrace": "Retracing last metres",
             "map_progress": "Map progress",
             "waiting_cap": "Waiting on explore cap",
             "no_frontier": "No reachable frontier",
@@ -1876,6 +2038,7 @@ class MissionPolicy:
             "blocked_frontiers": int(self._blocked_frontier_count),
             "n_blockages": int(self._blockage_events),
             "full_explore": bool(self.settings.full_explore),
+            "terrain_state": self.terrain_state,
         }
 
     def _freeze(self, info: dict[str, Any]) -> YardSnapshot:
@@ -2468,6 +2631,7 @@ class MissionPolicy:
         self._progress_best = 1e9
         self._progress_pose = None
         self._explore_recover_cool = 0
+        self._clear_retrace()
         self.phase_ranges.append({"phase": phase.value, "start": self.step, "end": None})
         self._emit(event, detail or {})
 
@@ -2522,6 +2686,226 @@ class MissionPolicy:
         """One-step reverse off a ridge before skipping the waypoint."""
         _ = pose
         return self._drive(-0.36, -0.36, 0.0, pose)
+
+    def _clear_retrace(self) -> None:
+        self._retrace_wps = []
+        self._retrace_index = 0
+        self._retrace_reason = ""
+
+    def _in_work_area(self, x: float, y: float) -> bool:
+        """Keep retrace on the yard — do not reverse off a 6×5 world lip."""
+        radius = float(getattr(self.cfg.robot, "collision_radius_m", 0.35) or 0.35)
+        margin = max(0.40, radius + 0.16)
+        if x < margin or y < margin:
+            return False
+        if x > float(self.cfg.world.width_m) - margin:
+            return False
+        if y > float(self.cfg.world.height_m) - margin:
+            return False
+        if self.observed is None or self.keep_in_mask is None:
+            return True
+        cell = self.observed.world_to_cell(x, y)
+        if cell is None:
+            return False
+        r, c = cell
+        rows, cols = self.keep_in_mask.shape
+        if not (0 <= r < rows and 0 <= c < cols):
+            return False
+        return bool(self.keep_in_mask[r, c])
+
+    def _record_pose_trail(self, pose: Pose) -> None:
+        if self.phase not in {MissionPhase.EXPLORE, MissionPhase.MOW}:
+            return
+        if self._chassis_tipped or self._retrace_wps:
+            return
+        if not self._in_work_area(pose.x, pose.y):
+            return
+        pt = (float(pose.x), float(pose.y), float(pose.theta))
+        if not self._pose_trail:
+            self._pose_trail.append(pt)
+            return
+        last = self._pose_trail[-1]
+        stride = float(self.settings.retrace_stride_m or 0.30)
+        if math.hypot(pt[0] - last[0], pt[1] - last[1]) < stride:
+            return
+        self._pose_trail.append(pt)
+        max_n = max(40, int(self.settings.trail_max_points or 400))
+        if len(self._pose_trail) > max_n:
+            self._pose_trail = self._pose_trail[-max_n:]
+
+    def _start_retrace(self, pose: Pose, *, reason: str) -> bool:
+        if self._chassis_tipped or self._retrace_cool > 0:
+            return False
+        wps = [
+            pt
+            for pt in retrace_waypoints(
+                self._pose_trail,
+                (pose.x, pose.y),
+                length_m=float(self.settings.retrace_length_m or 2.8),
+            )
+            if self._in_work_area(pt[0], pt[1])
+        ]
+        if not wps:
+            return False
+        self._retrace_wps = wps
+        self._retrace_index = 0
+        self._retrace_reason = reason
+        self.terrain_state = TERRAIN_RETRACE
+        self._emit("trail_retrace", {"n": len(wps), "reason": reason})
+        return True
+
+    def _tick_retrace(self, pose: Pose, advice: str) -> Optional[np.ndarray]:
+        if not self._retrace_wps:
+            return None
+        if self._chassis_tipped:
+            self._clear_retrace()
+            return None
+        if not self._in_work_area(pose.x, pose.y):
+            self._clear_retrace()
+            self._retrace_cool = 12
+            return self._lateral_nudge(pose)
+        arrive = max(0.22, float(self.cfg.planner.arrive_radius_m))
+        while self._retrace_index < len(self._retrace_wps):
+            tx, ty = self._retrace_wps[self._retrace_index]
+            if math.hypot(tx - pose.x, ty - pose.y) <= arrive:
+                self._retrace_index += 1
+                continue
+            break
+        if self._retrace_index >= len(self._retrace_wps):
+            self._clear_retrace()
+            self._retrace_cool = 16
+            self.explore_plan = None
+            if self.phase != MissionPhase.MOW:
+                self.index = 0
+            return None
+        return self._track_list(
+            self._retrace_wps,
+            pose,
+            cruise=0.32,
+            advice=advice,
+            trimmer=0.0,
+            index_attr="_retrace_index",
+        )
+
+    def _retrace_or_nudge(self, pose: Pose, *, reason: str) -> np.ndarray:
+        """Retrace the breadcrumb trail; fall back to a one-step reverse.
+
+        Software tip-risk still begins with a reverse nudge so PLN / IMU
+        recovery stays a wheel-reverse, then the trail is followed.
+        """
+        if self._chassis_tipped:
+            return self._hold()
+        if self.phase == MissionPhase.MOW:
+            # Explore owns trail retrace. Mow on a 6×5 / 70 cm body walked
+            # OOB when following breadcrumbs near the keep-in lip.
+            back_x = pose.x - 0.40 * math.cos(float(pose.theta))
+            back_y = pose.y - 0.40 * math.sin(float(pose.theta))
+            if not self._in_work_area(back_x, back_y):
+                return self._lateral_nudge(pose)
+            return self._reverse_nudge(pose)
+        if self._retrace_wps:
+            action = self._tick_retrace(pose, self.last_advice)
+            if action is not None:
+                return action
+        started = self._start_retrace(pose, reason=reason)
+        if reason in {"tip_risk", "mow_tip"}:
+            back_x = pose.x - 0.40 * math.cos(float(pose.theta))
+            back_y = pose.y - 0.40 * math.sin(float(pose.theta))
+            if not self._in_work_area(back_x, back_y):
+                return self._lateral_nudge(pose)
+            return self._reverse_nudge(pose)
+        if started:
+            action = self._tick_retrace(pose, self.last_advice)
+            if action is not None:
+                return action
+        back_x = pose.x - 0.40 * math.cos(float(pose.theta))
+        back_y = pose.y - 0.40 * math.sin(float(pose.theta))
+        if not self._in_work_area(back_x, back_y):
+            return self._lateral_nudge(pose)
+        return self._reverse_nudge(pose)
+
+    def _drain_hazard(self, info: Optional[dict[str, Any]]) -> bool:
+        blob = info if isinstance(info, dict) else {}
+        if bool(blob.get("drain_drop")):
+            return True
+        reason = str(blob.get("terrain_reason") or "").lower()
+        return "drain" in reason
+
+    def _grade_like(self, advice: str) -> bool:
+        return climbable_grade(
+            tilt_kind=self.last_tilt_kind,
+            advice=advice,
+            look_ahead_kind=self._look_ahead_kind,
+            chassis_tipped=self._chassis_tipped,
+        )
+
+    def _ahead_cell(self, pose: Pose) -> Optional[tuple[int, int]]:
+        if self.observed is None:
+            return None
+        return self.observed.world_to_cell(*self._blockage_stamp_xy(pose))
+
+    def _ahead_is_hard_structure(self, pose: Pose) -> bool:
+        cell = self._ahead_cell(pose)
+        if cell is None or self.observed is None:
+            return False
+        r, c = cell
+        struct = int(self.observed.structure[r, c])
+        return struct in {STRUCTURE_BUILDING, STRUCTURE_BUNKER, STRUCTURE_GARDEN, STRUCTURE_GREEN}
+
+    def _ahead_is_drain(self, pose: Pose) -> bool:
+        cell = self._ahead_cell(pose)
+        if cell is None or self.observed is None:
+            return False
+        r, c = cell
+        haz = int(self.observed.hazard[r, c])
+        return haz in {HAZARD_DRAIN, HAZARD_DRAIN_EDGE}
+
+    def _defer_current_frontier(self, *, force: bool = False) -> None:
+        """Drop the current plan. Skip the lip after a repeat stall (or force)."""
+        target = self.explore_plan.target if self.explore_plan is not None else None
+        if target is not None:
+            hits = getattr(self, "_deferred_once", None)
+            if hits is None:
+                hits = set()
+                self._deferred_once = hits
+            if force or target in hits:
+                if target not in self._skipped_frontiers:
+                    self._skipped_frontiers.append(target)
+            else:
+                hits.add(target)
+        if self.phase != MissionPhase.MOW:
+            self.explore_plan = None
+            self.index = 0
+
+    def _skip_frontiers_near(self, x: float, y: float, *, radius_m: float) -> None:
+        if self.observed is None:
+            return
+        for wx, wy in list(self._frontier_xy):
+            if math.hypot(wx - x, wy - y) > float(radius_m):
+                continue
+            cell = self.observed.world_to_cell(wx, wy)
+            if cell is not None and cell not in self._skipped_frontiers:
+                self._skipped_frontiers.append(cell)
+
+    def _look_ahead_reason(self) -> dict[str, Any]:
+        return look_ahead_reason_blob(
+            kind=self._look_ahead_kind,
+            advice=self._look_ahead_advice,
+            pitch=self._look_ahead_pitch,
+            roll=self._look_ahead_roll,
+        )
+
+    def _refresh_terrain_state(self, info: Optional[dict[str, Any]], *, advice: str) -> None:
+        blob = info if isinstance(info, dict) else {}
+        self.terrain_state = fuse_terrain_state(
+            chassis_tipped=bool(self._chassis_tipped or blob.get("tipover") or blob.get("chassis_tipped")),
+            tipover=bool(blob.get("tipover")),
+            retracing=bool(self._retrace_wps),
+            tilt_kind=self.last_tilt_kind,
+            advice=advice,
+            stamped_recent=self._blockage_cool > 0 and self._blockage_events > 0,
+            blockage_recovering=self._explore_recover_cool > 0 and self._blockage_events > 0,
+        )
 
     def _lateral_nudge(self, pose: Pose) -> np.ndarray:
         """Pivot-reverse so the next skip is not the same ridge cell."""
@@ -2610,6 +2994,8 @@ def _fast_settings(base: MissionConfig) -> MissionConfig:
         review_hold_steps=min(2, int(base.review_hold_steps or 2)),
         mow_complete_frac=float(base.mow_complete_frac or 0.0),
         blockage_no_progress_steps=min(10, int(base.blockage_no_progress_steps or 16)),
+        blockage_stamp_cooldown_steps=min(12, int(base.blockage_stamp_cooldown_steps or 20)),
+        retrace_length_m=min(1.8, float(base.retrace_length_m or 2.8)),
         cover_radius_m=float(base.cover_radius_m or 0.0),
         mow_skip_cluster=max(4, int(base.mow_skip_cluster or 4)),
         mow_stop_cool=max(6, int(base.mow_stop_cool or 10)),

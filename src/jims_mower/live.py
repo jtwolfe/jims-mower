@@ -49,6 +49,7 @@ from jims_mower.mission_flow import (
 from jims_mower.kinematics import attitude_past_tip
 from jims_mower.path_overlay import build_path_overlay, mission_from_phase
 from jims_mower.planning.grade_tip import KIND_TIP
+from jims_mower.planning.terrain_decision import near_level_attitude
 from jims_mower.planning.observed import fog_rgba
 from jims_mower.profile import (
     YardProfile,
@@ -123,6 +124,7 @@ OWNER_COPY = {
     "blocked_remap": "Blocked — remapping around obstacle",
     "tip_risk": "Tip risk — reversing",
     "steep_grade": "Steep grade — contouring",
+    "retrace": "Retracing last metres",
     "unpaired": "Pair Bluetooth before Start.",
     "pairing": "Pairing…",
     "pair_failed": "Pairing failed — check the gym PIN.",
@@ -207,6 +209,7 @@ def owner_copy_for(
     return_kind: str = "",
     tilt_kind: str = "",
     tipped: bool = False,
+    terrain_state: str = "",
 ) -> str:
     blob = fault if isinstance(fault, dict) else None
     if hw_estop or (blob and str(blob.get("code") or "") == "HW_ESTOP"):
@@ -243,8 +246,18 @@ def owner_copy_for(
     if charge_state == "resuming":
         return OWNER_COPY["resuming_explore"] if phase == "explore" else OWNER_COPY["resuming_mow"]
     kind = str(tilt_kind or "")
-    if kind == "tip":
+    state = str(terrain_state or "")
+    # Fused terrain wins so Tip risk and Seeking frontier cannot coexist.
+    if state == "immobilised":
+        return OWNER_COPY["immobilised"]
+    if state == "retrace":
+        return OWNER_COPY["retrace"]
+    if state == "blocked_nogo":
+        return OWNER_COPY["blocked_remap"]
+    if state == "tip_reverse" or kind == "tip":
         return OWNER_COPY["tip_risk"]
+    if state == "contour":
+        return OWNER_COPY["steep_grade"]
     # Idle after Reset (or parked): do not keep asking to start mow.
     if job_state == "idle" and phase not in {"complete", "teach", "calibrate_boundary"}:
         if isinstance(explore_reason, dict) and explore_reason.get("label"):
@@ -1785,6 +1798,8 @@ class LiveSession:
                     "reason": "tipped — immobilised, retrieve",
                 }
         explore_reason = {} if tipped else (status.get("explore_reason") or {})
+        terrain_state = "" if tipped else str(status.get("terrain_state") or getattr(policy, "terrain_state", "") or "")
+        look_ahead_reason = dict(status.get("look_ahead_reason") or {})
         path_overlay = build_path_overlay(
             phase=phase,
             job_state=self.job_state,
@@ -1799,6 +1814,39 @@ class LiveSession:
             tipped=tipped,
             immobilised=tipped,
         )
+        owner_copy = owner_copy_for(
+            self.job_state,
+            phase,
+            fault,
+            taught=self.owner_taught,
+            fence_unusable=fence_unusable,
+            done=self.done,
+            hw_estop=self._hw_estop_latched(),
+            pairing_state=self.pairing.state,
+            require_pair=self.require_pair,
+            explore_reason=explore_reason if explore_reason else None,
+            charge_state=str(status.get("charge_state") or ""),
+            return_kind=str(status.get("return_kind") or ""),
+            tilt_kind=tilt_kind,
+            tipped=tipped,
+            terrain_state=terrain_state,
+        )
+        # Snapshot contract: tip-risk copy cannot sit on tilt_kind=ok.
+        if str(owner_copy).startswith("Tip risk") and tilt_kind == "ok":
+            tilt_kind = KIND_TIP
+        pose_pitch = float(pose.get("pitch") or 0.0) if isinstance(pose, dict) else float(getattr(pose, "pitch", 0.0) or 0.0)
+        pose_roll = float(pose.get("roll") or 0.0) if isinstance(pose, dict) else float(getattr(pose, "roll", 0.0) or 0.0)
+        if str(owner_copy).startswith("Tip risk") and near_level_attitude(pose_pitch, pose_roll):
+            if not look_ahead_reason:
+                look_ahead_reason = {
+                    "kind": str(getattr(policy, "_look_ahead_kind", "") or ""),
+                    "advice": str(getattr(policy, "_look_ahead_advice", "") or ""),
+                    "pitch": float(getattr(policy, "_look_ahead_pitch", 0.0) or 0.0),
+                    "roll": float(getattr(policy, "_look_ahead_roll", 0.0) or 0.0),
+                    "note": "tip-risk with near-level seated attitude — look-ahead / fused",
+                }
+            elif "note" not in look_ahead_reason:
+                look_ahead_reason["note"] = "tip-risk with near-level seated attitude"
         return {
             "schema": LIVE_SCHEMA,
             "live": True,
@@ -1809,22 +1857,7 @@ class LiveSession:
             "phase": phase,
             "phase_label": phase_label,
             "job_state": self.job_state,
-            "owner_copy": owner_copy_for(
-                self.job_state,
-                phase,
-                fault,
-                taught=self.owner_taught,
-                fence_unusable=fence_unusable,
-                done=self.done,
-                hw_estop=self._hw_estop_latched(),
-                pairing_state=self.pairing.state,
-                require_pair=self.require_pair,
-                explore_reason=explore_reason if explore_reason else None,
-                charge_state=str(status.get("charge_state") or ""),
-                return_kind=str(status.get("return_kind") or ""),
-                tilt_kind=tilt_kind,
-                tipped=tipped,
-            ),
+            "owner_copy": owner_copy,
             "radio_path": radio_path_for(phase, self.job_state),
             "taught": bool(self.owner_taught),
             "first_run": bool(self.first_run),
@@ -1853,6 +1886,8 @@ class LiveSession:
             ),
             "explore_reason": explore_reason,
             "tilt_kind": tilt_kind,
+            "terrain_state": "immobilised" if tipped else terrain_state,
+            "look_ahead_reason": look_ahead_reason,
             "chassis_tipped": bool(tipped),
             "can_reset": True,
             "full_explore": bool(status.get("full_explore")),

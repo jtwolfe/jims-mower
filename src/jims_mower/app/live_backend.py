@@ -282,6 +282,8 @@ class LiveBackend:
             "can_return": bool(snap.get("can_return")),
             "explore_reason": snap.get("explore_reason") or {},
             "tilt_kind": snap.get("tilt_kind") or "",
+            "terrain_state": snap.get("terrain_state") or "",
+            "look_ahead_reason": snap.get("look_ahead_reason") or {},
             "chassis_tipped": bool(snap.get("chassis_tipped")),
             "full_explore": bool(snap.get("full_explore")),
             "charge_state": snap.get("charge_state") or "",

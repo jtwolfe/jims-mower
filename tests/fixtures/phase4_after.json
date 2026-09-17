@@ -1,0 +1,31 @@
+{
+  "schema": "jims_mower.phase4.v1",
+  "source": "real gym taught mission_tiny keep-in (not acre live)",
+  "gates": {
+    "map_pct": 1.0,
+    "planned_pct": 1.0,
+    "cut_pct": 0.9823008849557522,
+    "phase": "complete",
+    "n_blockages": 2,
+    "blocked_cells": 45,
+    "terrain_state": "ok",
+    "step": 610,
+    "seen": [
+      "explore",
+      "review",
+      "mow",
+      "return_home",
+      "complete"
+    ],
+    "hill_n_blockages": 0,
+    "hill_blocked_cells": 0,
+    "full_pytest": "passed"
+  },
+  "baseline": {
+    "map_pct": 0.399,
+    "n_blockages": 3263,
+    "blocked_cells": 1367,
+    "phase": "explore",
+    "step": 8002
+  }
+}
