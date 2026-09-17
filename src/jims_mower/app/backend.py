@@ -56,8 +56,21 @@ class AppBackend(Protocol):
     def close(self) -> None: ...
 
 
-def _pose_dict(x: float, y: float, theta: float) -> dict[str, float]:
-    return {"x": float(x), "y": float(y), "theta": float(theta)}
+def _pose_dict(
+    x: float,
+    y: float,
+    theta: float,
+    *,
+    pitch: float = 0.0,
+    roll: float = 0.0,
+) -> dict[str, float]:
+    return {
+        "x": float(x),
+        "y": float(y),
+        "theta": float(theta),
+        "pitch": float(pitch),
+        "roll": float(roll),
+    }
 
 
 def _bind_pairing(yard: Any, *, require_pair: bool = False) -> PairingMachine:
@@ -1131,7 +1144,7 @@ def make_backend(
     seed: int = 7,
     cameras: int = 4,
     fast: bool = False,
-    speed: Any = 5.0,
+    speed: Any = 1.0,
     steps: Optional[int] = None,
     out_dir: Optional[Union[str, Path]] = None,
     session: Any = None,

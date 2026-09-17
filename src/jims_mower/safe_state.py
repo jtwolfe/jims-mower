@@ -120,11 +120,14 @@ class SafeStateMachine:
         if help_requested:
             self.enter_safe("call-for-help")
             return self.command()
+        if tipover:
+            self.enter_safe("tip-over — immobilised")
+            return self.command()
         if self.mode == "safe":
             return self.command()
 
         rank = _ADVICE_RANK.get(advice if advice in _ADVICE_RANK else "ok", 0)
-        severe = tipover or drain_drop or rank >= _ADVICE_RANK["stop"]
+        severe = drain_drop or rank >= _ADVICE_RANK["stop"]
         if self.mode == "run":
             if severe:
                 self._stop_ticks += 1

@@ -194,6 +194,21 @@ class ObservedMap:
         self.refresh_free()
         return n
 
+    def clear_progress(self, *, clear_blockages: bool = True) -> None:
+        """Wipe fog / explore paint for a fresh job. Size and fence stay."""
+        self.observed.fill(False)
+        self.explored.fill(False)
+        self.free.fill(False)
+        self.hazard.fill(0)
+        self.structure.fill(0)
+        self.elevation.fill(0)
+        self.confidence.fill(0)
+        self.occupancy.fill(0)
+        self.elevation_set.fill(False)
+        self.locked.fill(False)
+        if clear_blockages:
+            self.blockage.fill(False)
+
     def stamp_cameras(
         self,
         images: dict[str, np.ndarray],

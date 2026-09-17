@@ -259,6 +259,8 @@ def test_tip_lethal_margin_matches_config() -> None:
 def test_owner_copy_distinguishes_tip_and_grade() -> None:
     assert owner_copy_for("running", "mow", tilt_kind="tip") == OWNER_TIP_RISK
     assert owner_copy_for("running", "mow", tilt_kind="grade") == OWNER_STEEP_GRADE
+    assert owner_copy_for("idle", "explore", tilt_kind="tip") == OWNER_TIP_RISK
+    assert "immobilised" in owner_copy_for("idle", "explore", tipped=True).lower()
 
 
 def test_terrain_policy_gentle_hill_does_not_recovery_loop() -> None:

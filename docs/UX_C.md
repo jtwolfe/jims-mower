@@ -114,16 +114,17 @@ Narrow phone chrome (~390 px). Hash routes:
 - `#/map` — live job: large **Mapping yard** / **Mowing** mode chip,
   `explore_reason` line, then a **Manual phases** card with always-visible
   **Explore / Mow / Return home** (enabled from `can_*`, disabled reason
-  shown), a **Full explore** On/Off toggle, then the map with area-type
-  raster, a labeled **Area types** legend (grass / mow-this / path /
-  sand / building / water / drain / beds / keep-out / blocked / fog)
-  plus the Path Fog/Mapped/Trail/Plan/Cut row. **Reset** sits with the
-  manual phases (stop job, clear tip cool-down, keep the fence; learned
-  blockages stay unless `clear_blockages`). **Low battery** inject is on Map
-  and Health (`{cmd: inject, kind: low_soc}`). Pair still required
-  before Start. Else 2D SVG yard. Desktop widens this same chrome and
-  embeds `/viewer?embed=1` as the map pane — one owner shell, not a
-  second product. Layer toggles live under **Advanced**.
+  shown), then the map with area-type raster, a labeled **Area types**
+  legend (grass / mow-this / path / sand / building / water / drain /
+  beds / keep-out / blocked / fog) plus the Path Fog/Mapped/Trail/Plan/Cut
+  row. There is no Full explore toggle — explore and mow always target
+  the taught fence. **Reset** sits with the manual phases (stop job,
+  clear tip latch / immobilise, learned blockages, and explore/mow
+  progress; keep the fence; land Idle Ready at 1×). **Low battery**
+  inject is on Map and Health (`{cmd: inject, kind: low_soc}`). Pair
+  still required before Start. Else 2D SVG yard. Desktop widens this
+  same chrome and embeds `/viewer?embed=1` as the map pane — one owner
+  shell, not a second product. Layer toggles live under **Advanced**.
 - `#/health` — battery, thermal, radio-path chips, hours, schedule enable toggle + next run, Low battery inject when `--live`
 - `#/fault` — ESTOP / SOS vs stuck recovery
 
@@ -151,7 +152,7 @@ jims-mower-app --live --config acre_yard_demo --port 8766
 
 # Same live session contract as the desktop viewer:
 # POST /api/live/control  GET /api/live  (no second MissionPolicy)
-# Desktop-only chrome still: jims-mower-live --config acre_yard_demo --speed 5
+# Desktop-only chrome still: jims-mower-live --config acre_yard_demo
 
 # Recorded episode / kinematic stub
 jims-mower-record --out /tmp/jm-ep --steps 8 --cameras 4
@@ -160,8 +161,9 @@ jims-mower-app --backend memory --yard configs/yards/example_profile.json --port
 ```
 
 `--live` wraps `LiveSession` in-process (default yard `acre_yard_demo`,
-port **8766**, speed 5×). Full `acre_yard` stays available
-(`--config acre_yard`). `--fast` is `mission_tiny` for CI.
+port **8766**, speed **1×**). Full `acre_yard` stays available
+(`--config acre_yard`). `--fast` is `mission_tiny` for CI. Speed
+buttons remain for 2× / 5× / max; Reset returns to 1×.
 
 ## First-run vs demo confirm fence
 

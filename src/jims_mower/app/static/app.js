@@ -1,5 +1,5 @@
 (() => {
-  window.JIMS_UI_BUILD = "owner-ui-5";
+  window.JIMS_UI_BUILD = "owner-ui-7";
   const ONBOARD = ["unbox", "pair", "home", "teach", "mow"];
   const KEY = "jims_mower_onboarded";
 
@@ -50,6 +50,11 @@
   function setRobotPill(status) {
     const pill = $("#robot-pill");
     if (!pill) return;
+    if (chassisTipped(status, state.live)) {
+      pill.textContent = "fault";
+      pill.className = "fault";
+      return;
+    }
     const robot = (status && status.robot) || ((status && status.state && status.state.mission) || "idle");
     const live = !!(status && (status.live || status.backend === "live"));
     const mode = (status && status.mode_banner) || {};
@@ -388,12 +393,29 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     });
   }
 
+  function chassisTipped(st, live) {
+    if ((st && st.chassis_tipped) || (live && live.chassis_tipped)) return true;
+    const kind = (live && live.tilt_kind) || (st && st.tilt_kind) || "";
+    if (kind === "tip") return true;
+    const faults = (st && st.faults) || (live && live.faults) || [];
+    if (faults.some((f) => f && (f.retrieve || f.code === "FAULT_IMMOBILISED"))) return true;
+    const mode = (live && live.mode_banner) || (st && st.mode_banner) || {};
+    if (mode.hold === "SOS") return true;
+    if (mode.label && /sos|immobil/i.test(String(mode.label))) return true;
+    const pose = (live && live.pose) || (st && st.pose) || {};
+    return Math.abs(Number(pose.roll || 0)) >= 0.40 || Math.abs(Number(pose.pitch || 0)) >= 0.45;
+  }
+
   function modeFrom(st, live) {
     const overlay = overlayFrom(st, live);
     const raw = (live && live.mode_banner) || (st && st.mode_banner) || overlay.mode || {};
     const phase = raw.phase || overlay.phase || (live && live.phase) || ((st && st.state) || {}).phase || "idle";
     const job = raw.job_state || (live && live.job_state) || ((st && st.state) || {}).job_state || "idle";
-    if (job === "idle" && phase !== "complete" && phase !== "teach") {
+    if (chassisTipped(st, live)) {
+      const label = raw.label && !/ready/i.test(String(raw.label)) ? raw.label : "SOS — immobilised";
+      return { label, tone: raw.tone || "idle", kind: "fault", hold: raw.hold || "SOS", phase: "fault", job_state: job };
+    }
+    if (job === "idle" && phase !== "complete" && phase !== "teach" && phase !== "fault") {
       return { label: "Ready", tone: "idle", kind: "idle", hold: null, phase, job_state: job };
     }
     const fallback = MODE_COPY[phase] || MODE_COPY.idle;
@@ -547,7 +569,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const resetBtn = $("#cmd-reset");
     if (resetBtn) {
       resetBtn.disabled = false;
-      resetBtn.setAttribute("title", "Stop the job, clear tip cool-down, keep the fence.");
+      resetBtn.setAttribute(
+        "title",
+        "Stop the job, clear tip / blockages / progress, keep the fence, 1×."
+      );
     }
     const hint = $("#phase-hint");
     if (hint) {
@@ -565,19 +590,9 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <button class="btn primary" id="cmd-explore" ${g.canExplore ? "" : "disabled"} ${g.exploreWhy ? `title="${g.exploreWhy}"` : ""}>Explore</button>
         <button class="btn warn" id="cmd-mow" ${g.canMow ? "" : "disabled"} ${g.mowWhy ? `title="${g.mowWhy}"` : ""}>Mow</button>
         <button class="btn ghost" id="cmd-return" ${g.canReturn ? "" : "disabled"} ${g.returnWhy ? `title="${g.returnWhy}"` : ""}>Return home</button>
-        <button class="btn ghost" id="cmd-reset" title="Stop the job, clear tip cool-down, keep the fence.">Reset</button>
+        <button class="btn ghost" id="cmd-reset" title="Stop the job, clear tip / blockages / progress, keep the fence, 1×.">Reset</button>
       </div>
       <p class="sub phase-hint" id="phase-hint">${hint}</p>
-    </div>`;
-  }
-
-  function fullExploreHtml(fullExplore) {
-    return `<div class="card full-explore-card" id="full-explore-card">
-      <div class="toggle-row">
-        <strong>Full explore</strong>
-        <button type="button" class="toggle ${fullExplore ? "on" : ""}" id="full-explore" aria-pressed="${fullExplore ? "true" : "false"}">${fullExplore ? "On" : "Off"}</button>
-      </div>
-      <div class="sub">Raise the map-ready gate past the demo 30% / 420 cap.</div>
     </div>`;
   }
 
@@ -594,10 +609,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
   function bindPhaseControls() {
     const exploreBtn = $("#cmd-explore");
     if (exploreBtn) {
-      exploreBtn.onclick = () => {
-        const fullEl = $("#full-explore");
-        liveControl("explore", { full: !!(fullEl && fullEl.classList.contains("on")) });
-      };
+      exploreBtn.onclick = () => liveControl("explore");
     }
     const mowBtn = $("#cmd-mow");
     if (mowBtn) mowBtn.onclick = () => liveControl("mow");
@@ -605,10 +617,6 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (returnBtn) returnBtn.onclick = () => liveControl("return");
     const resetBtn = $("#cmd-reset");
     if (resetBtn) resetBtn.onclick = () => liveControl("reset");
-    const fullBtn = $("#full-explore");
-    if (fullBtn) {
-      fullBtn.onclick = () => liveControl("full_explore", { enabled: !fullBtn.classList.contains("on") });
-    }
   }
 
   function bindLowBattery() {
@@ -645,11 +653,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const job = live.job_state || (st.state || {}).job_state || "idle";
     const taught = !!(st.taught || live.taught);
     const copy = st.owner_copy || live.owner_copy || "Yard unknown — start a job when ready.";
-    const speed = String(st.speed_label || live.speed_label || "5");
+    const speed = String(st.speed_label || live.speed_label || "1");
     const needsReteach = !!(st.needs_reteach || live.needs_reteach || st.fence_unusable || live.fence_unusable);
     const reason = (st.explore_reason || live.explore_reason || {});
-    const reasonLine = reason.label || "";
-    const fullExplore = !!(st.full_explore || live.full_explore);
+    const reasonLine = chassisTipped(st, live) ? "" : (reason.label || "");
     const fog = live.fog_url || st.fog_url || "/api/live/fog.png";
     const observed = live.observed_url || st.observed_url || "/api/live/observed.png";
     const coverage = live.coverage_url || st.coverage_url || "/api/live/coverage.png";
@@ -668,7 +675,6 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       <p class="owner-copy secondary" id="owner-copy">${copy}</p>
       <p class="explore-reason" id="explore-reason" ${reasonLine ? "" : "hidden"}>${reasonLine}</p>
       ${phaseRowHtml(st, live)}
-      ${fullExploreHtml(fullExplore)}
       <p class="sub" id="yard-chip">${yardName}${taught ? " · taught fence" : " · authored demo fence until you teach"}</p>
       <div class="live-preview kind-${kind}${hasAreas ? " has-areas" : ""}" id="live-preview">
         <img class="obs" id="obs-img" alt="observed terrain" src="${observed}"/>
@@ -703,7 +709,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
         <summary>Advanced</summary>
         <p class="sub">Gym injects and a standalone 3D tab. Casual use stays on Explore / Mow / Return / Reset.</p>
         ${injectRowHtml()}
-        <p class="sub reset-note">Reset stops the job and clears tip cool-down. Learned blockages stay unless you reset with clear_blockages. Fence is not re-taught.</p>
+        <p class="sub reset-note">Reset stops the job, clears tip / immobilise, learned blockages, and explore/mow progress, and lands at 1× Idle Ready. Fence is not re-taught.</p>
         <p style="margin-top:10px"><a class="linkish" href="/viewer" target="_blank" rel="noopener">Open 3D map in a tab</a></p>
       </details>`;
     document.querySelectorAll("#speed-row button").forEach((btn) => {
@@ -853,7 +859,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const st = state.status || {};
     const live = state.live || {};
     const faults = st.faults || live.faults || [];
-    const sos = faults.some((f) => f.retrieve || f.code === "FAULT_IMMOBILISED");
+    const tipped = chassisTipped(st, live);
+    const sos = tipped || faults.some((f) => f.retrieve || f.code === "FAULT_IMMOBILISED");
     const stuck = faults.some((f) => f.code === "STUCK");
     const hwEstop = faults.some((f) => f.code === "HW_ESTOP") || live.hw_estop;
     const swEstop = !!(st.state && st.state.mission === "estop") || live.estop;
@@ -868,7 +875,9 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
           : "";
     const list = faults.length
       ? faults.map((f) => `<div class="fault-banner"><strong>${f.code}</strong><span>${f.detail || ""}</span></div>`).join("")
-      : `<div class="card"><strong>All clear</strong>No latched owner faults.</div>`;
+      : tipped
+        ? `<div class="fault-banner"><strong>FAULT_IMMOBILISED</strong><span>Past-tip chassis — retrieve. Not Idle Ready.</span></div>`
+        : `<div class="card"><strong>All clear</strong>No latched owner faults.</div>`;
     screen().innerHTML = `
       <h1>SOS</h1>
       ${banner}
@@ -932,6 +941,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       state.status.needs_reteach = frame.needs_reteach;
       state.status.path_overlay = frame.path_overlay;
       state.status.mode_banner = frame.mode_banner;
+      state.status.chassis_tipped = !!frame.chassis_tipped;
+      state.status.tilt_kind = frame.tilt_kind;
+      if (frame.faults) state.status.faults = frame.faults;
+      if (frame.pose) state.status.pose = frame.pose;
       state.status.planned_pct = 100 * Number(frame.planned_pct || 0);
       state.status.waypoint_index = frame.waypoint_index;
       state.status.coverage_url = frame.coverage_url || state.status.coverage_url;
@@ -953,7 +966,9 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (copy && frame.owner_copy) copy.textContent = frame.owner_copy;
     const reasonEl = $("#explore-reason");
     if (reasonEl) {
-      const label = (frame.explore_reason && frame.explore_reason.label) || "";
+      const label = chassisTipped(state.status || {}, frame)
+        ? ""
+        : ((frame.explore_reason && frame.explore_reason.label) || "");
       reasonEl.textContent = label;
       reasonEl.hidden = !label;
     }
@@ -1014,12 +1029,6 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (cutImg && frame.coverage_url) cutImg.src = frame.coverage_url;
     const areasImg = $("#areas-img");
     if (areasImg && frame.areas_url) areasImg.src = frame.areas_url;
-    const fullBtn = $("#full-explore");
-    if (fullBtn && frame.full_explore != null) {
-      fullBtn.classList.toggle("on", !!frame.full_explore);
-      fullBtn.setAttribute("aria-pressed", frame.full_explore ? "true" : "false");
-      fullBtn.textContent = frame.full_explore ? "On" : "Off";
-    }
     paintLiveOverlay(state.status || {}, frame);
   }
 

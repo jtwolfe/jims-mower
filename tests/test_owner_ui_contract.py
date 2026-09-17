@@ -26,7 +26,6 @@ BUTTON_IDS = (
     "cmd-explore",
     "cmd-mow",
     "cmd-return",
-    "full-explore",
     "inj-soc",
     "explore-reason",
     "area-legend",
@@ -38,7 +37,6 @@ OWNER_LABELS = (
     "Explore",
     "Mow",
     "Return home",
-    "Full explore",
     "Low battery",
     "Area types",
     "Grass",
@@ -54,6 +52,7 @@ OWNER_LABELS = (
     "Reset",
     "Tip risk — reversing",
     "Steep grade — contouring",
+    "SOS — immobilised",
 )
 
 STATUS_FLAGS = (
@@ -87,7 +86,7 @@ def test_static_app_js_has_manual_phase_controls() -> None:
     assert ">Return home<" in js
     assert ">Explore<" in js
     assert ">Mow<" in js
-    assert ">Full explore<" in js or "Full explore</strong>" in js
+    assert "Full explore" not in js
     assert ">Low battery<" in js
     assert "low_soc" in js
     assert "can_explore" in js
@@ -103,6 +102,8 @@ def test_static_app_js_has_manual_phase_controls() -> None:
     assert ">Reset<" in js
     assert "Tip risk — reversing" in js
     assert "Steep grade — contouring" in js
+    assert "SOS — immobilised" in js
+    assert "chassisTipped" in js
     assert "advanced-card" in js
     assert f'window.JIMS_UI_BUILD = "{UI_BUILD}"' in js
     assert "UI build " in js
@@ -125,8 +126,8 @@ def test_static_html_and_css_wire_cache_bust_and_legends() -> None:
     assert 'id="btn-explore"' in viewer
     assert 'id="btn-return"' in viewer
     assert "Return home" in viewer
-    assert 'id="btn-full-explore"' in viewer
-    assert "Full explore" in viewer
+    assert "Full explore" not in viewer
+    assert 'id="btn-full-explore"' not in viewer
     assert f"?v={UI_BUILD}" in viewer
 
 
@@ -173,7 +174,7 @@ def test_status_and_live_frame_expose_owner_ui_flags(tmp_path: Path) -> None:
         conn.close()
         assert ">Return home<" in js
         assert "Manual phases" in js
-        assert "Full explore" in js
+        assert "Full explore" not in js
         assert "Area types" in js
         assert ">Low battery<" in js
         assert "JIMS_UI_BUILD" in js
@@ -252,7 +253,8 @@ def test_status_and_live_frame_expose_owner_ui_flags(tmp_path: Path) -> None:
         assert reset["ok"] is True
         assert reset.get("cmd") == "reset"
         assert reset.get("job_state") == "idle"
-        assert reset.get("kept_blockages") is True
+        assert reset.get("kept_blockages") is False
+        assert reset.get("speed_label") == "1"
         code, low = _json(host, port, "POST", "/api/live/control", {"cmd": "inject", "kind": "low_soc", "soc": 0.12})
         assert low["ok"] is True
     finally:

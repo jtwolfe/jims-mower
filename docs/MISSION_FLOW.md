@@ -29,10 +29,13 @@ CLI:
 ```bash
 # Live owner session (preferred): wall-clock sim + streaming viewer.
 # Observed terrain grows from step 0 — do not wait for a finished folder.
-jims-mower-live --config acre_yard_demo --speed 5
-jims-mower-live --config acre_yard --speed 1
+# Default speed is 1×. 2 / 5 / max stay on the owner bar.
+jims-mower-live --config acre_yard_demo
+jims-mower-live --config acre_yard
 jims-mower-live --config acre_yard --speed 5 --phase-budget 0.4
 jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
+# Local full-acre explore→mow (not CI):
+jims-mower-live --config acre_yard --speed max --prepare-only --steps 20000 --out live_acre_full
 
 # Post-hoc scrub of a finished episode (old path):
 jims-mower-mission-demo --config golf_rough --out mission_out
@@ -59,7 +62,7 @@ so owner-view encode does not drop acre to ~2 Hz.
 `acre_yard` is a ~226 m fence. At `dt=0.1` that is many minutes of
 calibrate even at `--speed 5`, and a laptop often cannot hold 5×
 because each acre step is expensive. **`acre_yard_demo` is a live demo
-profile**, not a smaller world:
+profile**, not a smaller world and not a partial-coverage gate:
 
 * Same 70×58 m layout, pond, sheds, paths, drains, and **true-height
   physics**.
@@ -70,18 +73,22 @@ profile**, not a smaller world:
   physics lie.
 * Faster calibrate cruise / stride. Live also downsamples acre cameras
   to 48×36 so `--speed 5` can keep up.
-* **Demo map-ready** at `explore_complete: 0.30` (or no remaining
-  frontier at `0.22`) **or** `max_explore_steps: 420` even if frontiers
-  remain. `acre_yard` stays at `0.72` / 4000 explore steps / full fence
-  lap. That is documented demo pacing so MAP READY → MOW can happen in
-  a live `--speed 5` / `max` window, not after 1400 starved steps.
-* **Demo mow finish** at `max_mow_steps: 1600` or `mow_complete_frac:
-  0.10` of the planned reachable lawn, then `return_home` → `complete`.
-  Owner cut % is that job fraction (not world-grass %). `cover_radius_m:
-  0.70` paints the coarse demo raster so strips show; the physical trimmer
-  stays 0.16 m. IMU tip-stop skips a cluster and keeps mowing.
-  `acre_yard` does **not** early-home.
+* **Owner map-ready is the full taught fence** on both `acre_yard_demo`
+  and `acre_yard`: `explore_complete: 1.0` (or no remaining frontier at
+  `0.90`) and `max_explore_steps: 4000`. A step cap is not MAP READY
+  while reachable frontiers remain. There is no 30% / 420-step demo
+  early exit and no owner **Full explore** switch.
+* **Mow** plans the full keep-in (`mow_complete_frac: 0.0`). Owner cut %
+  is that job fraction (not world-grass %). `cover_radius_m: 0.70`
+  paints the coarse raster so strips show; the physical trimmer stays
+  0.16 m. IMU tip-stop skips a cluster and keeps mowing.
+* Cold start and **Reset** land at **1×**. Speed buttons stay for 2 / 5
+  / max. Reset keeps the taught fence and clears tip latch, learned
+  blockages, explore/mow progress, and Hold-safe.
 * `--phase-budget 0.4` scales the phase caps on any yard the same way.
+  CI proves explore→mow on a taught pocket / `mission_tiny`, not the
+  whole acre. Local acre long-run:
+  `jims-mower-live --config acre_yard --speed max --prepare-only --steps 20000`.
 
 ## First-run teach vs demo confirm fence
 
@@ -112,34 +119,36 @@ to see where the robot has been or where it plans to go. Deep-link
 default on while mowing). No mAP / RF claims.
 
 `acre_yard` vs `acre_yard_demo`: same ~1-acre physics world (70×58 m,
-pond, sheds, paths). Use **`acre_yard_demo`** for the live phone / laptop
-loop (short confirm or a taught profile). Use **`acre_yard`** when you
-want a full fence lap and the stricter map-ready gate. Neither is a
-coverage benchmark. CI uses `--fast` (`mission_tiny`) — no full-acre mow.
+pond, sheds, paths) and the same full-fence explore/mow gates. Use
+**`acre_yard_demo`** for the live phone / laptop loop (short confirm or
+a taught profile). Use **`acre_yard`** when you want a full fence lap
+before EXPLORE. Neither is a coverage benchmark. CI uses `--fast`
+(`mission_tiny`) plus a taught pocket — no full-acre mow.
 
 Jamie **desktop** command (viewer chrome only):
 
 ```bash
-jims-mower-live --config acre_yard_demo --speed 5
+jims-mower-live --config acre_yard_demo
 ```
 
 Open the viewer: session is **idle** (yard unknown) until **Start**.
-Expect **CALIBRATE → EXPLORE → MAP READY → MOW → HOME → DONE** in a
-documented demo budget at `--speed 5` (or `max`). MAP READY holds ~2 s
-(or **Start mow**). Cut % should rise while mowing; the phone session
-card shows map / planned / cut / skips / duration, then idle with the
-yard still loaded. Full acre mow to completion is still a manual
-`acre_yard` run, not CI.
+Default speed is **1×**. Expect **CALIBRATE → EXPLORE → MAP READY →
+MOW → HOME → DONE** against the full taught fence (map target 100%).
+MAP READY holds ~2 s (or **Start mow**). Cut % should rise while
+mowing; the phone session card shows map / planned / cut / skips /
+duration, then idle with the yard still loaded. Full acre wall-clock
+to completion is a manual `acre_yard --speed max --prepare-only
+--steps 20000` run, not CI.
 
-Owner bar: Start / Pause / Resume, speed `1× 2× 5× max`, first-class
-**Explore / Mow / Return** (manual phase overrides — do not wait for
-auto MAP READY), plus **Full explore** (production map-ready gate; demo
-may still use `explore_complete: 0.30` / 420 steps). ESTOP stays.
+Owner bar: Start / Pause / Resume, speed `1× 2× 5× max` (cold start
+and Reset = 1×), first-class **Explore / Mow / Return** (manual phase
+overrides — do not wait for auto MAP READY), and **Reset** (fresh job,
+fence kept). There is no Full explore toggle. ESTOP stays.
 Phone adds radio-path chips (BT teach / Wi-Fi map / LoRa sparse,
 simulated), stuck / dead-motor SOS, and **low-SOC inject** (dock →
 charge → resume leftover plan). Copy reads like a product
-(“Calibrating boundary…”, “Seeking frontier · map 51% of target 80%
-· step 200/420”, “Map ready — start mow?”, “Mowing…”, “Low battery —
+(“Calibrating boundary…”, “Seeking frontier · map 51% of target 100%
+· step 200/4000”, “Map ready — start mow?”, “Mowing…”, “Low battery —
 returning to charge”, “Charging…”, “Resuming mow”).
 `explore_reason` is always on the live snapshot while mapping.
 MAP READY is not “Hold — safe” (that is SafeState / ESTOP). A review
@@ -182,10 +191,9 @@ is a separate `blockage` raster — see
   input outside the observed mask.
 * Map-ready when `observed` fraction ≥ `mission.explore_complete`, or
   there are no frontiers and the fraction is at least
-  `mission.explore_no_frontier`, or `max_explore_steps` elapses
-  (demo: leftover frontiers are OK). Full explore past the step cap
-  keeps seeking **other** frontiers after a blockage stamp; it does
-  not spin on the same lip.
+  `mission.explore_no_frontier`. A step cap is not MAP READY while
+  reachable frontiers remain. After a blockage stamp the job keeps
+  seeking **other** frontiers; it does not spin on the same lip.
 
 ## Coverage plan
 
@@ -255,7 +263,7 @@ copy, map %, cut %, frontiers, plan (after freeze), a compact
 banner), and URLs for the latest fog / observed / **observed mesh** /
 coverage / camera frames.
 `POST /api/live/control` is the owner bar (start / pause / resume /
-speed / explore / mow / return / full_explore / start_mow / reexplore /
+speed / explore / mow / return / reset / start_mow / reexplore /
 estop / hold / yard / pair / inject). `inject kind=low_soc` drops gym
 SOC so the mid-job dock-and-resume path can be tested.
 The phone app (`jims-mower-app --live`) proxies the same endpoints —

@@ -131,7 +131,7 @@ planner:
   slow_speed_factor: 0.35
   grade_speed_factor: 0.50
   grade_look_ahead_m: 1.10
-  grade_look_ahead_samples: 4
+  grade_look_ahead_samples: 6
   strip_spacing_m: 0.28
   waypoint_stride_m: 0.32
   cruise_speed: 0.55
@@ -170,8 +170,10 @@ planner:
 
 mission:
   observe_confidence: 0.35
-  explore_complete: 0.80
-  explore_no_frontier: 0.55
+  explore_complete: 1.0
+  explore_no_frontier: 0.90
+  full_explore: true
+  full_explore_complete: 1.0
   stamp_radius_m: 1.35
   camera_range_m: 6.0
   max_calibrate_steps: 900

@@ -61,11 +61,18 @@ def test_explore_mow_tip_resume_on_observed_map() -> None:
         if policy.phase == MissionPhase.MOW and not reached_mow:
             reached_mow = True
             # PLN-3: IMU tip-stop → reverse nudge (do not retune physics).
+            # Past climb (~0.32) but under tip_roll (0.40). roll=0.45 is
+            # past tip and latches SOS / hold, which is a different path.
+            climb_roll = 0.36
             info = dict(info)
             info["terrain_advice"] = "stop"
-            info["pose"] = {**(info.get("pose") or {}), "roll": 0.45}
+            info["pose"] = {**(info.get("pose") or {}), "roll": climb_roll}
             obs = dict(obs)
-            obs["imu"] = np.array([0.0, 4.0, 8.7, 0.0, 0.0, 0.0], dtype=np.float32)
+            g = 9.80665
+            obs["imu"] = np.array(
+                [0.0, g * np.sin(climb_roll), g * np.cos(climb_roll), 0.0, 0.0, 0.0],
+                dtype=np.float32,
+            )
             tip = policy.act(obs, info)
             recovered = float(tip[0]) < 0.0 and float(tip[1]) < 0.0
             policy.request_hold("pln pause")

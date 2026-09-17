@@ -177,11 +177,40 @@ def sit_on_terrain(
 
     Four-wheel samples drive tip / drop checks; pitch and roll come from
     the front–rear and left–right height differences. Not inertia / CG
-    tip-moment physics — see ``docs/CHASSIS_PHYSICS.md``.
+    tip-moment physics — see ``docs/CHASSIS_PHYSICS.md``. Seating will
+    happily report |roll| / |pitch| past the software tip; callers must
+    latch that as immobilised, not keep driving.
     """
     if height_field is None:
         return Pose(pose.x, pose.y, pose.theta, 0.0, 0.0, 0.0)
     return sit_on_height_fn(pose, height_field.sample, length_m, track_m)
+
+
+def attitude_past_tip(
+    roll: float,
+    pitch: float,
+    tip_roll_rad: float,
+    tip_pitch_rad: float,
+) -> bool:
+    """True when seated / IMU attitude is at or past the static tip trips."""
+    return abs(float(roll)) >= float(tip_roll_rad) or abs(float(pitch)) >= float(tip_pitch_rad)
+
+
+def static_tip_latch(
+    pose: Pose,
+    *,
+    tip_roll_rad: float,
+    tip_pitch_rad: float,
+    latched: bool = False,
+) -> bool:
+    """Minimal static-tip latch: once past tip angle, stay tipped.
+
+    Not a CG moment / rolling rigid-body model — just do not treat a
+    past-tip sit as a driveable re-seat.
+    """
+    return bool(latched) or attitude_past_tip(
+        pose.roll, pose.pitch, tip_roll_rad, tip_pitch_rad
+    )
 
 
 def wheel_clearances(

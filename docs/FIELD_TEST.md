@@ -16,7 +16,8 @@ jims-mower-field-dryrun --out artifacts/field_dryrun/scorecard.yaml
 That command walks bring-up, a short `mission_tiny` teach → explore →
 MAP READY → mow → return-home (capped steps are OK), appearance living
 interlock, gym red-bias hand-signal stop, pair-before-start, LoRa
-far-fence sim (no metre range), Brisbane 09:00 ≠ UTC 09:00, tip inject,
+far-fence sim (no metre range), Brisbane 09:00 ≠ UTC 09:00, past-climb
+tip-stop reverse inject (under `tip_roll`; past-tip is SOS hold, not reverse),
 rain/SOC schedule skips, day-2 new-process restore, and a sim HW ESTOP
 paddle. It writes
 the same scorecard schema with `domain: gym_dryrun` and

@@ -301,8 +301,23 @@ def test_acre_yard_demo_reaches_explore_without_full_lap() -> None:
     assert "boundary_recorded" in events
 
 
+def test_explore_ready_accepts_near_full_keep_in() -> None:
+    """1.0 target must not hang on leftover unreachable cells / float noise."""
+    env = _tiny_env()
+    policy = MissionPolicy(env.cfg)
+    policy.settings.explore_complete = 1.0
+    policy.settings.explore_no_frontier = 0.90
+    policy.phase_step = 12
+    assert policy._explore_ready(0.995, True) is True
+    assert policy._explore_ready(0.92, False) is True
+    assert policy._explore_ready(0.40, True) is False
+    env.close()
+
+
 def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
-    """Demo profile only: MAP READY then MOW in a bounded budget. Not full acre."""
+    """Small taught keep-in on the acre demo: MAP READY then MOW. Not full acre."""
+    from jims_mower.profile import YardProfile
+
     cfg, scenario = load_source("acre_yard_demo")
     cfg.sensors.width = 16
     cfg.sensors.height = 12
@@ -310,14 +325,24 @@ def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
     cfg.sensors.cameras = []
     cfg.max_steps = 760
     env = MowerEnv(config=cfg, scenario=scenario, render_mode=None)
-    obs, info = env.reset(seed=3)
+    profile = YardProfile(
+        name="acre_ci_pocket",
+        width_m=cfg.world.width_m,
+        height_m=cfg.world.height_m,
+        resolution_m=cfg.world.resolution_m,
+        keep_in=[(8.0, 8.0), (16.0, 8.0), (16.0, 14.0), (8.0, 14.0)],
+        home={"x": 10.0, "y": 10.0, "theta": 0.0},
+    )
+    obs, info = env.reset(seed=3, options={"yard_profile": profile, "resize_world": False})
     policy = MissionPolicy(env.cfg)
-    policy.reset(obs, info)
+    policy.reset(obs, info, profile=profile)
     seen: list[str] = []
     cut = 0.0
     for _ in range(720):
         if policy.phase.value not in seen:
             seen.append(policy.phase.value)
+        if policy.phase == MissionPhase.REVIEW:
+            policy.request_start_mow()
         action = policy.act(obs, info)
         obs, _reward, terminated, truncated, info = env.step(action)
         cut = float(info.get("coverage_fraction") or 0.0)
@@ -330,11 +355,9 @@ def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
     assert "explore" in seen
     assert "review" in seen
     assert "mow" in seen or policy.phase.value == "mow"
-    assert policy.settings.explore_complete <= 0.32
-    assert policy.settings.max_explore_steps <= 500
-    assert status["map_completion"] >= 0.18
+    assert policy.settings.explore_complete >= 0.95
+    assert status["map_completion"] >= 0.70
     assert policy.step < 740
-    # Ridge recovery must leave a first paint, not park on tip-stop.
     assert cut > 0.0
 
 

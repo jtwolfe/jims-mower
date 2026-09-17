@@ -11,6 +11,15 @@ from jims_mower.planning.coverage import CoveragePlan
 from jims_mower.safe_state import SafeStateMachine, estop_requested
 
 
+def test_tipover_enters_safe_immediately() -> None:
+    sm = SafeStateMachine(limp_after_stops=8)
+    sm.tick(advice="ok", tipover=True)
+    assert sm.mode == "safe"
+    hold = sm.apply(np.array([0.8, 0.8, 1.0], dtype=np.float32))
+    assert hold[0] == pytest.approx(0.0)
+    assert hold[1] == pytest.approx(0.0)
+
+
 def test_estop_latches_until_clear() -> None:
     sm = SafeStateMachine(limp_after_stops=8)
     sm.tick(advice="ok", estop=True)

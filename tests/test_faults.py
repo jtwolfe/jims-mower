@@ -252,3 +252,20 @@ def test_fault_defaults_off() -> None:
     report = bus.report()
     assert report.code == "ok"
     assert report.retrieve is False
+
+
+def test_chassis_tipover_latches_immobilised() -> None:
+    bus = FaultBus()
+    bus.latch_tipover()
+    assert bus.immobilised is True
+    assert bus.chassis_tipped is True
+    blob = bus.as_info()
+    assert blob["code"] == CODE_IMMOBILISED
+    assert blob["retrieve"] is True
+    assert blob["component"] == "chassis"
+    assert blob["chassis_tipped"] is True
+    left, right, trim = bus.apply_drive(0.8, 0.8, True)
+    assert left == 0.0 and right == 0.0 and trim is False
+    bus.clear_tipover()
+    assert bus.immobilised is False
+    assert bus.as_info()["code"] == "ok"

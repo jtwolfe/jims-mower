@@ -132,11 +132,11 @@ def test_climbable_face_does_not_hard_tip() -> None:
 
 
 def test_look_ahead_fires_before_seated_pitch_crosses_climb() -> None:
-    # Flat pad, then a tip-steep lip ~1.0 m ahead.
+    # Flat pad, then a climbable face ~1.0 m ahead (under physics tip).
     hf = HeightField.from_function(
-        10.0, 6.0, 0.25, lambda x, y: np.clip((x - 4.20) / 0.18, 0.0, 1.0) * 0.24
+        10.0, 6.0, 0.25, lambda x, y: np.clip((x - 3.60) / 0.45, 0.0, 1.0) * 0.15
     )
-    pose = sit_on_terrain(Pose(3.00, 3.0, 0.0), hf, 0.50, 0.40)
+    pose = sit_on_terrain(Pose(2.70, 3.0, 0.0), hf, 0.50, 0.40)
     climb = 0.32
     assert abs(pose.pitch) < climb
     ev = terrain_hazards(
@@ -159,10 +159,11 @@ def test_look_ahead_fires_before_seated_pitch_crosses_climb() -> None:
         length_m=0.50,
         track_m=0.40,
         look_ahead_m=1.10,
-        n_samples=4,
+        n_samples=6,
         max_climb_slope_rad=climb,
     )
     assert ahead.kind in {KIND_GRADE, KIND_TIP}
+    assert ahead.past_tip is False
     assert look_ahead_advice(ahead) in {"slow", "reroute"}
     assert look_ahead_advice(ahead) != "stop"
 
@@ -183,7 +184,10 @@ def test_observer_elevation_look_ahead_matches_sit_probe() -> None:
     )
     assert ahead is not None
     assert ahead.kind in {KIND_GRADE, KIND_TIP}
-    assert merge_look_ahead_kind(KIND_OK, ahead) == KIND_GRADE
+    if ahead.past_tip:
+        assert merge_look_ahead_kind(KIND_OK, ahead) == KIND_TIP
+    else:
+        assert merge_look_ahead_kind(KIND_OK, ahead) == KIND_GRADE
 
 
 def test_look_ahead_tip_does_not_rewrite_owner_tip_copy() -> None:

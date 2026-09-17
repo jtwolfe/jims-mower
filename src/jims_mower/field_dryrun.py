@@ -23,7 +23,12 @@ from typing import Any, Optional, Union
 import numpy as np
 
 from jims_mower.bringup import check_hw_estop_sim, run_bringup
-from jims_mower.constants import FIELD_DRYRUN_DOMAIN, FIELD_SCORECARD_SCHEMA, SIGNAL_TO_ID
+from jims_mower.constants import (
+    FIELD_DRYRUN_DOMAIN,
+    FIELD_SCORECARD_SCHEMA,
+    GRAVITY_MPS2,
+    SIGNAL_TO_ID,
+)
 from jims_mower.env import MowerEnv
 from jims_mower.field_scorecard import (
     FieldScorecardError,
@@ -62,6 +67,16 @@ _DAY2_SNIPPET = (
     "    'phase': state.phase,\n"
     "}))\n"
 )
+
+
+def _imu_for_roll(roll_rad: float) -> np.ndarray:
+    """Static IMU whose accel tilt matches ``roll_rad`` (near-g specific force)."""
+    g = float(GRAVITY_MPS2)
+    roll = float(roll_rad)
+    return np.array(
+        [0.0, g * math.sin(roll), g * math.cos(roll), 0.0, 0.0, 0.0],
+        dtype=np.float32,
+    )
 
 
 def _row(name: str, status: str, detail: str, **extra: Any) -> dict[str, Any]:
@@ -478,17 +493,22 @@ def _run_mission(
     drains = 0
     recovered = False
     tip_injected = False
+    latched_hold = False
     for _ in range(int(steps)):
         if policy.phase == MissionPhase.REVIEW:
             policy.request_start_mow()
         action = policy.act(obs, info)
         seen.add(policy.phase.value)
         if policy.phase == MissionPhase.MOW and not tip_injected:
+            # Past climb (~0.32) but under tip_roll (0.40): IMU tip-stop
+            # reverse, not past-tip SOS hold. roll=0.45 is past tip and
+            # must immobilise — that is a different inject below.
+            climb_roll = 0.36
             tipped = dict(info)
             tipped["terrain_advice"] = "stop"
-            tipped["pose"] = {**(info.get("pose") or {}), "roll": 0.45}
+            tipped["pose"] = {**(info.get("pose") or {}), "roll": climb_roll}
             tip_obs = dict(obs)
-            tip_obs["imu"] = np.array([0.0, 4.0, 8.7, 0.0, 0.0, 0.0], dtype=np.float32)
+            tip_obs["imu"] = _imu_for_roll(climb_roll)
             tip = policy.act(tip_obs, tipped)
             recovered = float(tip[0]) < 0.0 and float(tip[1]) < 0.0
             if recovered:
@@ -505,6 +525,17 @@ def _run_mission(
 
     leftover_cells, leftover_m2 = env._coverage.leftover_uncut()
     policy.save_session(session_path, env._coverage, env._pose, scenario=scenario_name, seed=seed)
+    # Past-tip inject after save so reverse recovery / day-2 session are
+    # not poisoned. Seated |roll| ≥ tip_roll must HOLD / SOS.
+    past_roll = 0.42
+    past = dict(info)
+    past["terrain_advice"] = "stop"
+    past["pose"] = {**(info.get("pose") or {}), "roll": past_roll}
+    past_obs = dict(obs)
+    past_obs["imu"] = _imu_for_roll(past_roll)
+    hold = policy.act(past_obs, past)
+    latched_hold = abs(float(hold[0])) < 1e-6 and abs(float(hold[1])) < 1e-6
+    latched_hold = latched_hold and bool(getattr(policy, "_chassis_tipped", False))
     estop = check_hw_estop_latch(env)
     env.close()
 
@@ -541,8 +572,18 @@ def _run_mission(
     tip_row = _row(
         "tip_ramp_recovery",
         "PASS" if recovered else ("SKIP" if not tip_injected else "FAIL"),
-        "injected IMU tip → reverse recovery" if recovered else "tip recovery not observed (capped or failed)",
+        "injected past-climb IMU (roll=0.36) → reverse recovery"
+        if recovered
+        else "tip-stop reverse not observed (capped or failed)",
         injected=tip_injected,
+    )
+    tip_latch_row = _row(
+        "tip_past_immobilise",
+        "PASS" if latched_hold else "FAIL",
+        "injected past-tip pose (roll=0.42) → hold / SOS"
+        if latched_hold
+        else "past-tip inject did not hold (reverse or missing latch)",
+        injected=True,
     )
     return {
         "seen": sorted(seen),
@@ -552,6 +593,7 @@ def _run_mission(
         "leftover_uncut_m2": leftover_m2,
         "mission_rows": mission_rows,
         "tip_row": tip_row,
+        "tip_latch_row": tip_latch_row,
         "estop_row": estop,
         "surveyed": surveyed_flag,
         "teach_ok": teach_ok,
@@ -670,6 +712,7 @@ def run_field_dryrun(
         "rain_skip": rain_row,
         "soc_skip": soc_row,
         "tip_ramp_recovery": mission["tip_row"],
+        "tip_past_immobilise": mission.get("tip_latch_row"),
         "hw_estop_paddle": mission["estop_row"],
         "day2_resume": day2,
         "mission": mission["mission_rows"],
@@ -679,7 +722,19 @@ def run_field_dryrun(
     rows = (
         list(preflight["rows"])
         + list(mission["mission_rows"])
-        + [living, hand, pair_row, radio_row, tz_row, mission["tip_row"], rain_row, soc_row, day2, mission["estop_row"]]
+        + [
+            living,
+            hand,
+            pair_row,
+            radio_row,
+            tz_row,
+            mission["tip_row"],
+            mission["tip_latch_row"],
+            rain_row,
+            soc_row,
+            day2,
+            mission["estop_row"],
+        ]
     )
     fail = any(r.get("status") == "FAIL" for r in rows)
     return {

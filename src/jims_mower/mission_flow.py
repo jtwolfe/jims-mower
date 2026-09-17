@@ -24,7 +24,7 @@ import numpy as np
 from jims_mower.config import EnvConfig, MissionConfig
 from jims_mower.faults import fault_is_immobilised, fault_is_retrieve
 from jims_mower.geofence import GeofenceSpec, gps_world_from_enu
-from jims_mower.kinematics import unicycle_from_wheels
+from jims_mower.kinematics import attitude_past_tip, unicycle_from_wheels
 from jims_mower.planning.controller import (
     combine_advice,
     geofence_from_info,
@@ -179,6 +179,7 @@ class MissionPolicy:
         self.replans = 0
         self.last_advice = "ok"
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
         self._tilt_filter = TipHoldFilter(
             window=int(cfg.planner.imu_tilt_window),
             hold_steps=int(cfg.planner.imu_stop_hold_steps),
@@ -333,12 +334,13 @@ class MissionPolicy:
         self._transition(MissionPhase.RETURN_HOME)
         return True
 
-    def owner_reset(self, *, clear_blockages: bool = False) -> dict[str, Any]:
-        """Stop the job transients and return to Explore-ready without reteach.
+    def owner_reset(self, *, clear_blockages: bool = True) -> dict[str, Any]:
+        """Fresh job: keep the taught fence, clear tip / progress / blockages.
 
-        Keeps the taught fence and the observed map. Learned blockages stay
-        unless ``clear_blockages`` is set. Clears tip cool-down, explore
-        spin, software safe/hold, and recovery counters.
+        Owner Reset is not Re-teach. YardProfile stay. Observed fog, learned
+        no-go, explore/mow plans, and tip latch clear so the next Explore
+        starts clean. Default clears blockages; pass ``clear_blockages=False``
+        only when a caller wants to keep them.
         """
         self.clear_owner_hold()
         self.help_requested = False
@@ -350,36 +352,56 @@ class MissionPolicy:
         self._progress_stall = 0
         self._progress_best = 1e9
         self._progress_pose = None
+        self._progress_map = 0.0
+        self._progress_map_stall = 0
         self._replan_cool = 0
         self._detour = []
         self._detour_index = 0
         self.last_advice = "ok"
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
         self._tilt_filter.reset()
-        self.safe.clear()
+        self.safe.reset()
+        self.plan = None
+        self.explore_plan = None
+        self.global_plan = None
+        self.snapshot = None
+        self.index = 0
+        self.phase_step = 0
+        self._skipped_global = []
+        self._frontier_xy = []
+        self._review_hold = False
+        self._mow_requested = False
+        self._return_kind = ""
+        self._resume_phase = None
+        self._resume_index = 0
         cleared = 0
-        if clear_blockages and self.observed is not None:
-            cleared = int(self.observed.clear_blockages())
+        if self.observed is not None:
+            if clear_blockages:
+                cleared = int(self.observed.blockage_count())
+            self.observed.clear_progress(clear_blockages=clear_blockages)
+            self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
             self._skipped_frontiers = []
             self._blocked_frontier_count = 0
             self._last_blockage_xy = None
             self._blockage_events = 0
         # Keep a taught fence. Leave calibrate only when a profile already exists.
-        if self.phase == MissionPhase.CALIBRATE_BOUNDARY and self.profile is not None:
-            self._close_calibrate_now()
-        if self.phase in {
+        if self.profile is not None:
+            self._transition(MissionPhase.EXPLORE)
+        elif self.phase == MissionPhase.CALIBRATE_BOUNDARY:
+            pass
+        elif self.phase in {
             MissionPhase.FAULT,
             MissionPhase.SAFE,
             MissionPhase.MOW,
             MissionPhase.RETURN_HOME,
             MissionPhase.CHARGING,
             MissionPhase.COMPLETE,
+            MissionPhase.REVIEW,
+            MissionPhase.EXPLORE,
         }:
-            if self.snapshot is not None:
-                self._transition(MissionPhase.REVIEW)
-            else:
-                self._transition(MissionPhase.EXPLORE)
-        self.explore_reason = self._build_explore_reason(0.0, self._last_info, code="idle")
+            self._transition(MissionPhase.CALIBRATE_BOUNDARY)
+        self.explore_reason = {}
         self._emit(
             "owner_reset",
             {
@@ -397,6 +419,27 @@ class MissionPolicy:
             "kept_fence": self.profile is not None,
             "kept_blockages": not clear_blockages,
         }
+
+    def latch_chassis_tip(self, *, reason: str = "tip-over — immobilised") -> None:
+        """Sticky past-tip: SOS / FAULT until owner Reset / retrieve."""
+        self._chassis_tipped = True
+        self.last_tilt_kind = KIND_TIP
+        self.last_advice = "stop"
+        self.help_requested = True
+        self.safe.enter_safe(reason)
+        if self.phase not in {MissionPhase.FAULT, MissionPhase.COMPLETE}:
+            self._transition(MissionPhase.FAULT)
+
+    def _pose_past_tip(self, pose: Pose, info: Optional[dict[str, Any]] = None) -> bool:
+        blob = info if isinstance(info, dict) else {}
+        if self._chassis_tipped or bool(blob.get("tipover")) or bool(blob.get("chassis_tipped")):
+            return True
+        return attitude_past_tip(
+            pose.roll,
+            pose.pitch,
+            self.cfg.robot.tip_roll_rad,
+            self.cfg.robot.tip_pitch_rad,
+        )
 
     def apply_full_explore_mode(self, enabled: bool = True) -> bool:
         if enabled:
@@ -566,6 +609,7 @@ class MissionPolicy:
         self.replans = 0
         self.last_advice = "ok"
         self.last_tilt_kind = "ok"
+        self._chassis_tipped = False
         self._tilt_filter.reset()
         self.help_requested = False
         self.plan = None
@@ -658,6 +702,11 @@ class MissionPolicy:
 
         advice = self._sense_advice(obs, info, fused, pose_hint)
         self.last_advice = advice
+        if self._pose_past_tip(pose, info):
+            self.latch_chassis_tip()
+            self.step += 1
+            self.phase_step += 1
+            return self._finish(self._hold(), "stop", info)
         if estop_requested(obs, info):
             self.safe.request_estop("software/hardware estop")
         if self._owner_hold and self.safe.mode != "estop":
@@ -750,6 +799,7 @@ class MissionPolicy:
             "resume_index": int(self._resume_index),
             "area_legend": ObservedMap.area_legend(),
             "tilt_kind": self.last_tilt_kind,
+            "chassis_tipped": bool(self._chassis_tipped),
             "not_a_benchmark": True,
         }
 
@@ -924,8 +974,11 @@ class MissionPolicy:
         sensed = combine_advice(sensed, look_ahead_advice(ahead))
         chassis = combine_advice(chassis, look_ahead_advice(ahead))
         self.last_tilt_kind = merge_look_ahead_kind(self.last_tilt_kind, ahead)
-        if env_advice == "stop" and bool(info.get("tipover")):
+        if self._pose_past_tip(pose_hint, info) or (
+            env_advice == "stop" and bool(info.get("tipover"))
+        ):
             self.last_tilt_kind = KIND_TIP
+            self._chassis_tipped = True
         living = str(info.get("living_advice") or "ok")
         fence = str(info.get("geofence_advice") or "ok")
         power = budget_advice(info)
@@ -1022,11 +1075,19 @@ class MissionPolicy:
         thin = downsample_frontiers(raw, min_sep=2, limit=40)
         self._frontier_xy = [self.observed.cell_to_world(r, c) for r, c in thin]
         completion = self.observed.completion(keep)
-        ready = self._explore_ready(completion, bool(thin))
+        skip = set(self._skipped_frontiers)
+        reachable_thin = [cell for cell in thin if cell not in skip]
+        ready = self._explore_ready(completion, bool(reachable_thin))
         timed_out = self.phase_step + 1 >= int(self.settings.max_explore_steps)
-        # Full explore: a step cap is not MAP READY while frontiers remain
-        # and the production target is unmet.
-        if timed_out and not ready and self.settings.full_explore and thin:
+        # Full explore: a step cap is not MAP READY while reachable
+        # frontiers remain and the keep-in is not essentially mapped.
+        if (
+            timed_out
+            and not ready
+            and self.settings.full_explore
+            and reachable_thin
+            and completion < 0.99
+        ):
             timed_out = False
         if ready or timed_out:
             self.explore_reason = self._build_explore_reason(
@@ -1168,9 +1229,9 @@ class MissionPolicy:
             )
             full_clear = (
                 bool(self.settings.full_explore)
-                and not blocked
                 and self.phase_step >= give_up
                 and completion >= float(self.settings.explore_no_frontier)
+                and (not reachable_thin or completion >= 0.99)
             )
             # Look around a few ticks so a real stall can unstick, then
             # demo may still MAP READY with leftover frontiers.
@@ -1211,7 +1272,10 @@ class MissionPolicy:
         # keep-in is already "33% observed / no frontiers" at spawn.
         if self.phase_step < 1:
             return False
-        if completion >= float(self.settings.explore_complete):
+        target = float(self.settings.explore_complete)
+        # 1.0 is the taught fence. Leftover cells / float noise / one
+        # unreachable lip must not hang MAP READY forever.
+        if completion >= target or (target >= 0.99 and completion >= 0.99):
             return True
         min_steps = max(4, int(getattr(self.settings, "min_explore_steps", 8) or 8))
         if (
@@ -1371,7 +1435,7 @@ class MissionPolicy:
                 pose,
                 cruise=float(self.settings.mow_cruise),
                 advice=advice,
-                trimmer=1.0 if advice in {"ok", "slow"} else 0.0,
+                trimmer=1.0 if advice in {"ok", "slow"} or self.last_tilt_kind == KIND_GRADE else 0.0,
                 index_attr="_detour_index",
             )
             if self._detour_index >= len(self._detour):
@@ -1383,7 +1447,7 @@ class MissionPolicy:
             pose,
             cruise=float(self.settings.mow_cruise),
             advice=advice,
-            trimmer=1.0 if advice in {"ok", "slow"} else 0.0,
+            trimmer=1.0 if advice in {"ok", "slow"} or self.last_tilt_kind == KIND_GRADE else 0.0,
         )
         if self.index >= len(self.global_plan.waypoints):
             self._emit("mow_complete", self.global_plan.as_metrics())
@@ -1787,8 +1851,9 @@ class MissionPolicy:
         if not closed:
             notes.append("keep-in trail did not close tightly")
         completion = self.observed.completion(keep)
-        if completion < float(self.settings.explore_complete):
-            notes.append(f"map completion {completion:.2f} below target {self.settings.explore_complete:.2f}")
+        target = float(self.settings.explore_complete)
+        if not (completion >= target or (target >= 0.99 and completion >= 0.99)):
+            notes.append(f"map completion {completion:.2f} below target {target:.2f}")
         mowable = self.observed.mowable_mask(keep)
         comps = connected_components(mowable)
         if len(comps) > 1:
@@ -2142,10 +2207,17 @@ class MissionPolicy:
         profile = self.profile
         if profile is None or len(profile.keep_in) < 3:
             return False
+        # Teach/save still uses acre-relative scribble thresholds.
+        # Once a keep-in is the job fence, only reject a centre scribble
+        # so a small taught pocket on the acre world can still be mowed.
         return not keep_in_usable(
             profile.keep_in,
             float(self.cfg.world.width_m),
             float(self.cfg.world.height_m),
+            min_span_frac=0.0,
+            min_area_frac=0.0,
+            min_span_m=1.5,
+            min_area_m2=2.0,
         )
 
     def _hold(self) -> np.ndarray:
@@ -2157,15 +2229,25 @@ class MissionPolicy:
         self._sync_env_charge(self.phase == MissionPhase.CHARGING)
         if self.help_requested:
             self.safe.enter_safe("call-for-help")
-        # Ridge IMU stop during mow is a skip/replan, not a limp-park.
+        # Seated past-tip / drain still immobilise. Predicted look-ahead
+        # stop and IMU tip-risk must not limp-park the acre fence lap.
         safe_advice = advice
         if (
-            self.phase in {MissionPhase.MOW, MissionPhase.RETURN_HOME}
-            and advice == "stop"
+            advice == "stop"
             and not bool(info.get("tipover"))
             and not bool(info.get("drain_drop"))
+            and not self._chassis_tipped
+            and not (
+                self._last_pose is not None
+                and attitude_past_tip(
+                    self._last_pose.roll,
+                    self._last_pose.pitch,
+                    self.cfg.robot.tip_roll_rad,
+                    self.cfg.robot.tip_pitch_rad,
+                )
+            )
         ):
-            safe_advice = "slow"
+            safe_advice = "reroute" if self.phase == MissionPhase.CALIBRATE_BOUNDARY else "slow"
         self.safe.tick(
             advice=safe_advice,
             estop=estop_requested(None, info),
@@ -2385,15 +2467,16 @@ def apply_full_explore(settings: MissionConfig, *, world_width_m: float = 70.0) 
     settings.full_explore = True
     tiny = float(world_width_m) < 20.0
     if tiny:
-        settings.explore_complete = max(float(settings.explore_complete), 0.70)
+        settings.explore_complete = max(float(settings.explore_complete), 0.95)
         settings.max_explore_steps = max(int(settings.max_explore_steps), 360)
         settings.mow_complete_frac = 0.0
         settings.max_mow_steps = max(int(settings.max_mow_steps), 280)
     else:
         settings.explore_complete = max(
             float(settings.explore_complete),
-            float(settings.full_explore_complete or 0.80),
+            float(settings.full_explore_complete or 1.0),
         )
+        settings.explore_no_frontier = max(float(settings.explore_no_frontier), 0.90)
         settings.max_explore_steps = max(
             int(settings.max_explore_steps),
             int(settings.full_explore_steps or 4000),

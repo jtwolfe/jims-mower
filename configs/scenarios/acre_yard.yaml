@@ -167,8 +167,10 @@ mission:
   max_mow_steps: 8000
   max_return_steps: 800
   snapshot_stride: 40
-  explore_complete: 0.72
-  explore_no_frontier: 0.50
+  explore_complete: 1.0
+  explore_no_frontier: 0.90
+  full_explore: true
+  full_explore_complete: 1.0
   # Wheel-command fraction. 0.45 × 1.2 m/s ≈ 0.54 m/s explore cap.
   explore_cruise: 0.45
   mow_cruise: 0.50

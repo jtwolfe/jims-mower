@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=None)
-    p.add_argument("--speed", default="5")
+    p.add_argument("--speed", default="1")
     p.add_argument("--fast", action="store_true")
     p.add_argument("--steps", type=int, default=None)
     p.add_argument(

@@ -14,8 +14,8 @@ See also [`MISSION_FLOW.md`](MISSION_FLOW.md) (phases) and
 Gym physics still uses the true height field and body-circle collisions.
 Control does **not**. `ObservedMap` only trusts cells the cameras / body
 disk / ToF have stamped. That split is intentional (unknown is not
-safe). The live symptom — Full explore ON, `map_pct≈0.21` of target
-`0.80`, `40` frontiers, `unreachable_frontiers: 0`, still commanding
+safe). The live symptom — full-fence explore, `map_pct≈0.21` of target
+`1.00`, `40` frontiers, `unreachable_frontiers: 0`, still commanding
 motion — is what that split does when a frontier is A*-reachable in
 known-free but the chassis cannot actually enter the cells that would
 grow the map.
@@ -24,7 +24,7 @@ A* succeeding to the nearest free/unknown lip is not “reachable yard.”
 It is “reachable last known-free cell.” If that lip sits on a shed
 face, a fence the RGB never classified, a swale lip, or a path
 junction the robot cannot cross, the planner reports `0` unreachable
-and retries the same cluster forever. Full explore then ignores
+and retries the same cluster forever. Full-fence explore then ignores
 `max_explore_steps` while frontiers remain. That matches the `:8766`
 trace (`step 8001/4000`).
 
@@ -92,11 +92,10 @@ transit it.
 5. After `blockage_replan_after` (default 6) blocked frontiers with
    stale map growth, owner copy / `explore_reason` reads
    **“Blocked — remapping around obstacle”**. Manual **Return** stays
-   available. Full explore does **not** declare MAP READY at ~20%
-   just because the step cap elapsed.
-
-Demo early-exit (`explore_complete: 0.30` / short cap) is unchanged
-when Full explore is off.
+   available. Full-fence explore does **not** declare MAP READY at ~20%
+   just because the step cap elapsed. Owner default is always the
+   taught keep-in (`explore_complete: 1.0`); there is no Full explore
+   toggle and no 30% / 420-step demo early exit.
 
 ## 5. Owner line
 

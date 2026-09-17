@@ -60,12 +60,13 @@ jims-mower-viewer --episode mission_out
 # Live owner session (observed terrain + fog, wall-clock). One command.
 # Open http://127.0.0.1:8765/ while it runs — do not wait for the folder.
 # acre_yard_demo is the Jamie live command: same ~1 acre features, short
-# calibrate confirmation, demo map-ready at ~30% observed or 420 explore
-# steps (leftover frontiers OK), then MOW with a documented mow budget →
-# home → done. Open idle → Start. Speed 1× 2× 5× max.
-jims-mower-live --config acre_yard_demo --speed 5
-jims-mower-live --config acre_yard --speed 5
+# calibrate confirmation, then explore/mow the full taught fence
+# (map target 100%). Default speed is 1×. Buttons stay for 2× 5× max.
+jims-mower-live --config acre_yard_demo
+jims-mower-live --config acre_yard
 jims-mower-live --fast --speed max --steps 40 --prepare-only --out live_tiny
+# Local full-acre explore→mow (not CI):
+jims-mower-live --config acre_yard --speed max --prepare-only --steps 20000 --out live_acre_full
 # CI / laptop smoke uses --fast (mission_tiny). Full acre mow is manual.
 
 # Keep the old scripted creep or random wheels:
@@ -126,8 +127,9 @@ jims-mower-owner --live
 # first-run hash: jims-mower-owner --live --first-run
 # reload a saved YardProfile: --yard live_out/profile.json
 # same session: jims-mower-app --live --config acre_yard_demo --port 8766
-# desktop viewer only: jims-mower-live --config acre_yard_demo --speed 5
-# acre_yard_demo = live/laptop; acre_yard = full fence lap (not CI)
+# desktop viewer only: jims-mower-live --config acre_yard_demo
+# acre_yard_demo = live/laptop (short confirm, full-fence explore/mow)
+# acre_yard = full fence lap (not CI)
 jims-mower-app --backend memory --yard configs/yards/example_profile.json --port 8765
 ```
 

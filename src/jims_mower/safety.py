@@ -376,6 +376,9 @@ def terrain_hazards(
         advice, reason = "stop", "tip-over risk from pitch/roll"
     elif drain_drop:
         advice, reason = "stop", "wheel in earth drain / channel"
+    elif ahead_grade.past_tip:
+        advice, reason = "stop", "grade look-ahead — sit would exceed tip"
+        steep = True
     elif lip_ahead or lip_under:
         advice, reason = "reroute", "drain edge — do not drop a wheel in"
     elif ahead_grade.kind == KIND_TIP:

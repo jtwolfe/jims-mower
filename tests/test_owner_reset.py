@@ -1,4 +1,4 @@
-"""Owner Reset: stop job, clear tip cool-down, keep fence, optional blockages."""
+"""Owner Reset: stop job, clear tip/blockages/progress, keep fence, land 1× Idle Ready."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def test_policy_owner_reset_clears_tip_cool_and_keeps_fence() -> None:
     if policy.observed is not None:
         policy.observed.stamp_blockage(2.0, 2.0, 0.6)
     blocked = policy.observed.blockage_count() if policy.observed is not None else 0
-    out = policy.owner_reset(clear_blockages=False)
+    out = policy.owner_reset(clear_blockages=False)  # opt-out: keep learned no-go
     env.close()
     assert out["ok"] is True
     assert out["kept_blockages"] is True
@@ -93,6 +93,19 @@ def test_observed_clear_blockages_keeps_observed_cells() -> None:
     assert int(omap.observed.sum()) >= seen
 
 
+def test_observed_clear_progress_can_keep_blockages() -> None:
+    omap = ObservedMap.empty(4.0, 4.0, 0.2)
+    omap.stamp_disk(2.0, 2.0, 0.4, explored=True)
+    omap.stamp_blockage(2.5, 2.5, 0.4)
+    blocked = omap.blockage_count()
+    assert blocked > 0
+    omap.clear_progress(clear_blockages=False)
+    assert omap.blockage_count() == blocked
+    assert int(omap.observed.sum()) == 0
+    omap.clear_progress()
+    assert omap.blockage_count() == 0
+
+
 def test_live_reset_control_returns_idle_ready(tmp_path: Path) -> None:
     session = LiveSession(
         config="mission_tiny",
@@ -120,7 +133,8 @@ def test_live_reset_control_returns_idle_ready(tmp_path: Path) -> None:
     assert out["ok"] is True
     assert out["cmd"] == "reset"
     assert out["job_state"] == "idle"
-    assert out.get("kept_blockages") is True
+    assert out.get("kept_blockages") is False
+    assert out.get("speed_label") == "1"
     assert out.get("can_reset") is True
     assert "start mow" not in str(out.get("owner_copy") or "").lower()
     assert out.get("can_explore") is True
@@ -128,3 +142,37 @@ def test_live_reset_control_returns_idle_ready(tmp_path: Path) -> None:
         assert session.policy._stop_cool == 0
         assert session.policy.profile is not None or session.owner_taught or True
     assert session.estop is False
+    assert session.speed == 1.0
+    if session.policy is not None and session.policy.observed is not None:
+        assert session.policy.observed.blockage_count() == 0
+        assert int(session.policy.observed.observed.sum()) == 0
+    assert "Ready" in str(out.get("mode_banner", {}).get("label") or "") or "ready" in str(
+        out.get("owner_copy") or ""
+    ).lower()
+    assert out.get("tilt_kind") != "tip" or out.get("chassis_tipped") is True
+
+
+def test_owner_reset_default_clears_blockages_and_progress() -> None:
+    env, profile = _tiny()
+    obs, info = env.reset(seed=5, options={"yard_profile": profile, "resize_world": False})
+    policy = MissionPolicy(env.cfg, fast=True)
+    policy.reset(obs, info, profile=profile)
+    assert policy.observed is not None
+    policy.observed.stamp_disk(2.0, 2.0, 0.8, explored=True)
+    policy.observed.stamp_blockage(2.4, 2.4, 0.5)
+    assert policy.observed.blockage_count() > 0
+    assert int(policy.observed.observed.sum()) > 0
+    policy.global_plan = object()  # type: ignore[assignment]
+    policy._skipped_global = [(1.0, 1.0)]
+    out = policy.owner_reset()
+    env.close()
+    assert out["kept_fence"] is True
+    assert out["kept_blockages"] is False
+    assert out["cleared_cells"] > 0
+    assert policy.observed.blockage_count() == 0
+    assert int(policy.observed.observed.sum()) == 0
+    assert policy.global_plan is None
+    assert policy._skipped_global == []
+    assert policy._chassis_tipped is False
+    assert policy.phase == MissionPhase.EXPLORE
+    assert policy.profile is not None

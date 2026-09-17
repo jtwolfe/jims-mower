@@ -54,7 +54,7 @@ class LiveBackend:
         session: Optional[LiveSession] = None,
         config: Optional[str] = "acre_yard_demo",
         fast: bool = False,
-        speed: Any = 5.0,
+        speed: Any = 1.0,
         steps: Optional[int] = None,
         seed: int = 7,
         cameras: int = 4,
@@ -158,7 +158,13 @@ class LiveBackend:
         faults = list(snap.get("faults") or [])
         faults = _ux_b_faults(info, faults)
         job_state = str(snap.get("job_state") or "idle")
-        mission = mission_from_phase(str(snap.get("phase") or "idle"), job_state)
+        tipped = bool(snap.get("chassis_tipped"))
+        mission = mission_from_phase(
+            str(snap.get("phase") or "idle"),
+            job_state,
+            tipped=tipped,
+            immobilised=tipped,
+        )
         radio = _overlay_radio_sim(
             _radio_status(self.yard.radio, pairing=self.session.pairing),
             _radio_sim_from_info(info),
@@ -193,8 +199,34 @@ class LiveBackend:
             spec=self.yard.schedule,
         )
         snap = self.session.snapshot()
+        info = self.session.info if isinstance(self.session.info, dict) else info
+        pose = snap.get("pose") or pose
         job_state = str(snap.get("job_state") or job_state)
-        mission = mission_from_phase(str(snap.get("phase") or "idle"), job_state)
+        tipped = bool(snap.get("chassis_tipped"))
+        faults = list(snap.get("faults") or [])
+        faults = _ux_b_faults(info, faults)
+        if tipped and not any(f.get("code") == "FAULT_IMMOBILISED" for f in faults):
+            faults.append(
+                {
+                    "code": "FAULT_IMMOBILISED",
+                    "detail": "tipped — immobilised, retrieve",
+                    "retrieve": True,
+                    "kind": "software",
+                }
+            )
+        mission = mission_from_phase(
+            str(snap.get("phase") or "idle"),
+            job_state,
+            tipped=tipped,
+            immobilised=tipped,
+        )
+        robot = robot_status_for(
+            paired=self.paired,
+            job_state=job_state,
+            faults=faults,
+            done=bool(snap.get("done")),
+            tipped=tipped,
+        )
         return {
             "schema": APP_STATUS_SCHEMA,
             "backend": "live",
@@ -203,6 +235,8 @@ class LiveBackend:
                 float(pose.get("x", 0.0)),
                 float(pose.get("y", 0.0)),
                 float(pose.get("theta", 0.0)),
+                pitch=float(pose.get("pitch", 0.0)),
+                roll=float(pose.get("roll", 0.0)),
             ),
             "battery": battery_status_block(
                 soc=float(info.get("battery_soc", 0.9)),
@@ -247,6 +281,8 @@ class LiveBackend:
             "can_mow": bool(snap.get("can_mow", snap.get("can_start_mow"))),
             "can_return": bool(snap.get("can_return")),
             "explore_reason": snap.get("explore_reason") or {},
+            "tilt_kind": snap.get("tilt_kind") or "",
+            "chassis_tipped": bool(snap.get("chassis_tipped")),
             "full_explore": bool(snap.get("full_explore")),
             "charge_state": snap.get("charge_state") or "",
             "return_kind": snap.get("return_kind") or "",
