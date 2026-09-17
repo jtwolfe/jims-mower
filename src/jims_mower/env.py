@@ -711,21 +711,28 @@ class MowerEnv(gym.Env):
                 n_cameras=len(self.cameras),
             )
         mission_phase = str(getattr(self, "_mission_phase", "") or "")
-        recoverable_hit = hit is not None and mission_phase in {
+        recoverable_mission = mission_phase in {
             "explore",
             "mow",
             "calibrate_boundary",
             "return_home",
         }
+        recoverable_hit = hit is not None and recoverable_mission
         if recoverable_hit and self._prev_pose is not None:
             # Undo the penetrating step so the mission can stamp a no-go
             # and reverse. Do not end the owner job on the first tree bump.
             self._pose = self._prev_pose
+        recoverable_tip = bool(terrain_ev.tipover) and recoverable_mission
+        if recoverable_tip and self._prev_pose is not None:
+            # Climbable shed / look-ahead sit can trip tipover for one
+            # step. Undo so a tiny keep-in job is not aborted at ~50%.
+            # A pose that is still past tip after undo re-latches below.
+            self._pose = self._prev_pose
         terminated = bool(
             (hit is not None and not recoverable_hit)
             or oob
-            or terrain_ev.tipover
-            or bool(self._tip_latched)
+            or (terrain_ev.tipover and not recoverable_tip)
+            or (bool(self._tip_latched) and not recoverable_mission)
             or terrain_ev.drain_drop
             or breakdown.done_success
         )
