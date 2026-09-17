@@ -57,11 +57,6 @@ def test_taught_tiny_explore_mow_near_complete() -> None:
         last_status = policy.status(info)
         if policy.phase in {MissionPhase.COMPLETE, MissionPhase.RETURN_HOME}:
             break
-        if policy.phase == MissionPhase.MOW:
-            planned = float(last_status.get("planned_coverage_fraction") or 0.0)
-            actual = float(last_status.get("actual_coverage_fraction") or 0.0)
-            if planned >= 0.90 or actual >= 0.85:
-                break
         if terminated or truncated or policy.done:
             break
     summary = {
@@ -71,13 +66,16 @@ def test_taught_tiny_explore_mow_near_complete() -> None:
         "phase": policy.phase.value,
         "seen": sorted(seen),
         "step": int(policy.step),
+        "planned_mowable_cells": last_status.get("planned_mowable_cells"),
+        "reachable_mowable_cells": last_status.get("reachable_mowable_cells"),
     }
     env.close()
     assert "explore" in seen, summary
-    assert "mow" in seen or policy.phase == MissionPhase.MOW, summary
-    assert summary["map_pct"] >= 0.80, summary
-    assert summary["planned_pct"] >= 0.70 or summary["cut_pct"] >= 0.70, summary
-    assert policy.phase.value in {"mow", "return_home", "complete", "review"}, summary
+    assert "mow" in seen, summary
+    assert summary["map_pct"] >= 0.90, summary
+    assert summary["planned_pct"] >= 0.90, summary
+    assert summary["cut_pct"] >= 0.50 or policy.phase.value in {"return_home", "complete"}, summary
+    assert policy.phase.value in {"mow", "return_home", "complete"}, summary
 
 
 def test_live_reset_lands_idle_ready_at_1x(tmp_path: Path) -> None:
