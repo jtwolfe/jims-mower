@@ -1716,6 +1716,8 @@ class MissionPolicy:
         if commanded and (not pivoting) and moved < 0.03:
             self._progress_stall += 1
         limit = max(6, int(self.settings.blockage_no_progress_steps) + 4)
+        if self._leftover_replans:
+            limit = max(limit, 18)
         return self._progress_stall >= limit
 
     def _blockage_stamp_xy(self, pose: Pose) -> tuple[float, float]:
@@ -1918,7 +1920,13 @@ class MissionPolicy:
             notes=notes,
         )
 
-    def _plan_global_mow(self, pose: Pose, *, leftover: bool = False) -> CoveragePlan:
+    def _plan_global_mow(
+        self,
+        pose: Pose,
+        *,
+        leftover: bool = False,
+        info: Optional[dict[str, Any]] = None,
+    ) -> CoveragePlan:
         assert self.observed is not None
         snap = self.snapshot
         keep = snap.keep_in_mask if snap is not None else self.keep_in_mask
@@ -1971,7 +1979,7 @@ class MissionPolicy:
             hardscape = self.observed.structure != 0
             mowable = known & ~hardscape
         if leftover:
-            cut = self._keep_in_cut_mask(self._last_info)
+            cut = self._keep_in_cut_mask(info if info is not None else self._last_info)
             if cut is not None and cut.shape == mowable.shape:
                 mowable = mowable & ~cut
         heading = choose_strip_orientation(
@@ -2163,6 +2171,41 @@ class MissionPolicy:
             return cut & np.asarray(keep, dtype=bool)
         return cut
 
+    def _uncut_mowable_mask(self, info: Optional[dict[str, Any]]) -> Optional[np.ndarray]:
+        if self.observed is None:
+            return None
+        keep = self.keep_in_mask
+        mow = self.observed.mowable_mask(keep)
+        cut = self._keep_in_cut_mask(info)
+        leftover = np.asarray(mow, dtype=bool)
+        if cut is not None and cut.shape == leftover.shape:
+            leftover = leftover & ~cut
+        return leftover
+
+    def _direct_leftover_waypoints(
+        self,
+        leftover: np.ndarray,
+        pose: Pose,
+    ) -> list[tuple[float, float]]:
+        """Nearest-neighbour tour of leftover uncut cells."""
+        ys, xs = np.where(np.asarray(leftover, dtype=bool))
+        if ys.size == 0:
+            return []
+        res = max(float(self.cfg.world.resolution_m), 1e-6)
+        pts = [((float(c) + 0.5) * res, (float(r) + 0.5) * res) for r, c in zip(ys.tolist(), xs.tolist())]
+        path: list[tuple[float, float]] = []
+        cx, cy = float(pose.x), float(pose.y)
+        remaining = pts
+        arrive = max(0.16, float(self.cfg.planner.arrive_radius_m))
+        while remaining and len(path) < 96:
+            i = min(range(len(remaining)), key=lambda k: (remaining[k][0] - cx) ** 2 + (remaining[k][1] - cy) ** 2)
+            nxt = remaining.pop(i)
+            if math.hypot(nxt[0] - cx, nxt[1] - cy) < arrive and path:
+                continue
+            path.append(nxt)
+            cx, cy = nxt
+        return path
+
     def _replan_leftover_uncut(self, pose: Pose, info: Optional[dict[str, Any]]) -> bool:
         """When the strip list ends, sweep leftover uncut keep-in cells.
 
@@ -2171,14 +2214,26 @@ class MissionPolicy:
         """
         if self.observed is None or self.global_plan is None:
             return False
-        if self._leftover_replans >= 4:
+        if self._leftover_replans >= 8:
             return False
         world = float((info or {}).get("coverage_fraction") or 0.0)
         cut_frac = self._job_cut_fraction(info, self.global_plan, world)
         if cut_frac >= 0.95:
             return False
-        leftover = self._plan_global_mow(pose, leftover=True)
-        if leftover is None or len(leftover.waypoints) < 2:
+        mask = self._uncut_mowable_mask(info)
+        leftover_n = int(mask.sum()) if mask is not None else 0
+        reachable = max(1, int(self.global_plan.reachable_mowable_cells or 0))
+        if leftover_n <= 0 or leftover_n / reachable <= 0.05:
+            return False
+        leftover = self._plan_global_mow(pose, leftover=True, info=info)
+        direct = self._direct_leftover_waypoints(mask, pose) if mask is not None else []
+        if leftover is None:
+            return False
+        if len(direct) >= 2 and len(leftover.waypoints) < max(4, len(direct) // 2):
+            leftover.waypoints = list(direct)
+        if len(leftover.waypoints) < 2:
+            leftover.waypoints = list(direct)
+        if len(leftover.waypoints) < 2:
             return False
         orig = self.global_plan
         leftover.planned_mowable_cells = int(orig.planned_mowable_cells)
@@ -2198,6 +2253,7 @@ class MissionPolicy:
             {
                 "pass": int(self._leftover_replans),
                 "cut_pct": float(cut_frac),
+                "leftover_cells": leftover_n,
                 "n_waypoints": len(leftover.waypoints),
             },
         )
