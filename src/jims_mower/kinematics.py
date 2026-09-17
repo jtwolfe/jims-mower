@@ -178,12 +178,43 @@ def sit_on_terrain(
     Four-wheel samples drive tip / drop checks; pitch and roll come from
     the front–rear and left–right height differences. Not inertia / CG
     tip-moment physics — see ``docs/CHASSIS_PHYSICS.md``. Seating will
-    happily report |roll| / |pitch| past the software tip; callers must
-    latch that as immobilised, not keep driving.
+    happily report |roll| / |pitch| past the software tip. Immobilise
+    only when the sit crosses static α(t, b, h_cg) — see
+    ``docs/CHASSIS_PHYSICS.md``.
     """
     if height_field is None:
         return Pose(pose.x, pose.y, pose.theta, 0.0, 0.0, 0.0)
     return sit_on_height_fn(pose, height_field.sample, length_m, track_m)
+
+
+def static_tip_angle_rad(half_support_m: float, h_cg_m: float) -> float:
+    """Geometric static tip: gravity through the CG leaves a t×b patch.
+
+    ``α = atan((support/2) / h_cg)``. Hang-measure ``h_cg`` before treating
+    this as a field number. Not a rolling rigid-body moment.
+    """
+    if float(h_cg_m) <= 0.0:
+        raise ValueError("h_cg_m must be positive")
+    if float(half_support_m) <= 0.0:
+        raise ValueError("half_support_m must be positive")
+    return math.atan(float(half_support_m) / float(h_cg_m))
+
+
+def static_tip_angles_rad(
+    *,
+    track_m: float,
+    wheelbase_m: float,
+    h_cg_m: float,
+) -> tuple[float, float]:
+    """Return ``(α_roll, α_pitch)`` from track, wheelbase, and CG height.
+
+    Iso-stable when ``track_m ≈ wheelbase_m`` (square support). Software
+    trips must stay *below* these angles.
+    """
+    return (
+        static_tip_angle_rad(0.5 * float(track_m), h_cg_m),
+        static_tip_angle_rad(0.5 * float(wheelbase_m), h_cg_m),
+    )
 
 
 def attitude_past_tip(
@@ -192,7 +223,7 @@ def attitude_past_tip(
     tip_roll_rad: float,
     tip_pitch_rad: float,
 ) -> bool:
-    """True when seated / IMU attitude is at or past the static tip trips."""
+    """True when seated / IMU attitude is at or past the given trips."""
     return abs(float(roll)) >= float(tip_roll_rad) or abs(float(pitch)) >= float(tip_pitch_rad)
 
 
@@ -203,10 +234,11 @@ def static_tip_latch(
     tip_pitch_rad: float,
     latched: bool = False,
 ) -> bool:
-    """Minimal static-tip latch: once past tip angle, stay tipped.
+    """Latch once seated |roll| / |pitch| reaches the *static* α(t, b, h_cg).
 
-    Not a CG moment / rolling rigid-body model — just do not treat a
-    past-tip sit as a driveable re-seat.
+    Callers must pass the geometric static angles, not the earlier
+    software tip-stop. Not a full CG tip-moment / rolling rigid-body
+    engine — just do not treat a past-static sit as a driveable re-seat.
     """
     return bool(latched) or attitude_past_tip(
         pose.roll, pose.pitch, tip_roll_rad, tip_pitch_rad

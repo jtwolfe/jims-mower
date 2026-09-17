@@ -688,6 +688,8 @@ class MowerEnv(gym.Env):
             look_ahead_m=self.cfg.planner.grade_look_ahead_m,
             look_ahead_samples=self.cfg.planner.grade_look_ahead_samples,
             max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            static_tip_roll_rad=self.cfg.robot.static_tip_roll_rad(),
+            static_tip_pitch_rad=self.cfg.robot.static_tip_pitch_rad(),
         )
         breakdown = compute_reward(
             self.cfg.reward,
@@ -796,8 +798,8 @@ class MowerEnv(gym.Env):
         """Once sit exceeds tip, latch immobilised. Do not re-seat as driveable."""
         tipped = static_tip_latch(
             self._pose,
-            tip_roll_rad=self.cfg.robot.tip_roll_rad,
-            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+            tip_roll_rad=self.cfg.robot.static_tip_roll_rad(),
+            tip_pitch_rad=self.cfg.robot.static_tip_pitch_rad(),
             latched=self._tip_latched,
         )
         if tipped:
@@ -1281,6 +1283,8 @@ class MowerEnv(gym.Env):
             look_ahead_m=self.cfg.planner.grade_look_ahead_m,
             look_ahead_samples=self.cfg.planner.grade_look_ahead_samples,
             max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            static_tip_roll_rad=self.cfg.robot.static_tip_roll_rad(),
+            static_tip_pitch_rad=self.cfg.robot.static_tip_pitch_rad(),
         )
         spec = self.geofence_spec()
         origin_info = self._origin_info()

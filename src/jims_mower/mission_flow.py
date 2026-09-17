@@ -439,8 +439,8 @@ class MissionPolicy:
         return attitude_past_tip(
             pose.roll,
             pose.pitch,
-            self.cfg.robot.tip_roll_rad,
-            self.cfg.robot.tip_pitch_rad,
+            self.cfg.robot.static_tip_roll_rad(),
+            self.cfg.robot.static_tip_pitch_rad(),
         )
 
     def apply_full_explore_mode(self, enabled: bool = True) -> bool:
@@ -953,6 +953,8 @@ class MissionPolicy:
                 stop_frac=self.cfg.planner.imu_stop_frac,
                 max_climb_slope_rad=climb,
                 tip_lethal_frac=lethal_frac,
+                static_tip_roll_rad=self.cfg.robot.static_tip_roll_rad(),
+                static_tip_pitch_rad=self.cfg.robot.static_tip_pitch_rad(),
             ),
             tip_roll_rad=self.cfg.robot.tip_roll_rad,
             tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
@@ -974,6 +976,8 @@ class MissionPolicy:
             stop_frac=self.cfg.planner.imu_stop_frac,
             max_climb_slope_rad=climb,
             tip_lethal_frac=lethal_frac,
+            static_tip_roll_rad=self.cfg.robot.static_tip_roll_rad(),
+            static_tip_pitch_rad=self.cfg.robot.static_tip_pitch_rad(),
         )
         sensed = combine_advice(sensed, look_ahead_advice(ahead))
         chassis = combine_advice(chassis, look_ahead_advice(ahead))
@@ -2397,8 +2401,8 @@ class MissionPolicy:
                 and attitude_past_tip(
                     self._last_pose.roll,
                     self._last_pose.pitch,
-                    self.cfg.robot.tip_roll_rad,
-                    self.cfg.robot.tip_pitch_rad,
+                    self.cfg.robot.static_tip_roll_rad(),
+                    self.cfg.robot.static_tip_pitch_rad(),
                 )
             )
         ):

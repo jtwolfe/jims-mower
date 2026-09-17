@@ -20,9 +20,9 @@ sensors:
   camera_count: 6
   fov_deg: 70.0
   cameras:
-    - {name: stereo_left,  x: 0.24, y:  0.04, z: 0.38, yaw_deg:   0.0, pitch_deg: -22.0, fov_deg: 70.0}
-    - {name: stereo_right, x: 0.24, y: -0.04, z: 0.38, yaw_deg:   0.0, pitch_deg: -22.0, fov_deg: 70.0}
-    - {name: front,        x: 0.25, y:  0.00, z: 0.38, yaw_deg:   0.0, pitch_deg: -22.0, fov_deg: 70.0}
-    - {name: rear,         x: -0.25, y:  0.00, z: 0.38, yaw_deg: 180.0, pitch_deg: -12.0, fov_deg: 70.0}
-    - {name: left,         x:  0.00, y:  0.25, z: 0.38, yaw_deg:  90.0, pitch_deg: -12.0, fov_deg: 70.0}
-    - {name: right,        x:  0.00, y: -0.25, z: 0.38, yaw_deg: -90.0, pitch_deg: -12.0, fov_deg: 70.0}
+    - {name: stereo_left,  x: 0.33, y:  0.04, z: 0.34, yaw_deg:   0.0, pitch_deg: -22.0, fov_deg: 70.0}
+    - {name: stereo_right, x: 0.33, y: -0.04, z: 0.34, yaw_deg:   0.0, pitch_deg: -22.0, fov_deg: 70.0}
+    - {name: front,        x: 0.33, y:  0.00, z: 0.34, yaw_deg:   0.0, pitch_deg: -22.0, fov_deg: 70.0}
+    - {name: rear,         x: -0.33, y:  0.00, z: 0.34, yaw_deg: 180.0, pitch_deg: -12.0, fov_deg: 70.0}
+    - {name: left,         x:  0.00, y:  0.33, z: 0.34, yaw_deg:  90.0, pitch_deg: -12.0, fov_deg: 70.0}
+    - {name: right,        x:  0.00, y: -0.33, z: 0.34, yaw_deg: -90.0, pitch_deg: -12.0, fov_deg: 70.0}

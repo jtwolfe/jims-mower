@@ -16,13 +16,13 @@ note: >
 classes:
   - id: chassis
     qty: 1
-    class: 3 mm Al or HDPE tub, 500 mm cube class
+    class: 3 mm Al or HDPE tub, 700 × 700 × 400 mm envelope
     buy_make: make
     verify_before_spin: hang-measure wet mass and CG; write HARDWARE_DESIGN §1
     open_questions: thickness vs 22 kg assumption; belly clearance 70–90 mm
     number_status: assumption
     feeds: mass / CG
-    notes: Envelope matches gym 0.50 m. Not a fabbed article.
+    notes: Envelope matches gym 0.70 × 0.70 × 0.40 m. Front castors, rear DD. Not a fabbed article.
 
   - id: drive_hub
     qty: 2
@@ -46,17 +46,26 @@ classes:
     qty: "2 or 4"
     class: ~8 in / 200 mm OD, turf tread
     buy_make: buy
-    verify_before_spin: tape r_w; confirm track 400 mm and wheelbase 400 mm
+    verify_before_spin: tape r_w; confirm track 550 mm and wheelbase 550 mm
     open_questions: foam vs pneumatic; ground pressure on wet soil
     number_status: assumption
     feeds: r_w, track_m
+
+  - id: castor
+    qty: 2
+    class: front swivel castors (passive), turf tread
+    buy_make: buy
+    verify_before_spin: trail and lock; sit ahead of the belly slab
+    open_questions: size vs rear drive wheels; trail vs 550 mm wheelbase
+    number_status: class
+    feeds: front contact / wheelbase_m
 
   - id: pack
     qty: 1
     class: LiFePO4 24 V 50 Ah class + BMS (uncertain SKU)
     buy_make: buy
     verify_before_spin: "docs/PACK_THERMAL.md — Wh + charge hours before measured: true"
-    open_questions: fit in 50 cm cube with CG low and between wheels
+    open_questions: LFP slab as central belly ballast (not tall over the rear axle). Lead-acid is heavier/Wh-worse — only if Jamie insists on Pb.
     number_status: class
     feeds: battery_soc later
 
@@ -154,7 +163,7 @@ classes:
     qty: 1
     class: non-structural skirt above grass
     buy_make: make
-    verify_before_spin: no under-deck blade; collision_radius_m 0.28 m still matches
+    verify_before_spin: no under-deck blade; collision_radius_m 0.40 m still matches
     open_questions: material
     number_status: target
     feeds: body envelope

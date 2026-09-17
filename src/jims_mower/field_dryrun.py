@@ -500,9 +500,8 @@ def _run_mission(
         action = policy.act(obs, info)
         seen.add(policy.phase.value)
         if policy.phase == MissionPhase.MOW and not tip_injected:
-            # Past climb (~0.32) but under tip_roll (0.40): IMU tip-stop
-            # reverse, not past-tip SOS hold. roll=0.45 is past tip and
-            # must immobilise — that is a different inject below.
+            # Past climb (~0.32) but under software tip (~0.55): IMU
+            # tip-stop reverse, not past-static SOS. Static α is ~1.10.
             climb_roll = 0.36
             tipped = dict(info)
             tipped["terrain_advice"] = "stop"
@@ -525,9 +524,9 @@ def _run_mission(
 
     leftover_cells, leftover_m2 = env._coverage.leftover_uncut()
     policy.save_session(session_path, env._coverage, env._pose, scenario=scenario_name, seed=seed)
-    # Past-tip inject after save so reverse recovery / day-2 session are
-    # not poisoned. Seated |roll| ≥ tip_roll must HOLD / SOS.
-    past_roll = 0.42
+    # Past-static inject after save so reverse recovery / day-2 session
+    # are not poisoned. Seated |roll| ≥ static α must HOLD / SOS.
+    past_roll = float(env.cfg.robot.static_tip_roll_rad()) + 0.05
     past = dict(info)
     past["terrain_advice"] = "stop"
     past["pose"] = {**(info.get("pose") or {}), "roll": past_roll}
@@ -580,7 +579,7 @@ def _run_mission(
     tip_latch_row = _row(
         "tip_past_immobilise",
         "PASS" if latched_hold else "FAIL",
-        "injected past-tip pose (roll=0.42) → hold / SOS"
+        f"injected past-static pose (roll={past_roll:.2f}) → hold / SOS"
         if latched_hold
         else "past-tip inject did not hold (reverse or missing latch)",
         injected=True,

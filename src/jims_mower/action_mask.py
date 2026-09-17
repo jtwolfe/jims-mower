@@ -54,7 +54,7 @@ def forward_cone_values(
     *,
     resolution_m: float,
     reach_m: float = 0.95,
-    half_width_m: float = 0.38,
+    half_width_m: float = 0.40,
     n_along: int = 8,
     n_across: int = 5,
 ) -> np.ndarray:

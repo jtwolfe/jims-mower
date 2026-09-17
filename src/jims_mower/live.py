@@ -1051,21 +1051,29 @@ class LiveSession:
         return bool(info.get("hw_estop") or info.get("hw_estop_latched"))
 
     def _tip_thresholds(self) -> tuple[float, float]:
+        """Software tip-stop (earlier than static α)."""
         cfg = self.env.cfg if self.env is not None else None
         if cfg is None:
-            return 0.40, 0.45
+            return 0.55, 0.55
         return float(cfg.robot.tip_roll_rad), float(cfg.robot.tip_pitch_rad)
+
+    def _static_tip_thresholds(self) -> tuple[float, float]:
+        """Geometric static α(t, b, h_cg) — immobilise / SOS latch."""
+        cfg = self.env.cfg if self.env is not None else None
+        if cfg is None:
+            return 1.10, 1.10
+        return float(cfg.robot.static_tip_roll_rad()), float(cfg.robot.static_tip_pitch_rad())
 
     def _sync_tip_latch(self) -> None:
         """After physics, latch a past-tip sit so idle / stall cannot hide it."""
         info = self.info if isinstance(self.info, dict) else {}
         pose = info.get("pose") if info else None
-        tip_roll, tip_pitch = self._tip_thresholds()
+        static_roll, static_pitch = self._static_tip_thresholds()
         past = (
             bool(self._tipped)
             or bool(info.get("tipover"))
             or bool(info.get("chassis_tipped"))
-            or pose_is_past_tip(pose, tip_roll, tip_pitch)
+            or pose_is_past_tip(pose, static_roll, static_pitch)
         )
         if not past:
             return
@@ -1746,7 +1754,8 @@ class LiveSession:
         teach_trail = []
         if self.teach_policy is not None and self.teach_policy.trail:
             teach_trail = list(self.teach_policy.trail)
-        tip_roll, tip_pitch = self._tip_thresholds()
+        software_roll, software_pitch = self._tip_thresholds()
+        static_roll, static_pitch = self._static_tip_thresholds()
         info_blob = self.info if isinstance(self.info, dict) else {}
         tipped = (
             bool(self._tipped)
@@ -1754,13 +1763,13 @@ class LiveSession:
             or bool(getattr(policy, "_chassis_tipped", False))
             or bool(info_blob.get("tipover"))
             or bool(info_blob.get("chassis_tipped"))
-            or pose_is_past_tip(pose, tip_roll, tip_pitch)
+            or pose_is_past_tip(pose, static_roll, static_pitch)
         )
         tilt_kind = snapshot_tilt_kind(
             pose,
             last_kind=str(status.get("tilt_kind") or getattr(policy, "last_tilt_kind", "") or ""),
-            tip_roll_rad=tip_roll,
-            tip_pitch_rad=tip_pitch,
+            tip_roll_rad=software_roll,
+            tip_pitch_rad=software_pitch,
             tipover=bool(info_blob.get("tipover")),
             tipped=tipped,
         )

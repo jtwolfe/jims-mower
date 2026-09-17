@@ -131,7 +131,7 @@ def _cone_mask(
     resolution_m: float,
     *,
     reach_m: float = 0.95,
-    half_width_m: float = 0.38,
+    half_width_m: float = 0.40,
 ) -> np.ndarray:
     """Cells in a short forward rectangle — used to force a reroute."""
     mask = np.zeros(shape, dtype=bool)
@@ -249,8 +249,8 @@ class TerrainPolicy:
         return attitude_past_tip(
             pose.roll,
             pose.pitch,
-            self.cfg.robot.tip_roll_rad,
-            self.cfg.robot.tip_pitch_rad,
+            self.cfg.robot.static_tip_roll_rad(),
+            self.cfg.robot.static_tip_pitch_rad(),
         )
 
     def act(self, obs: dict[str, Any], info: dict[str, Any]) -> np.ndarray:
@@ -304,6 +304,8 @@ class TerrainPolicy:
             stop_frac=self.cfg.planner.imu_stop_frac,
             max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
             tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
+            static_tip_roll_rad=self.cfg.robot.static_tip_roll_rad(),
+            static_tip_pitch_rad=self.cfg.robot.static_tip_pitch_rad(),
         )
         filtered = self._tilt_filter.update(
             raw_cls,
@@ -327,6 +329,8 @@ class TerrainPolicy:
             stop_frac=self.cfg.planner.imu_stop_frac,
             max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
             tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
+            static_tip_roll_rad=self.cfg.robot.static_tip_roll_rad(),
+            static_tip_pitch_rad=self.cfg.robot.static_tip_pitch_rad(),
         )
         sensed = combine_advice(sensed, look_ahead_advice(ahead))
         chassis = combine_advice(chassis, look_ahead_advice(ahead))

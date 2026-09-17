@@ -17,12 +17,12 @@ Linked from [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) §19,
 
 ## Before you cut metal
 
-1. Read HARDWARE_DESIGN §1. The 22 kg / 0.18 m CG figures are
+1. Read HARDWARE_DESIGN §1. The 22 kg / 0.14 m CG figures are
    **assumptions**. If you already know they are wrong, revise §1
-   *before* the first water-jet / saw cut.
-2. Confirm gym envelope you are matching: body 0.50 m, track 0.40 m,
-   wheelbase 0.40 m, `collision_radius_m` 0.28 m. Growing past ~0.55 m
-   means retuning those knobs.
+   *before* the first water-jet / saw cut. Do not invent a measured kg.
+2. Confirm gym envelope you are matching: body 0.70 × 0.70 × 0.40 m,
+   track 0.55 m, wheelbase 0.55 m, `collision_radius_m` 0.40 m,
+   assumed `h_cg_m` 0.14. Growing the shell means retuning those knobs.
 3. Freeze the BOM class list (below). Do not pick fake SKUs in git.
 
 ---
@@ -33,18 +33,23 @@ Do these in order. Tick in the shop copy; do not tick them here.
 
 ### 1. Chassis cut
 
-- Cut the belly / tub to the 500 mm cube class (3 mm Al or HDPE — your
-  call; both are **uncertain**).
+- Cut the belly / tub to the **700 × 700 × 400 mm** envelope (3 mm Al
+  or HDPE — your call; both are **uncertain**).
 - Ground clearance **70–90 mm**. Gym `wheel_drop_m` 80 mm is the
   drain-fail height — do not sit lower without changing that.
-- Skirts above grass. **No under-deck blade.** Front +x is the trimmer.
+- Skirts above grass. **No under-deck blade.** Front +x is the trimmer
+  (off-center, keep the hub low).
+- Battery as a **central belly slab** between front castors and the
+  rear axle. Not a tall stack over the rear axle.
 
 ### 2. Wheel track + wheelbase
 
-- Wheel centreline track **400 mm**. Wheelbase **400 mm**.
+- Wheel centreline track **550 mm**. Wheelbase **550 mm** (castor line
+  to rear axle). \(t \approx b\) for iso tip.
+- Front: 2× swivel castors. Rear: 2× large wheels + direct-drive hubs.
 - Wheel OD ~200 mm (\(r_w = 0.10\) m) is an **assumption** until you
   tape the tyre you bought.
-- Hubs: 24 V class, ≥7 N·m peak, encoder. Uncertain SKU.
+- Hubs: 24 V class, ≥7 N·m peak, encoder, rear DD. Uncertain SKU.
 
 ### 3. Hang-measure mass and CG
 
@@ -94,7 +99,7 @@ Mark every fuse on the lid.
 
 - Orin Nano 8 GB + carrier. Confirm barrel voltage. **Do not** feed
   8S LFP raw into a 19 V barrel.
-- Duct or finned lid. Closed cube in sun will run hot
+- Duct or finned lid. Closed 70 × 40 cm lid in sun will run hot
   (**assumption**). Thermal trip stays a stub until
   [`PACK_THERMAL.md`](PACK_THERMAL.md).
 - No gym renderer on-box.
@@ -120,17 +125,23 @@ HARDWARE_DESIGN §2 uses
 \tan\alpha_\mathrm{pitch} = \frac{b/2}{h_\mathrm{cg}}.
 \]
 
-With the **assumed** \(t = b = 0.40\) m and \(h_\mathrm{cg} = 0.18\) m
-that is \(\alpha \approx 48°\). After you measure \(m\) and
-\(h_\mathrm{cg}\):
+With the **assumed** \(t = b = 0.55\) m and \(h_\mathrm{cg} = 0.14\) m
+that is \(\alpha \approx 63°\) **both axes** (iso). Software trips are
+\(\approx 0.50 \times \alpha\) (`tip_roll_rad` / `tip_pitch_rad` =
+0.55 rad ≈ 31.5°). After you measure \(m\) and \(h_\mathrm{cg}\):
 
-1. Recompute \(\alpha_\mathrm{roll}\) and \(\alpha_\mathrm{pitch}\).
+1. Recompute \(\alpha_\mathrm{roll}\) and \(\alpha_\mathrm{pitch}\)
+   from \(t\), \(b\), \(h_\mathrm{cg}\).
 2. Recompute grade / yaw torque in §3 (\(F = mg\sin\theta\),
    \(T_\mathrm{yaw} \approx \mu mg\, t/2\)).
-3. Leave gym software trips at `tip_roll_rad = 0.40` (~23°) and
-   `tip_pitch_rad = 0.45` (~26°) unless the **machine** needs a
-   *lower* trip. Never raise them to the static geometric tip.
-4. Point reviewers at HARDWARE_DESIGN §2 and §11 (“Do not fix
+3. Keep gym software trips at about half of static (or
+   `software_tip_frac * α`) unless the **machine** needs a *lower*
+   trip. Never raise them to the static geometric tip. Never raise
+   tips to hide a tall CG.
+4. True tip-over / immobilise in the gym is seated attitude past
+   static \(\alpha\), not past the software trip. Sticky SOS still
+   applies once you are past static.
+5. Point reviewers at HARDWARE_DESIGN §2 and §11 (“Do not fix
    tip/drain physics to match a tall CG”).
 
 ---
@@ -142,11 +153,12 @@ YAML: [`configs/hardware/bom.yaml`](../configs/hardware/bom.yaml).
 
 | qty | class | buy/make | verify-before-spin | open questions | numbers |
 | --- | --- | --- | --- | --- | --- |
-| 1 | Chassis / belly, 500 mm tub | make | hang-measure mass + CG | thickness vs 22 kg | **assumption** |
-| 2 | Drive hub + encoder, 24 V ≥7 N·m | buy | stall current; resize fuses | wheel OD / gearbox | **class** |
-| 1 | Trimmer spindle 24–36 V + string | buy | electrical cut, not PWM 0 | clutch vs current limit | **class** |
-| 2 or 4 | Wheels ~8″ turf | buy | tape \(r_w\); track 400 mm | foam vs pneumatic | **assumption** |
-| 1 | LFP pack + BMS, 24 V 50 Ah class | buy | [`PACK_THERMAL.md`](PACK_THERMAL.md) | CG low, between wheels | **class** |
+| 1 | Chassis / belly, 700 × 700 × 400 mm tub | make | hang-measure mass + CG | thickness vs 22 kg | **assumption** |
+| 2 | Drive hub + encoder, 24 V ≥7 N·m, rear DD | buy | stall current; resize fuses | wheel OD / gearbox | **class** |
+| 2 | Front swivel castors | buy | trail; sit ahead of the slab | size vs rear wheels | **class** |
+| 1 | Trimmer spindle 24–36 V + string (low) | buy | electrical cut, not PWM 0 | clutch vs current limit | **class** |
+| 2 + 2 | Rear drive wheels + front castors | buy | tape \(r_w\); track 550 mm | foam vs pneumatic | **assumption** |
+| 1 | LFP pack + BMS, 24 V 50 Ah class | buy | [`PACK_THERMAL.md`](PACK_THERMAL.md) | central belly slab; LFP not Pb unless insisted | **class** |
 | 1 | Charger 24 V 10 A class | buy | log `charge_time_h` | dock vs barrel | **class** |
 | 1 | Orin Nano 8 GB + carrier | buy | barrel voltage; separate fuse | carrier variant | **class** |
 | 4–6 | CSI cams; **one 6–12 cm stereo pair** + mono | buy | tape baseline; camera names | module SKU | **class** |

@@ -24,7 +24,7 @@ from jims_mower.types import CameraSpec, Pose
 # Near-field band for tip / lip / obstacle. Depth resolution worsens with z².
 STEREO_Z_MIN_M = 0.80
 STEREO_Z_MAX_M = 4.00
-# 6–12 cm on a 50 cm body. Wider looks-around cams are not this pair.
+# 6–12 cm on a 70 cm body. Wider looks-around cams are not this pair.
 STEREO_BASELINE_MIN_M = 0.06
 STEREO_BASELINE_MAX_M = 0.12
 STEREO_NOTE = (

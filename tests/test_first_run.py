@@ -11,6 +11,7 @@ from jims_mower.app.live_backend import LiveBackend
 from jims_mower.app.server import make_server
 from jims_mower.constants import LIVE_SCHEMA
 from jims_mower.live import LiveSession, owner_copy_for, robot_status_for
+from jims_mower.mission_flow import apply_full_explore
 from jims_mower.profile import (
     YardProfile,
     apply_profile_to_scenario,
@@ -398,7 +399,7 @@ def test_taught_live_job_completes_to_idle(tmp_path: Path) -> None:
         config="mission_tiny",
         fast=True,
         speed="max",
-        steps=720,
+        steps=1100,
         seed=3,
         cameras=4,
         out_dir=tmp_path / "taught-done",
@@ -406,14 +407,31 @@ def test_taught_live_job_completes_to_idle(tmp_path: Path) -> None:
         map_stride=8,
         yard_path=tmp_path / "profile.json",
     )
-    saved = session.control("save_yard", keep_in=_tiny_keep_in())
+    # 70 cm body + 0.40 m collision: a 4×3 m pocket yields 1 waypoint, and
+    # a 0.7 m inset fence OOBs on a 2 mm overshoot. Use a 5×4 m taught
+    # fence inset from the 6×5 world so MAP READY can mow to Done.
+    keep_in = [[0.5, 0.5], [5.5, 0.5], [5.5, 4.5], [0.5, 4.5]]
+    saved = session.control(
+        "save_yard",
+        keep_in=keep_in,
+        home={"x": 2.4, "y": 2.2, "theta": 0.0},
+    )
     assert saved["ok"] is True
     assert saved["taught"] is True
     session._reset_for_next_job()
     assert session.policy is not None
     assert session.policy.phase.value == "explore"
-    session.policy.settings.review_hold_steps = 2
-    last = session.run_n(680)
+    apply_full_explore(
+        session.policy.settings,
+        world_width_m=float(session.env.cfg.world.width_m),
+    )
+    session.policy.settings.stamp_radius_m = 1.35
+    session.policy.settings.review_hold_steps = 1
+    session.env.cfg.planner.strip_spacing_m = 0.20
+    session.env.cfg.planner.waypoint_stride_m = 0.28
+    session.policy.cfg.planner.strip_spacing_m = 0.20
+    session.policy.cfg.planner.waypoint_stride_m = 0.28
+    last = session.run_n(1000)
     session.close()
     phases = {row.get("phase") for row in session.poses}
     assert "mow" in phases

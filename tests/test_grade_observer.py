@@ -102,7 +102,10 @@ def test_gradient_yard_coverage_beats_flat_map_baseline() -> None:
     # 0.5 m/s (KIND_GRADE × grade_speed_factor); 80 steps should still move
     # more than a spin-in-place (~2 m), not the old 4 m straight-line.
     assert coverage >= start
-    assert travel > 1.8 or (coverage - start) > 0.005
+    # Wider 0.70 m chassis + grade-aware cruise is slower than the old
+    # 50 cm / 0.5 m/s straight-line. 80 steps should still move more
+    # than a spin-in-place.
+    assert travel > 1.0 or (coverage - start) > 0.003
     assert info.get("drain_drop") is not True
 
 

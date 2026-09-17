@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from jims_mower.env import MowerEnv
-from jims_mower.mission_flow import MissionPhase, MissionPolicy
+from jims_mower.mission_flow import MissionPhase, MissionPolicy, apply_full_explore
 from jims_mower.perception.base import BlindDetector
 from jims_mower.perception.mock import MockDetector
 from jims_mower.planning.observed import ObservedMap
@@ -26,7 +26,7 @@ def _tiny_env() -> MowerEnv:
     cfg.sensors.height = 24
     cfg.sensors.camera_count = 4
     cfg.sensors.cameras = []
-    cfg.max_steps = 700
+    cfg.max_steps = 1100
     return MowerEnv(config=cfg, scenario=scenario, render_mode=None)
 
 
@@ -45,24 +45,27 @@ def test_explore_mow_tip_resume_on_observed_map() -> None:
     env = _tiny_env()
     profile = _taught(env)
     obs, info = env.reset(seed=3, options={"yard_profile": profile, "resize_world": False})
-    policy = MissionPolicy(env.cfg, fast=True)
+    policy = MissionPolicy(env.cfg)
     policy.reset(obs, info, profile=profile)
+    apply_full_explore(policy.settings, world_width_m=float(env.cfg.world.width_m))
+    policy.settings.stamp_radius_m = 1.35
+    policy.settings.review_hold_steps = 1
     assert policy.phase == MissionPhase.EXPLORE
     assert policy.observed is not None
     seen = {policy.phase.value}
     reached_mow = False
     recovered = False
     paused = False
-    for i in range(420):
+    for i in range(900):
         action = policy.act(obs, info)
         seen.add(policy.phase.value)
         if policy.phase == MissionPhase.REVIEW:
             policy.request_start_mow()
         if policy.phase == MissionPhase.MOW and not reached_mow:
             reached_mow = True
-            # PLN-3: IMU tip-stop → reverse nudge (do not retune physics).
-            # Past climb (~0.32) but under tip_roll (0.40). roll=0.45 is
-            # past tip and latches SOS / hold, which is a different path.
+            # PLN-3: IMU tip-stop → reverse nudge.
+            # Past climb (~0.32) but under software tip (~0.55). Static α
+            # (~1.10) latches SOS / hold — a different path.
             climb_roll = 0.36
             info = dict(info)
             info["terrain_advice"] = "stop"

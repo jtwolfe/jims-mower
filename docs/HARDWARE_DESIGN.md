@@ -1,11 +1,15 @@
 # Hardware design — construction math
 
-Target: a **~50 × 50 × 50 cm** zero-turn residential mower, Jetson Orin
-Nano class compute, **forward stereo pair + side/rear mono** (4–6 RGB
-cameras), **front whipper-snipper**,
-meant to be **1-acre capable**. This note does the sizing math so fab
-is not a guess. It is **not** a measured field pack, not a must-buy
-cart, and not a SIL claim.
+Target: a **~70 × 70 × 40 cm** iso-stable residential mower (square
+footprint, low belly), Jetson Orin Nano class compute, **forward stereo
+pair + side/rear mono** (4–6 RGB cameras), **front whipper-snipper**,
+meant to be **1-acre capable**. Layout follows Jamie’s plan + side
+sketch: **front castors**, **rear large wheels with direct-drive
+motors**, **front / off-center trimmer kept low**, and the **battery
+slab as central belly ballast** between the castors and the rear axle
+(not a tall stack over the rear axle). This note does the sizing math
+so fab is not a guess. It is **not** a measured field pack, not a
+must-buy cart, and not a SIL claim.
 
 **No claimed field runtime** until row 18 of
 [`PRODUCT_TO_HARDWARE.md`](PRODUCT_TO_HARDWARE.md) is measured.
@@ -18,9 +22,10 @@ ICD keys that the wiring must feed (do not rename): `cameras`, `imu`,
 [`../ICD.md`](../ICD.md) and [`runtime_contract.md`](runtime_contract.md).
 
 Gym geometry already matches the envelope
-(`RobotConfig` length/width/height 0.50 m, track 0.40 m, wheelbase
-0.40 m, `max_wheel_speed_mps` 1.2, trimmer offset 0.32 m / radius
-0.16 m). Those are **sim defaults**, not certified hardware.
+(`RobotConfig` length/width 0.70 m, height 0.40 m, track 0.55 m,
+wheelbase 0.55 m, assumed `h_cg_m` 0.14, `max_wheel_speed_mps` 1.2,
+trimmer offset 0.42 m / radius 0.16 m, `collision_radius_m` 0.40).
+Those are **sim defaults**, not certified hardware.
 
 ---
 
@@ -28,17 +33,18 @@ Gym geometry already matches the envelope
 
 | Symbol | Assumed value | Why / source | Status |
 | --- | --- | --- | --- |
-| \(m\) | **22 kg** wet | Chassis + 2×hub + trimmer + Orin + 24 V pack. Could be 18–28 kg. | **assumption** |
-| \(h_\mathrm{cg}\) | **0.18 m** | Slightly below mid-height; battery low. Measure on a hang. | **assumption** |
-| \(L, W, H\) | **0.50 m** | Envelope. | target |
-| \(t\) track | **0.40 m** | Gym `track_m`. Wheel centreline. | matches gym |
-| \(b\) wheelbase | **0.40 m** | Gym `wheelbase_m`. | matches gym |
-| \(r_w\) wheel radius | **0.10 m** | ~8″ OD pneumatic or foam. | **assumption** |
-| \(\eta\) drivetrain | **0.70** | Hub + gearbox. | **assumption** |
+| \(m\) | **22 kg** wet | Chassis + 2×hub + 2×castor + trimmer + Orin + 24 V pack. Could land higher on the larger tub — **do not invent a new kg**. Hang-measure. | **assumption** |
+| \(h_\mathrm{cg}\) | **0.14 m** | Belly slab between castors and rear axle (was 0.18 m on the 0.50 m cube). Measure on a hang. | **assumption** |
+| \(L, W\) | **0.70 m** | Square shell for iso tip. | target |
+| \(H\) | **0.40 m** | Low lid. Cameras stay under this. | target |
+| \(t\) track | **0.55 m** | Gym `track_m`. Wheel centreline, inset in the 0.70 m shell. | matches gym |
+| \(b\) wheelbase | **0.55 m** | Gym `wheelbase_m`. Castor line to rear axle. \(t \approx b\) for iso. | matches gym |
+| \(r_w\) wheel radius | **0.10 m** | ~8″ OD pneumatic or foam (rear drive). | **assumption** |
+| \(\eta\) drivetrain | **0.70** | Rear direct-drive / hub. | **assumption** |
 | \(\mu\) grass | **0.45** | Dry turf skid. Wet is lower. | **assumption** |
 | \(\theta_\mathrm{grade}\) | **15°** continuous, **20°** stall | Steeper than most lawns; gym `steep_slope_rad` 0.30 ≈ 17°. | design |
 | \(v\) | **1.2 m/s** max | Gym `max_wheel_speed_mps`. Cruise ~0.8 m/s. | matches gym |
-| \(w_\mathrm{cut}\) | **0.32 m** | Trimmer offset ≈ effective strip. | matches gym |
+| \(w_\mathrm{cut}\) | **0.32 m** | ~2× string radius 0.16 m. Hub sits at offset 0.42 m. | matches gym |
 | \(P_\mathrm{trim,cont}\) | **180 W** | String in grass, not peak stall. | **assumption** |
 | \(P_\mathrm{orin}\) | **10 W** mean / **15 W** TDP | Orin Nano 8 GB class, not a bench wattmeter. | class |
 | \(P_\mathrm{drive,cruise}\) | **60 W** both hubs | See §3. | derived + assumed η |
@@ -62,29 +68,39 @@ polygon (four wheel patches, approximate as a \(t \times b\) rectangle).
 
 \[
 \tan\alpha_\mathrm{roll} = \frac{t/2}{h_\mathrm{cg}}
-= \frac{0.20}{0.18} = 1.111
+= \frac{0.275}{0.14} = 1.964
 \quad\Rightarrow\quad
-\alpha_\mathrm{roll} \approx 48^\circ
+\alpha_\mathrm{roll} \approx 63^\circ
 \]
 
 **Pitch (about \(y\), nose up/down):**
 
 \[
 \tan\alpha_\mathrm{pitch} = \frac{b/2}{h_\mathrm{cg}}
-= \frac{0.20}{0.18} = 1.111
+= \frac{0.275}{0.14} = 1.964
 \quad\Rightarrow\quad
-\alpha_\mathrm{pitch} \approx 48^\circ
+\alpha_\mathrm{pitch} \approx 63^\circ
 \]
 
-That is the **static** geometric tip. It is **not** the software trip.
-Gym `tip_roll_rad = 0.40` ≈ **23°**, `tip_pitch_rad = 0.45` ≈ **26°**.
-Those fire earlier so the controller can reverse / skip. Do not raise
-the software trip to 48° to “match physics.”
+Because \(t \approx b\), \(\alpha_\mathrm{roll} \approx \alpha_\mathrm{pitch}\)
+(**iso**). The old 0.50 m cube with \(t=b=0.40\) m and
+\(h_\mathrm{cg}=0.18\) m was ~48° both axes; this envelope is more
+stable because the support is wider *and* the belly pack is lower.
+**Never raise software trips to 63° to “match” that.**
+
+That is the **static** geometric tip — true tip-over / immobilise in
+the gym when seated \(|\mathrm{roll}|\) or \(|\mathrm{pitch}|\) reaches
+\(\alpha\). It is **not** the software trip. Gym software
+`tip_roll_rad = tip_pitch_rad = 0.55` ≈ **31.5°**
+(\(\approx 0.50 \times \alpha\), `software_tip_frac`). Those fire
+earlier so the controller can reverse / skip. Do not raise them to
+63°. Never raise tips to hide a tall CG — if a hang-measure puts
+\(h_\mathrm{cg}\) *up*, **lower** the software trip or the slab.
 
 **CG shift from a 1.2 m/s² accel** (hard launch):
 
 \[
-\Delta x = \frac{a_x\, h_\mathrm{cg}}{g} \approx \frac{1.2\times 0.18}{9.81} \approx 0.022\,\mathrm{m}
+\Delta x = \frac{a_x\, h_\mathrm{cg}}{g} \approx \frac{1.2\times 0.14}{9.81} \approx 0.017\,\mathrm{m}
 \]
 
 Effective roll/pitch margins shrink a few degrees. Wet grass + a
@@ -129,12 +145,13 @@ Skid-steer yaw against friction, both wheels opposing:
 
 \[
 T_\mathrm{yaw,ground} \approx \mu\, m g\, \frac{t}{2}
-\approx 0.45 \times 22 \times 9.81 \times 0.20
-\approx 19.4\,\mathrm{N\cdot m}
+\approx 0.45 \times 22 \times 9.81 \times 0.275
+\approx 26.7\,\mathrm{N\cdot m}
 \]
 
-Per wheel tangential force \(F = T_\mathrm{yaw}/t \approx 48.5\,\mathrm{N}\),
-wheel torque \(F r_w \approx 4.85\,\mathrm{N\cdot m}\), shaft
+Per wheel tangential force \(F = T_\mathrm{yaw}/t = \mu m g / 2
+\approx 48.5\,\mathrm{N}\) (independent of track), wheel torque
+\(F r_w \approx 4.85\,\mathrm{N\cdot m}\), shaft
 \(4.85/0.70 \approx **6.9 N·m**\).
 
 **Zero-turn, not grade, sizes the peak.** Wet \(\mu\) is lower (easier
@@ -167,7 +184,8 @@ after measuring wheel OD and gearbox.
 
 ## 4. Trimmer motor
 
-Front offset 0.32 m, radius 0.16 m, hub height 0.12 m (gym). This is a
+Front offset 0.42 m (just proud of the 0.70 m shell), radius 0.16 m,
+hub height 0.12 m (gym — keep the off-center motor **low**). This is a
 **string head**, not a deck.
 
 Handheld 18–36 V trimmers advertise 200–600 W **peak**. Continuous in
@@ -232,7 +250,11 @@ default. **Do not copy the ~1.3 kWh model into MEASURED YAML.**
 ### 5.3 Chemistry / voltage / Ah
 
 Prefer **LiFePO4** for abuse and outdoor temperature (**assumption**:
-residential, not a race pack).
+residential, not a race pack). Jamie called the slab a “lead battery”
+colloquially — that is the **heavy floor ballast**, not a chemistry
+pick. Lead-acid helps ballast but is heavier per Wh and worse in heat /
+cycle life. **Keep an LFP slab, mounted as belly ballast**, unless he
+insists on Pb. Do not invent a measured kg for either chemistry.
 
 | Pack | V × Ah | Wh | Notes |
 | --- | --- | --- | --- |
@@ -241,8 +263,11 @@ residential, not a race pack).
 | 36 V 30 Ah LFP | 38.4 V × 30 Ah | 1152 Wh | Less current, heavier harness |
 
 **Recommendation for fab planning:** 24 V (8S LFP) **50 Ah class**,
-~1.3 kWh, ~8–10 kg. **Uncertain SKU.** Fit inside the 50 cm cube with
-the CG **low and between the wheels**.
+~1.3 kWh, ~8–10 kg class (not measured). **Uncertain SKU.** Mount as a
+**central belly slab** between the front castors and the rear axle —
+low, floor ballast. Plan-view between the drive motors is fine if the
+pack also extends forward into mid-wheelbase. Do **not** stack it tall
+over the rear axle.
 
 Charge: 24 V 10 A (~250 W) charger → 20–100% ≈ \(0.8 \times 1280 / 250
 \approx 4.1\,\mathrm{h}\). 20 A if you want ~2 h; watch thermal.
@@ -256,36 +281,47 @@ measure the real empty.
 ## 6. Wheels, track, clearance, chassis
 
 ```
-          500 mm
-     ┌──────────────┐
-     │   cameras    │  z ≈ 380 mm (gym extrinsics)
-   L │   Orin+heatsink
-   0 │   batt (low) │
-   0 │  ●────────●  │  track 400 mm
-     │   hubs       │
-     │      ○ trimmer (front, +x)
-     └──────────────┘
+              700 mm
+     ┌────────────────────┐
+     │ cameras z ≈ 340 mm │  under the 400 mm lid
+   L │     Orin + lid     │
+   0 │  ○ trimmer (front, │  off-center, keep low
+   0 │     slightly +y)   │
+     │  ◯    belly     ◯  │  front castors
+     │     LFP slab       │  central, between axles
+     │  ●────────────●    │  rear DD, track 550 mm
+     └────────────────────┘
+              side: 400 mm tall; slab on the floor
 ```
+
+Jamie’s sketch (plan + side): castors at the nose, big rear drive
+wheels, off-center front motor/trimmer, battery as a slab. The only
+layout change from that drawing is **moving the slab from “tall over
+the rear axle” to the belly between castors and rear axle** so
+\(h_\mathrm{cg}\) stays ~0.14 m.
 
 | Item | Value | Notes |
 | --- | --- | --- |
-| Wheel OD | ~200 mm | \(r_w=0.10\) m |
-| Track | 400 mm | Must match planner `track_m` or retune |
-| Wheelbase | 400 mm | |
+| Wheel OD | ~200 mm | \(r_w=0.10\) m (rear drive) |
+| Front | 2× swivel castors | Passive. Trail set so the 550 mm wheelbase is the support. |
+| Rear | 2× large wheels + DD hubs | ICD action `[left, right]` |
+| Track | 550 mm | Must match planner `track_m` or retune |
+| Wheelbase | 550 mm | \(t \approx b\) for iso tip |
 | Ground clearance | **70–90 mm** | Gym `wheel_drop_m` 80 mm is the drain-fail height |
-| Body | 500 mm cube class | Skirts above grass; no under-deck blade |
-| Trimmer | Front +x, offset 0.32 m | Keep the hub inside the 1.5 m living radius logic |
+| Body | 700 × 700 × 400 mm | Skirts above grass; no under-deck blade |
+| Trimmer | Front +x, offset 0.42 m, hub 0.12 m | Off-center / keep low; inside 1.5 m living radius |
+| Pack | Central belly slab | Floor ballast; not tall over the rear axle |
 | Dock / home | Rear or side contacts | `YardProfile.home` is a pose, not a pinout |
 
-Do not grow the body past ~0.55 m without changing `collision_radius_m`
-(0.28 m) and the costmap inflation.
+`collision_radius_m` is **0.40 m** (half-width 0.35 m plus skirt /
+corner). Retune inflation if the shell grows again.
 
 ---
 
 ## 7. Cameras, IMU, GNSS, ToF
 
 **Prefer a calibrated forward stereo pair** (baseline **~6–12 cm** on
-the 50 cm body) plus side / rear monoculars. Do **not** fab six
+the 70 cm body) plus side / rear monoculars. Do **not** fab six
 independent look-around monoculars and call that a depth rig. Grass is
 low-texture; live control is near-field disparity in the 0.8–4 m band,
 not COLMAP / full-yard SfM.
@@ -298,10 +334,10 @@ Physical measure-and-commit is still required
 
 | Name | Body \(x,y,z\) m | yaw / pitch | FOV | Role |
 | --- | --- | --- | --- | --- |
-| stereo_left / stereo_right | 0.24, ±0.04, 0.38 | 0° / −22° | 70° | **Metric pair**, \(B \approx 8\) cm |
-| front | 0.25, 0, 0.38 | 0° / −22° | 70° | Fill / teach |
-| rear | −0.25, 0, 0.38 | 180° / −12° | 70° | Mono |
-| left / right | 0, ±0.25, 0.38 | ±90° / −12° | 70° | Mono |
+| stereo_left / stereo_right | 0.33, ±0.04, 0.34 | 0° / −22° | 70° | **Metric pair**, \(B \approx 8\) cm |
+| front | 0.33, 0, 0.34 | 0° / −22° | 70° | Fill / teach |
+| rear | −0.33, 0, 0.34 | 180° / −12° | 70° | Mono |
+| left / right | 0, ±0.33, 0.34 | ±90° / −12° | 70° | Mono |
 
 Gym look-around example (`configs/orin/extrinsics_6cam.yaml`) keeps the
 old 40° / ~40 cm `front_left` / `front_right`. Those are **not** a
@@ -340,7 +376,7 @@ Orin Nano 8 GB, JetPack 6 class ([`JETSON.md`](JETSON.md)).
 | Explore / mow + TRT | 10–15 TDP | **Do not** run the gym renderer |
 | Thermal trip | gym `t_hot_c` 75 / `t_crit_c` 85 | Stub until measured |
 
-Closed 50 cm cube in Australian sun will exceed 35 °C ambient
+Closed 70 × 40 cm lid in Australian sun will exceed 35 °C ambient
 (**assumption**). Give the Orin a duct or a finned lid. `OrinBudget`
 `heat_c_per_w = 0.35` is a first-order RC, not a CFD.
 
@@ -360,10 +396,11 @@ Every number there is **assumption / class / target** until measured.
 
 | Class | Qty | Example class | Uncertain SKU? | Feeds ICD / role |
 | --- | --- | --- | --- | --- |
-| Chassis / belly | 1 | 3 mm Al or HDPE tub, 500 mm | yes | mass / CG |
-| Drive hub + encoder | 2 | 24 V, ≥7 N·m peak | yes | action `[0]`, `[1]` |
-| Trimmer spindle | 1 | 24–36 V BLDC + string head | yes | action `[2]` |
-| Wheels | 2 or 4 | 8″, turf tread | yes | \(r_w\) |
+| Chassis / belly | 1 | 3 mm Al or HDPE tub, 700 × 700 × 400 mm | yes | mass / CG |
+| Drive hub + encoder | 2 | 24 V, ≥7 N·m peak, **rear DD** | yes | action `[0]`, `[1]` |
+| Front castors | 2 | swivel, turf | yes | front contact |
+| Trimmer spindle | 1 | 24–36 V BLDC + string head (low, off-center) | yes | action `[2]` |
+| Wheels | 2 drive + 2 castor | 8″ class rear, castor to match | yes | \(r_w\) |
 | LFP pack + BMS | 1 | 24 V 50 Ah class | yes | `battery_soc` later |
 | Charger | 1 | 24 V 10 A class | yes | dock |
 | Orin Nano 8 GB + carrier | 1 | JetPack 6 | carrier variant yes | compute |
@@ -436,7 +473,9 @@ spin still required. Do not claim the physical acceptance line.
 | `YardProfile` metres | Survey origin + GNSS lever arm |
 
 Do not “fix” tip/drain physics to match a tall CG. Change \(h_\mathrm{cg}\)
-in this document and retune **software** trips.
+in this document, recompute static \(\alpha\), and retune **software**
+trips *down* if the hang-measure is higher. Gym true tip-over latches
+at static \(\alpha(t,b,h_\mathrm{cg})\), not at the software trip.
 
 ---
 

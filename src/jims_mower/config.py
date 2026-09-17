@@ -39,18 +39,19 @@ def _discover_default_config() -> Path:
 DEFAULT_CONFIG_PATH = _discover_default_config()
 
 # Built-in gym look-around (body frame: x forward, y left, z up). Used
-# when YAML leaves `sensors.cameras` empty.
-# front_left / front_right are 40° yaw at ~40 cm — NOT a stereo pair.
-# Metric near-field depth wants configs/orin/extrinsics_stereo.yaml
-# (6–12 cm baseline, shared yaw/pitch). Front pair is pitched down so
-# drain lips sit in the lower image third.
+# when YAML leaves `sensors.cameras` empty. Mounts sit under the 0.40 m
+# lid (z = 0.34). front_left / front_right are 40° yaw at ~37 cm — NOT
+# a stereo pair. Metric near-field depth wants
+# configs/orin/extrinsics_stereo.yaml (6–12 cm baseline, shared
+# yaw/pitch). Front pair is pitched down so drain lips sit in the
+# lower image third.
 _DEFAULT_RIG = (
-    CameraSpec("front", 0.25, 0.00, 0.38, 0.0, -22.0),
-    CameraSpec("front_left", 0.20, 0.20, 0.38, 40.0, -18.0),
-    CameraSpec("front_right", 0.20, -0.20, 0.38, -40.0, -18.0),
-    CameraSpec("rear", -0.25, 0.00, 0.38, 180.0, -12.0),
-    CameraSpec("left", 0.00, 0.25, 0.38, 90.0, -12.0),
-    CameraSpec("right", 0.00, -0.25, 0.38, -90.0, -12.0),
+    CameraSpec("front", 0.33, 0.00, 0.34, 0.0, -22.0),
+    CameraSpec("front_left", 0.26, 0.26, 0.34, 40.0, -18.0),
+    CameraSpec("front_right", 0.26, -0.26, 0.34, -40.0, -18.0),
+    CameraSpec("rear", -0.33, 0.00, 0.34, 180.0, -12.0),
+    CameraSpec("left", 0.00, 0.33, 0.34, 90.0, -12.0),
+    CameraSpec("right", 0.00, -0.33, 0.34, -90.0, -12.0),
 )
 
 # 4-cam: cardinal. 5-cam: add front_left. 6-cam: full rig.
@@ -81,7 +82,7 @@ class DriveConfig:
 
 @dataclass
 class TrimmerConfig:
-    offset_m: float = 0.32
+    offset_m: float = 0.42
     radius_m: float = 0.16
     safety_radius_m: float = 1.50
     height_m: float = 0.12
@@ -94,15 +95,20 @@ class TrimmerConfig:
 
 @dataclass
 class RobotConfig:
-    length_m: float = 0.50
-    width_m: float = 0.50
-    height_m: float = 0.50
-    wheelbase_m: float = 0.40
-    track_m: float = 0.40
+    length_m: float = 0.70
+    width_m: float = 0.70
+    height_m: float = 0.40
+    wheelbase_m: float = 0.55
+    track_m: float = 0.55
     max_wheel_speed_mps: float = 1.2
-    collision_radius_m: float = 0.28
-    tip_roll_rad: float = 0.40
-    tip_pitch_rad: float = 0.45
+    collision_radius_m: float = 0.40
+    # Software tip-stop. Must stay below static α(t, b, h_cg).
+    # Defaults ≈ 0.50 × atan((0.55/2)/0.14) ≈ 0.55 rad (~31.5°).
+    tip_roll_rad: float = 0.55
+    tip_pitch_rad: float = 0.55
+    # Assumed belly-pack CG. Hang-measure before treating as field.
+    h_cg_m: float = 0.14
+    software_tip_frac: float = 0.50
     wheel_drop_m: float = 0.08
     steep_slope_rad: float = 0.30
     trimmer: TrimmerConfig = field(default_factory=TrimmerConfig)
@@ -111,6 +117,24 @@ class RobotConfig:
     def wheel_speed_mps(self) -> float:
         """1.0 command → m/s. Scale is 1.0 until a human measures it."""
         return float(self.max_wheel_speed_mps) * float(self.drive.scale)
+
+    def static_tip_roll_rad(self) -> float:
+        """Geometric roll tip α = atan((track/2) / h_cg)."""
+        from jims_mower.kinematics import static_tip_angle_rad
+
+        return static_tip_angle_rad(0.5 * float(self.track_m), float(self.h_cg_m))
+
+    def static_tip_pitch_rad(self) -> float:
+        """Geometric pitch tip α = atan((wheelbase/2) / h_cg)."""
+        from jims_mower.kinematics import static_tip_angle_rad
+
+        return static_tip_angle_rad(0.5 * float(self.wheelbase_m), float(self.h_cg_m))
+
+    def derived_software_tip_roll_rad(self) -> float:
+        return float(self.software_tip_frac) * self.static_tip_roll_rad()
+
+    def derived_software_tip_pitch_rad(self) -> float:
+        return float(self.software_tip_frac) * self.static_tip_pitch_rad()
 
 
 @dataclass
@@ -705,6 +729,23 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("track_m must be positive")
     if cfg.robot.tip_roll_rad <= 0 or cfg.robot.tip_pitch_rad <= 0:
         raise ConfigError("tip roll/pitch thresholds must be positive")
+    if cfg.robot.h_cg_m <= 0:
+        raise ConfigError("h_cg_m must be positive")
+    if not 0.0 < float(cfg.robot.software_tip_frac) <= 1.0:
+        raise ConfigError("software_tip_frac must be in (0, 1]")
+    static_roll = cfg.robot.static_tip_roll_rad()
+    static_pitch = cfg.robot.static_tip_pitch_rad()
+    if cfg.robot.tip_roll_rad >= static_roll or cfg.robot.tip_pitch_rad >= static_pitch:
+        raise ConfigError(
+            "software tip_roll_rad / tip_pitch_rad must stay below static "
+            "α(t, b, h_cg); never raise them to hide a tall CG"
+        )
+    for cam in cfg.resolved_cameras():
+        if float(cam.z) > float(cfg.robot.height_m) + 1e-6:
+            raise ConfigError(
+                f"camera {cam.name!r} z={cam.z} m is above body height "
+                f"{cfg.robot.height_m} m"
+            )
     if cfg.robot.wheel_drop_m <= 0:
         raise ConfigError("wheel_drop_m must be positive")
     if cfg.robot.steep_slope_rad <= 0:
