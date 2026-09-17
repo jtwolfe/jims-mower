@@ -24,7 +24,6 @@ import numpy as np
 from jims_mower.constants import GRAVITY_MPS2
 from jims_mower.kinematics import sit_on_height_fn
 from jims_mower.planning.fusion import attitude_from_accel
-from jims_mower.perception.stereo import height_sampler_from_raster
 from jims_mower.types import Pose
 
 KIND_OK = "ok"
@@ -328,7 +327,9 @@ def look_ahead_from_elevation(
     arr = np.asarray(elevation)
     if arr.ndim != 2 or arr.size == 0:
         return None
-    sample_z = height_sampler_from_raster(arr, resolution_m=resolution_m)
+    # Local nearest-cell sample — do not import perception.stereo here
+    # (that package pulls terrain → safety → this module).
+    sample_z = _raster_sample_z(arr, resolution_m)
     return probe_forward_grade(
         pose,
         sample_z,
@@ -343,6 +344,23 @@ def look_ahead_from_elevation(
         max_climb_slope_rad=max_climb_slope_rad,
         tip_lethal_frac=tip_lethal_frac,
     )
+
+
+def _raster_sample_z(elev: np.ndarray, resolution_m: float) -> Callable[[float, float], float]:
+    ev = np.asarray(elev, dtype=np.float32)
+    rows, cols = int(ev.shape[0]), int(ev.shape[1])
+    res = max(float(resolution_m), 1e-6)
+
+    def height_at(x: float, y: float) -> float:
+        if x < 0.0 or y < 0.0:
+            return 0.0
+        rr = int(y / res)
+        cc = int(x / res)
+        if 0 <= rr < rows and 0 <= cc < cols:
+            return float(ev[rr, cc])
+        return 0.0
+
+    return height_at
 
 
 def look_ahead_advice(ahead: Optional[TiltClass]) -> str:

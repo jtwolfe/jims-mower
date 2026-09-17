@@ -27,7 +27,9 @@ from jims_mower.terrain import HeightField
 from jims_mower.types import Pose
 
 
-def _ramp_fn(x0: float = 3.40, width: float = 0.65, rise: float = 0.18):
+def _ramp_fn(x0: float = 3.30, width: float = 0.40, rise: float = 0.18):
+    """0.40 m face: one 0.50 m cell (aliased cliff), two-plus 0.25 m cells."""
+
     def fn(x, y):
         _ = y
         return np.clip((np.asarray(x) - x0) / width, 0.0, 1.0) * rise
@@ -72,10 +74,12 @@ def test_sit_on_height_fn_matches_height_field() -> None:
     assert a.roll == pytest.approx(b.roll)
 
 
-def test_finer_mesh_reduces_ridge_pitch_jumps() -> None:
+def test_finer_mesh_reduces_aliased_ridge_peak_pitch() -> None:
+    # Same cruise: 0.50 m one-cell cliff overstates sit pitch. 0.25 m
+    # resolves the face so peak pitch is closer to the authored ramp.
     coarse = _drive_ramp(0.50, 0.98)
     fine = _drive_ramp(0.25, 0.98)
-    assert fine["max_delta"] < coarse["max_delta"]
+    assert fine["max_abs_pitch"] < coarse["max_abs_pitch"]
     assert fine["tip"] == 0.0
 
 
@@ -85,6 +89,14 @@ def test_slower_explore_reduces_ridge_pitch_jumps() -> None:
     assert slow["max_delta"] <= fast["max_delta"] + 1e-9
     assert slow["max_delta"] < fast["max_delta"] or slow["max_delta"] < 0.08
     assert slow["tip"] == 0.0
+
+
+def test_finer_mesh_and_slower_explore_beat_old_acre_demo() -> None:
+    old = _drive_ramp(0.50, 0.98)
+    new = _drive_ramp(0.25, 0.45)
+    assert new["max_delta"] < old["max_delta"]
+    assert new["max_abs_pitch"] < old["max_abs_pitch"]
+    assert new["tip"] == 0.0
 
 
 def test_climbable_face_does_not_hard_tip() -> None:

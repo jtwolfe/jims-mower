@@ -22,7 +22,6 @@ from jims_mower.geofence import (
 )
 from jims_mower.world import point_to_segment_distance
 from jims_mower.kinematics import sit_on_terrain, trimmer_xy, wheel_positions
-from jims_mower.planning.grade_tip import KIND_GRADE, KIND_TIP, probe_forward_grade
 from jims_mower.types import Detection, Obstacle, Pose
 
 if TYPE_CHECKING:
@@ -358,6 +357,9 @@ def terrain_hazards(
     lip_ahead = ahead_label in {TERRAIN_DRAIN, TERRAIN_DRAIN_EDGE}
     lip_under = any(lab == TERRAIN_DRAIN_EDGE for lab in labels)
     climb = float(max_climb_slope_rad) if max_climb_slope_rad is not None else float(steep_slope_rad)
+    # Late import: safety is a leaf used by terrain/structures.
+    from jims_mower.planning.grade_tip import KIND_GRADE, KIND_TIP, probe_forward_grade
+
     ahead_grade = probe_forward_grade(
         seated,
         height_field.sample,
