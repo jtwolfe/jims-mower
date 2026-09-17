@@ -463,18 +463,13 @@ def test_live_acre_demo_taught_reaches_mow(tmp_path: Path, monkeypatch) -> None:
         yard_path=tmp_path / "profile.json",
     )
     session.reset()
-    pose = (session.info or {}).get("pose") or {}
     session.yard_profile = YardProfile(
         name="taught_acre",
         width_m=70.0,
         height_m=58.0,
         resolution_m=0.50,
         keep_in=keep,
-        home={
-            "x": float(pose.get("x", 6.0)),
-            "y": float(pose.get("y", 6.0)),
-            "theta": float(pose.get("theta", 0.0)),
-        },
+        home={"x": 10.0, "y": 10.0, "theta": 0.0},
     )
     session.owner_taught = True
     session.reset()

@@ -95,6 +95,11 @@ def test_live_reset_lands_idle_ready_at_1x(tmp_path: Path) -> None:
     )
     session.reset()
     session.control("pair")
+    saved = session.control(
+        "save_yard",
+        keep_in=[[0.8, 0.8], [5.0, 0.8], [5.0, 4.0], [0.8, 4.0]],
+    )
+    assert saved.get("ok") is True
     session.control("speed", speed="5")
     assert session.speed == 5.0
     out = session.control("reset")

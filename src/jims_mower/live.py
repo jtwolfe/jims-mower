@@ -927,6 +927,11 @@ class LiveSession:
                 clear_blockages = raw_clear.strip().lower() not in {"0", "false", "off", "no"}
             else:
                 clear_blockages = bool(raw_clear)
+            self.job_state = "idle"
+            self._stop.set()
+            thread = self._thread
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=2.0)
             self.estop = False
             self.done = False
             self._tipped = False
@@ -946,19 +951,24 @@ class LiveSession:
                     self._tipped = True
                     if self.policy is not None:
                         self.policy.latch_chassis_tip()
+                if self.policy is not None and self.policy.observed is not None:
+                    self.policy.observed.clear_progress(clear_blockages=clear_blockages)
                 if self.policy is not None:
                     self._record_pose()
-            self.job_state = "idle"
-            self._stop.set()
+            kept_fence = bool(
+                self.owner_taught
+                or self.yard_profile is not None
+                or (self.policy is not None and self.policy.profile is not None)
+            )
             snap = self.snapshot()
             return {
                 "ok": True,
                 "cmd": key,
                 "clear_blockages": clear_blockages,
-                "kept_fence": bool(self.owner_taught or (self.yard_profile is not None)),
                 "kept_blockages": not clear_blockages,
                 **reset_info,
                 **snap,
+                "kept_fence": kept_fence,
             }
         return {"ok": True, "cmd": key, **self.snapshot()}
 

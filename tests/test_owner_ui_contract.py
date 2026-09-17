@@ -26,7 +26,6 @@ BUTTON_IDS = (
     "cmd-explore",
     "cmd-mow",
     "cmd-return",
-    "full-explore",
     "inj-soc",
     "explore-reason",
     "area-legend",

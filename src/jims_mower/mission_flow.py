@@ -1075,11 +1075,19 @@ class MissionPolicy:
         thin = downsample_frontiers(raw, min_sep=2, limit=40)
         self._frontier_xy = [self.observed.cell_to_world(r, c) for r, c in thin]
         completion = self.observed.completion(keep)
-        ready = self._explore_ready(completion, bool(thin))
+        skip = set(self._skipped_frontiers)
+        reachable_thin = [cell for cell in thin if cell not in skip]
+        ready = self._explore_ready(completion, bool(reachable_thin))
         timed_out = self.phase_step + 1 >= int(self.settings.max_explore_steps)
-        # Full explore: a step cap is not MAP READY while frontiers remain
-        # and the production target is unmet.
-        if timed_out and not ready and self.settings.full_explore and thin:
+        # Full explore: a step cap is not MAP READY while reachable
+        # frontiers remain and the keep-in is not essentially mapped.
+        if (
+            timed_out
+            and not ready
+            and self.settings.full_explore
+            and reachable_thin
+            and completion < 0.99
+        ):
             timed_out = False
         if ready or timed_out:
             self.explore_reason = self._build_explore_reason(
@@ -1221,9 +1229,9 @@ class MissionPolicy:
             )
             full_clear = (
                 bool(self.settings.full_explore)
-                and not blocked
                 and self.phase_step >= give_up
                 and completion >= float(self.settings.explore_no_frontier)
+                and (not reachable_thin or completion >= 0.99)
             )
             # Look around a few ticks so a real stall can unstick, then
             # demo may still MAP READY with leftover frontiers.
@@ -1264,7 +1272,10 @@ class MissionPolicy:
         # keep-in is already "33% observed / no frontiers" at spawn.
         if self.phase_step < 1:
             return False
-        if completion >= float(self.settings.explore_complete):
+        target = float(self.settings.explore_complete)
+        # 1.0 is the taught fence. Leftover cells / float noise / one
+        # unreachable lip must not hang MAP READY forever.
+        if completion >= target or (target >= 0.99 and completion >= 0.99):
             return True
         min_steps = max(4, int(getattr(self.settings, "min_explore_steps", 8) or 8))
         if (
@@ -1840,8 +1851,9 @@ class MissionPolicy:
         if not closed:
             notes.append("keep-in trail did not close tightly")
         completion = self.observed.completion(keep)
-        if completion < float(self.settings.explore_complete):
-            notes.append(f"map completion {completion:.2f} below target {self.settings.explore_complete:.2f}")
+        target = float(self.settings.explore_complete)
+        if not (completion >= target or (target >= 0.99 and completion >= 0.99)):
+            notes.append(f"map completion {completion:.2f} below target {target:.2f}")
         mowable = self.observed.mowable_mask(keep)
         comps = connected_components(mowable)
         if len(comps) > 1:
@@ -2195,10 +2207,17 @@ class MissionPolicy:
         profile = self.profile
         if profile is None or len(profile.keep_in) < 3:
             return False
+        # Teach/save still uses acre-relative scribble thresholds.
+        # Once a keep-in is the job fence, only reject a centre scribble
+        # so a small taught pocket on the acre world can still be mowed.
         return not keep_in_usable(
             profile.keep_in,
             float(self.cfg.world.width_m),
             float(self.cfg.world.height_m),
+            min_span_frac=0.0,
+            min_area_frac=0.0,
+            min_span_m=1.5,
+            min_area_m2=2.0,
         )
 
     def _hold(self) -> np.ndarray:

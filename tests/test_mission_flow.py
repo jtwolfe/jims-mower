@@ -301,6 +301,19 @@ def test_acre_yard_demo_reaches_explore_without_full_lap() -> None:
     assert "boundary_recorded" in events
 
 
+def test_explore_ready_accepts_near_full_keep_in() -> None:
+    """1.0 target must not hang on leftover unreachable cells / float noise."""
+    env = _tiny_env()
+    policy = MissionPolicy(env.cfg)
+    policy.settings.explore_complete = 1.0
+    policy.settings.explore_no_frontier = 0.90
+    policy.phase_step = 12
+    assert policy._explore_ready(0.995, True) is True
+    assert policy._explore_ready(0.92, False) is True
+    assert policy._explore_ready(0.40, True) is False
+    env.close()
+
+
 def test_acre_yard_demo_reaches_map_ready_then_mow() -> None:
     """Small taught keep-in on the acre demo: MAP READY then MOW. Not full acre."""
     from jims_mower.profile import YardProfile
