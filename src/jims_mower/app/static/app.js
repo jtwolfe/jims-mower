@@ -1,4 +1,5 @@
 (() => {
+  window.JIMS_UI_BUILD = "owner-ui-3";
   const ONBOARD = ["unbox", "pair", "home", "teach", "mow"];
   const KEY = "jims_mower_onboarded";
 
@@ -307,6 +308,11 @@ reachable ${reachPct.toFixed(1)}% · cut ${((card.cut_pct || 0) * 100).toFixed(1
 skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall_s ? ` · ${card.wall_s.toFixed(1)}s wall` : ""}</div>`;
   }
 
+  function uiBuildStamp() {
+    const build = window.JIMS_UI_BUILD || "unknown";
+    return `<p class="ui-build" id="ui-build">UI build ${build}</p>`;
+  }
+
   function renderPairingStub() {
     const st = state.status || {};
     const live = state.live || {};
@@ -319,6 +325,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     }[pair] || "Pair Bluetooth before Start. Sim pair — no BlueZ.";
     screen().innerHTML = `
       <h1>Pair Bluetooth</h1>
+      ${uiBuildStamp()}
       <p class="lead">${copy}</p>
       <p class="sub">State: ${pair} · rf_claim: none · no metre range</p>
       <div class="card radio-list">
@@ -644,6 +651,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const hasAreas = showAreasOverlay(st, live, kind);
     screen().innerHTML = `
       <h1>Live job</h1>
+      ${uiBuildStamp()}
       ${radioChipsHtml(path)}
       ${modeBannerHtml(st, live)}
       <p class="owner-copy secondary" id="owner-copy">${copy}</p>
@@ -708,6 +716,11 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const unpairBtn = $("#unpair");
     if (unpairBtn) unpairBtn.onclick = () => liveControl("unpair");
     paintLiveOverlay(st, live);
+    if (!document.querySelector("#phase-card")) {
+      console.warn(
+        `JIMS_UI_BUILD ${window.JIMS_UI_BUILD || "?"}: #phase-card missing after renderLiveJob — stale cached app.js?`
+      );
+    }
   }
 
   function renderMap() {

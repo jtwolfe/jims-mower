@@ -16,7 +16,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 
 from jims_mower.app.live_backend import LiveBackend
-from jims_mower.app.server import make_server, static_dir
+from jims_mower.app.server import STATIC_CACHE_CONTROL, UI_BUILD, make_server, static_dir
 from jims_mower.constants import APP_STATUS_SCHEMA, LIVE_SCHEMA
 from jims_mower.live import LiveSession
 from jims_mower.viewer import static_dir as viewer_static_dir
@@ -94,22 +94,30 @@ def test_static_app_js_has_manual_phase_controls() -> None:
     # Not gated behind Start mow / hidden-until-MAP-READY.
     assert "phase-row" in js
     assert "Manual phases" in js
+    assert f'window.JIMS_UI_BUILD = "{UI_BUILD}"' in js
+    assert "UI build " in js
+    assert "stale cached app.js" in js
 
 
 def test_static_html_and_css_wire_cache_bust_and_legends() -> None:
     html = _app_html()
-    assert "/static/app.js" in html
-    assert "/static/app.css" in html
+    assert f"/static/app.js?v={UI_BUILD}" in html
+    assert f"/static/app.css?v={UI_BUILD}" in html
+    assert f"/static/viewer.js?v={UI_BUILD}" in html
+    assert f"UI build {UI_BUILD}" in html
+    assert "owner-ui-2" not in html
     css = (static_dir() / "app.css").read_text(encoding="utf-8")
     assert "phase-card" in css
     assert "area-legend" in css
     assert "has-areas" in css
+    assert ".ui-build" in css
     viewer = (viewer_static_dir() / "index.html").read_text(encoding="utf-8")
     assert 'id="btn-explore"' in viewer
     assert 'id="btn-return"' in viewer
     assert "Return home" in viewer
     assert 'id="btn-full-explore"' in viewer
     assert "Full explore" in viewer
+    assert f"?v={UI_BUILD}" in viewer
 
 
 def _serve_live(tmp_path: Path):
@@ -149,17 +157,32 @@ def test_status_and_live_frame_expose_owner_ui_flags(tmp_path: Path) -> None:
     try:
         conn = HTTPConnection(host, port, timeout=6.0)
         conn.request("GET", "/static/app.js")
-        js = conn.getresponse().read().decode("utf-8")
+        js_resp = conn.getresponse()
+        js = js_resp.read().decode("utf-8")
+        js_cc = js_resp.getheader("Cache-Control") or ""
         conn.close()
         assert ">Return home<" in js
+        assert "Manual phases" in js
+        assert "Full explore" in js
+        assert "Area types" in js
         assert ">Low battery<" in js
+        assert "JIMS_UI_BUILD" in js
+        assert f'window.JIMS_UI_BUILD = "{UI_BUILD}"' in js
         assert 'id="cmd-explore"' in js
+        assert "no-store" in js_cc
+        assert "must-revalidate" in js_cc
+        assert js_cc == STATIC_CACHE_CONTROL
 
         conn = HTTPConnection(host, port, timeout=6.0)
         conn.request("GET", "/")
-        html = conn.getresponse().read().decode("utf-8")
+        html_resp = conn.getresponse()
+        html = html_resp.read().decode("utf-8")
+        html_cc = html_resp.getheader("Cache-Control") or ""
         conn.close()
-        assert "/static/app.js" in html
+        assert f"/static/app.js?v={UI_BUILD}" in html
+        assert f"UI build {UI_BUILD}" in html
+        assert "no-store" in html_cc
+        assert "must-revalidate" in html_cc
 
         code, unpaired = _json(host, port, "GET", "/status")
         assert code == 200
