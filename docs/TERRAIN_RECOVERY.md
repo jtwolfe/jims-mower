@@ -71,10 +71,13 @@ events.
 
 ### Trail retrace
 
-Explore / mow drop breadcrumbs. On stall, software tip-risk, or a
-blocked frontier the robot **retraces N metres** along that trail
-(reverse path), then replans. Immobilise / SOS does not reverse into a
-past-static tip.
+Explore (and mow) drop breadcrumbs. On explore stall, software
+tip-risk, or a blocked frontier the robot **retraces N metres** along
+that trail (reverse path), then replans. Mow keeps the existing reverse
+/ skip-cluster recovery — following breadcrumbs on a 6×5 / 70 cm body
+walked the chassis out of bounds. Immobilise / SOS does not reverse
+into a past-static tip. Drain-edge stop is stamped and retraced, not
+demoted to grade-reroute.
 
 ### Fused terrain state
 
