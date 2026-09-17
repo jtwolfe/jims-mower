@@ -15,7 +15,6 @@ from jims_mower.env import MowerEnv
 from jims_mower.kinematics import sit_on_terrain
 from jims_mower.live import LiveSession, owner_copy_for
 from jims_mower.mission_flow import MissionPhase, MissionPolicy, apply_full_explore
-from jims_mower.planning.grade_tip import KIND_GRADE
 from jims_mower.planning.terrain_decision import TERRAIN_CONTOUR, TERRAIN_OK, TERRAIN_RETRACE
 from jims_mower.profile import YardProfile
 from jims_mower.scenarios import load_source
@@ -117,7 +116,7 @@ def test_gentle_hill_does_not_accumulate_blockage() -> None:
         float(env.cfg.world.width_m),
         float(env.cfg.world.height_m),
         float(env.cfg.world.resolution_m),
-        lambda x, y: 0.22 * float(y),
+        lambda x, y: 0.22 * y,
     )
     env._terrain = hf
     env._pose = sit_on_terrain(env._pose, hf, env.cfg.robot.length_m, env.cfg.robot.track_m)
@@ -135,7 +134,7 @@ def test_gentle_hill_does_not_accumulate_blockage() -> None:
     env.close()
     n_block = int(status.get("n_blockages") or 0)
     assert n_block <= 6, status
-    assert states & {TERRAIN_OK, TERRAIN_CONTOUR, TERRAIN_RETRACE, KIND_GRADE} or True
+    assert states & {TERRAIN_OK, TERRAIN_CONTOUR, TERRAIN_RETRACE}
     # Mass stamp of the face is the live bug.
     assert int(status.get("blocked_cells") or 0) < 80, status
 
