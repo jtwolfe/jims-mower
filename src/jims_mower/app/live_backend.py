@@ -199,13 +199,33 @@ class LiveBackend:
             spec=self.yard.schedule,
         )
         snap = self.session.snapshot()
+        info = self.session.info if isinstance(self.session.info, dict) else info
+        pose = snap.get("pose") or pose
         job_state = str(snap.get("job_state") or job_state)
         tipped = bool(snap.get("chassis_tipped"))
+        faults = list(snap.get("faults") or [])
+        faults = _ux_b_faults(info, faults)
+        if tipped and not any(f.get("code") == "FAULT_IMMOBILISED" for f in faults):
+            faults.append(
+                {
+                    "code": "FAULT_IMMOBILISED",
+                    "detail": "tipped — immobilised, retrieve",
+                    "retrieve": True,
+                    "kind": "software",
+                }
+            )
         mission = mission_from_phase(
             str(snap.get("phase") or "idle"),
             job_state,
             tipped=tipped,
             immobilised=tipped,
+        )
+        robot = robot_status_for(
+            paired=self.paired,
+            job_state=job_state,
+            faults=faults,
+            done=bool(snap.get("done")),
+            tipped=tipped,
         )
         return {
             "schema": APP_STATUS_SCHEMA,
@@ -215,6 +235,8 @@ class LiveBackend:
                 float(pose.get("x", 0.0)),
                 float(pose.get("y", 0.0)),
                 float(pose.get("theta", 0.0)),
+                pitch=float(pose.get("pitch", 0.0)),
+                roll=float(pose.get("roll", 0.0)),
             ),
             "battery": battery_status_block(
                 soc=float(info.get("battery_soc", 0.9)),

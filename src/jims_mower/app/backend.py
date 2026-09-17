@@ -56,8 +56,21 @@ class AppBackend(Protocol):
     def close(self) -> None: ...
 
 
-def _pose_dict(x: float, y: float, theta: float) -> dict[str, float]:
-    return {"x": float(x), "y": float(y), "theta": float(theta)}
+def _pose_dict(
+    x: float,
+    y: float,
+    theta: float,
+    *,
+    pitch: float = 0.0,
+    roll: float = 0.0,
+) -> dict[str, float]:
+    return {
+        "x": float(x),
+        "y": float(y),
+        "theta": float(theta),
+        "pitch": float(pitch),
+        "roll": float(roll),
+    }
 
 
 def _bind_pairing(yard: Any, *, require_pair: bool = False) -> PairingMachine:

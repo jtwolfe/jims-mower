@@ -1,5 +1,5 @@
 (() => {
-  window.JIMS_UI_BUILD = "owner-ui-5";
+  window.JIMS_UI_BUILD = "owner-ui-6";
   const ONBOARD = ["unbox", "pair", "home", "teach", "mow"];
   const KEY = "jims_mower_onboarded";
 
@@ -50,6 +50,11 @@
   function setRobotPill(status) {
     const pill = $("#robot-pill");
     if (!pill) return;
+    if (chassisTipped(status, state.live)) {
+      pill.textContent = "fault";
+      pill.className = "fault";
+      return;
+    }
     const robot = (status && status.robot) || ((status && status.state && status.state.mission) || "idle");
     const live = !!(status && (status.live || status.backend === "live"));
     const mode = (status && status.mode_banner) || {};
@@ -388,12 +393,29 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     });
   }
 
+  function chassisTipped(st, live) {
+    if ((st && st.chassis_tipped) || (live && live.chassis_tipped)) return true;
+    const kind = (live && live.tilt_kind) || (st && st.tilt_kind) || "";
+    if (kind === "tip") return true;
+    const faults = (st && st.faults) || (live && live.faults) || [];
+    if (faults.some((f) => f && (f.retrieve || f.code === "FAULT_IMMOBILISED"))) return true;
+    const mode = (live && live.mode_banner) || (st && st.mode_banner) || {};
+    if (mode.hold === "SOS") return true;
+    if (mode.label && /sos|immobil/i.test(String(mode.label))) return true;
+    const pose = (live && live.pose) || (st && st.pose) || {};
+    return Math.abs(Number(pose.roll || 0)) >= 0.40 || Math.abs(Number(pose.pitch || 0)) >= 0.45;
+  }
+
   function modeFrom(st, live) {
     const overlay = overlayFrom(st, live);
     const raw = (live && live.mode_banner) || (st && st.mode_banner) || overlay.mode || {};
     const phase = raw.phase || overlay.phase || (live && live.phase) || ((st && st.state) || {}).phase || "idle";
     const job = raw.job_state || (live && live.job_state) || ((st && st.state) || {}).job_state || "idle";
-    if (job === "idle" && phase !== "complete" && phase !== "teach") {
+    if (chassisTipped(st, live)) {
+      const label = raw.label && !/ready/i.test(String(raw.label)) ? raw.label : "SOS — immobilised";
+      return { label, tone: raw.tone || "idle", kind: "fault", hold: raw.hold || "SOS", phase: "fault", job_state: job };
+    }
+    if (job === "idle" && phase !== "complete" && phase !== "teach" && phase !== "fault") {
       return { label: "Ready", tone: "idle", kind: "idle", hold: null, phase, job_state: job };
     }
     const fallback = MODE_COPY[phase] || MODE_COPY.idle;
@@ -648,7 +670,7 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const speed = String(st.speed_label || live.speed_label || "5");
     const needsReteach = !!(st.needs_reteach || live.needs_reteach || st.fence_unusable || live.fence_unusable);
     const reason = (st.explore_reason || live.explore_reason || {});
-    const reasonLine = reason.label || "";
+    const reasonLine = chassisTipped(st, live) ? "" : (reason.label || "");
     const fullExplore = !!(st.full_explore || live.full_explore);
     const fog = live.fog_url || st.fog_url || "/api/live/fog.png";
     const observed = live.observed_url || st.observed_url || "/api/live/observed.png";
@@ -853,7 +875,8 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     const st = state.status || {};
     const live = state.live || {};
     const faults = st.faults || live.faults || [];
-    const sos = faults.some((f) => f.retrieve || f.code === "FAULT_IMMOBILISED");
+    const tipped = chassisTipped(st, live);
+    const sos = tipped || faults.some((f) => f.retrieve || f.code === "FAULT_IMMOBILISED");
     const stuck = faults.some((f) => f.code === "STUCK");
     const hwEstop = faults.some((f) => f.code === "HW_ESTOP") || live.hw_estop;
     const swEstop = !!(st.state && st.state.mission === "estop") || live.estop;
@@ -868,7 +891,9 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
           : "";
     const list = faults.length
       ? faults.map((f) => `<div class="fault-banner"><strong>${f.code}</strong><span>${f.detail || ""}</span></div>`).join("")
-      : `<div class="card"><strong>All clear</strong>No latched owner faults.</div>`;
+      : tipped
+        ? `<div class="fault-banner"><strong>FAULT_IMMOBILISED</strong><span>Past-tip chassis — retrieve. Not Idle Ready.</span></div>`
+        : `<div class="card"><strong>All clear</strong>No latched owner faults.</div>`;
     screen().innerHTML = `
       <h1>SOS</h1>
       ${banner}
@@ -932,6 +957,10 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
       state.status.needs_reteach = frame.needs_reteach;
       state.status.path_overlay = frame.path_overlay;
       state.status.mode_banner = frame.mode_banner;
+      state.status.chassis_tipped = !!frame.chassis_tipped;
+      state.status.tilt_kind = frame.tilt_kind;
+      if (frame.faults) state.status.faults = frame.faults;
+      if (frame.pose) state.status.pose = frame.pose;
       state.status.planned_pct = 100 * Number(frame.planned_pct || 0);
       state.status.waypoint_index = frame.waypoint_index;
       state.status.coverage_url = frame.coverage_url || state.status.coverage_url;
@@ -953,7 +982,9 @@ skips ${card.skips || 0} · ${(card.duration_s || 0).toFixed(1)}s sim${card.wall
     if (copy && frame.owner_copy) copy.textContent = frame.owner_copy;
     const reasonEl = $("#explore-reason");
     if (reasonEl) {
-      const label = (frame.explore_reason && frame.explore_reason.label) || "";
+      const label = chassisTipped(state.status || {}, frame)
+        ? ""
+        : ((frame.explore_reason && frame.explore_reason.label) || "");
       reasonEl.textContent = label;
       reasonEl.hidden = !label;
     }

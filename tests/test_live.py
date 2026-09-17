@@ -308,6 +308,7 @@ def test_owner_copy_reads_like_a_product() -> None:
     assert robot_status_for(paired=False, job_state="idle") == "pairing"
     assert robot_status_for(paired=True, job_state="running") == "live"
     assert robot_status_for(paired=True, job_state="idle", faults=[{"code": "FAULT_IMMOBILISED", "retrieve": True}]) == "fault"
+    assert robot_status_for(paired=True, job_state="idle", tipped=True) == "fault"
 
 
 def _post(host: str, port: int, path: str, payload: dict, timeout: float = 6.0):

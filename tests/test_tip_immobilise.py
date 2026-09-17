@@ -86,6 +86,13 @@ def test_live_snapshot_ridge_is_tip_not_ok_ready(tmp_path: Path) -> None:
     assert snap.get("chassis_tipped") is True
     assert "Ready" not in str(snap["mode_banner"]["label"])
     assert "immobilised" in str(snap["owner_copy"]).lower() or "sos" in str(snap["owner_copy"]).lower()
+    assert "Idle ·" not in str(snap.get("owner_copy") or "")
+    assert not (snap.get("explore_reason") or {}).get("label")
+    assert any(f.get("code") == "FAULT_IMMOBILISED" for f in snap.get("faults") or [])
+    assert snap["phase_label"] == "SOS"
+    start = session.control("start")
+    assert start.get("ok") is False
+    assert "tipped" in str(start.get("reason") or start.get("error") or "").lower()
     session.close()
 
 

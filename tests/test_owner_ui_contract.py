@@ -54,6 +54,7 @@ OWNER_LABELS = (
     "Reset",
     "Tip risk — reversing",
     "Steep grade — contouring",
+    "SOS — immobilised",
 )
 
 STATUS_FLAGS = (
@@ -103,6 +104,8 @@ def test_static_app_js_has_manual_phase_controls() -> None:
     assert ">Reset<" in js
     assert "Tip risk — reversing" in js
     assert "Steep grade — contouring" in js
+    assert "SOS — immobilised" in js
+    assert "chassisTipped" in js
     assert "advanced-card" in js
     assert f'window.JIMS_UI_BUILD = "{UI_BUILD}"' in js
     assert "UI build " in js

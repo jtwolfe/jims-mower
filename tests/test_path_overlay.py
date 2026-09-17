@@ -80,6 +80,7 @@ def test_mode_banner_mapping_vs_mowing() -> None:
 
     sos = mode_banner_for("explore", "idle", tipped=True)
     assert sos["label"] == "SOS — immobilised"
+    assert sos["kind"] == "fault"
     assert "Ready" not in sos["label"]
     assert mission_from_phase("explore", "idle", tipped=True) == "fault"
 

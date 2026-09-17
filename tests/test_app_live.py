@@ -117,7 +117,7 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "path_overlay" in snap
         assert snap["path_overlay"]["phase"]
         assert "trail" in snap["path_overlay"]
-        assert snap["mode_banner"]["kind"] in {"mapping", "mowing", "idle", "done"}
+        assert snap["mode_banner"]["kind"] in {"mapping", "mowing", "idle", "done", "fault"}
         assert "explore_reason" in snap
         assert "area_legend" in snap
         assert "full_explore" in snap

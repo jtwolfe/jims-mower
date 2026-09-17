@@ -30,7 +30,7 @@ MODE_ROWS: dict[str, dict[str, str]] = {
     "charging": {"label": "Charging", "tone": "home", "kind": "idle"},
     "complete": {"label": "Done", "tone": "done", "kind": "done"},
     "safe": {"label": "Hold — safe", "tone": "idle", "kind": "idle"},
-    "fault": {"label": "Fault", "tone": "idle", "kind": "idle"},
+    "fault": {"label": "SOS — immobilised", "tone": "idle", "kind": "fault"},
 }
 
 HOLD_LABELS = {

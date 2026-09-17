@@ -774,7 +774,8 @@ function setOwnerBar(frame) {
     const want = frame.speed_label != null ? String(frame.speed_label) : "1";
     btn.classList.toggle("active", btn.dataset.speed === want);
   });
-  const idle = frame.job_state === "idle";
+  const tipped = !!(frame.chassis_tipped || frame.tilt_kind === "tip");
+  const idle = frame.job_state === "idle" && !tipped;
   const start = $("btn-job-start");
   if (start) start.disabled = frame.job_state === "running";
   const pause = $("btn-job-pause");
@@ -788,11 +789,11 @@ function setOwnerBar(frame) {
   const fullBtn = $("btn-full-explore");
   if (fullBtn) fullBtn.classList.toggle("active", !!frame.full_explore);
   const reason = frame.explore_reason || {};
-  if (reason.label) $("save-status").textContent = reason.label;
+  if (reason.label && !tipped) $("save-status").textContent = reason.label;
   setPhaseBar(idle ? "" : (frame.phase || ""));
   applyPhaseLayerDefaults(idle ? "" : (frame.phase || ""));
   const chip = $("phase-chip");
-  if (chip) chip.textContent = idle ? "IDLE" : `LIVE ${frame.phase_label || frame.phase || "—"}`;
+  if (chip) chip.textContent = tipped ? "SOS" : idle ? "IDLE" : `LIVE ${frame.phase_label || frame.phase || "—"}`;
   const summary = $("session-summary");
   if (summary && frame.session_summary && (frame.done || frame.phase === "complete" || frame.phase === "return_home")) {
     const s = frame.session_summary;
@@ -873,9 +874,10 @@ function applyLiveFrame(frame) {
   if (state.followLive && frame.pose && state.poseMarker) {
     state.poseMarker.position.copy(worldToScene(frame.pose.x, frame.pose.y, frame.pose.z || 0));
     state.poseMarker.rotation.y = -(frame.pose.theta || 0);
-    const idle = frame.job_state === "idle";
+    const tippedLive = !!(frame.chassis_tipped || frame.tilt_kind === "tip");
+    const idle = frame.job_state === "idle" && !tippedLive;
     const phase = idle ? "" : (frame.phase || "");
-    const phaseLabel = idle ? "idle" : (frame.phase_label || phase);
+    const phaseLabel = tippedLive ? "SOS" : idle ? "idle" : (frame.phase_label || phase);
     $("scrub").value = String(Math.max(0, state.poses.length - 1));
     $("scrub-label").textContent = `LIVE step ${frame.step || 0} · ${phaseLabel}`;
     const el = $("mission-metrics");

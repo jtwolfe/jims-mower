@@ -325,8 +325,11 @@ def robot_status_for(
     job_state: str,
     faults: Optional[list[dict[str, Any]]] = None,
     done: bool = False,
+    tipped: bool = False,
 ) -> str:
     """Owner pill: idle / pairing / live / fault."""
+    if tipped:
+        return "fault"
     for item in faults or []:
         if not isinstance(item, dict):
             continue
@@ -601,6 +604,7 @@ class LiveSession:
 
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
+            self._sync_tip_latch()
             return self._frame_unlocked()
 
     def manifest(self) -> dict[str, Any]:
@@ -770,6 +774,16 @@ class LiveSession:
             return {"ok": False, "error": f"unknown command {cmd}", **self.snapshot()}
         if not self.started:
             self.reset()
+        if key in {"start", "resume", "start_mow", "explore", "reexplore", "mow", "return"}:
+            self._sync_tip_latch()
+            if self._tipped:
+                return {
+                    "ok": False,
+                    "error": "tipped — retrieve / Reset",
+                    "reason": "tipped — retrieve / Reset",
+                    "cmd": key,
+                    **self.snapshot(),
+                }
         if key in {"start", "resume", "start_mow", "explore", "mow", "return"}:
             refused = self.pairing.refuse_start()
             if refused:
@@ -1736,7 +1750,8 @@ class LiveSession:
         )
         if tipped:
             self._tipped = True
-            if not (isinstance(fault, dict) and str(fault.get("code") or "") not in {"", "ok"}):
+            phase_label = "SOS"
+            if not (isinstance(fault, dict) and str(fault.get("code") or "") == "HW_ESTOP"):
                 fault = {
                     "code": "FAULT_IMMOBILISED",
                     "retrieve": True,
@@ -1744,6 +1759,7 @@ class LiveSession:
                     "component": "chassis",
                     "reason": "tipped — immobilised, retrieve",
                 }
+        explore_reason = {} if tipped else (status.get("explore_reason") or {})
         path_overlay = build_path_overlay(
             phase=phase,
             job_state=self.job_state,
@@ -1778,7 +1794,7 @@ class LiveSession:
                 hw_estop=self._hw_estop_latched(),
                 pairing_state=self.pairing.state,
                 require_pair=self.require_pair,
-                explore_reason=status.get("explore_reason") if isinstance(status.get("explore_reason"), dict) else None,
+                explore_reason=explore_reason if explore_reason else None,
                 charge_state=str(status.get("charge_state") or ""),
                 return_kind=str(status.get("return_kind") or ""),
                 tilt_kind=tilt_kind,
@@ -1798,12 +1814,19 @@ class LiveSession:
             "yard": str(self.config_name),
             "width_m": float(self.env.cfg.world.width_m) if self.env is not None else 16.0,
             "height_m": float(self.env.cfg.world.height_m) if self.env is not None else 12.0,
-            "can_start_mow": (status["phase"] in {"review", "explore", "complete", "charging"} or bool(status.get("planned_mowable_cells"))) and not fence_unusable,
-            "can_reexplore": status["phase"] in {"review", "mow", "return_home", "complete", "charging"},
-            "can_explore": True,
-            "can_mow": not fence_unusable,
-            "can_return": self.job_state in {"running", "paused", "hold"} or status["phase"] not in {"idle", "complete", ""},
-            "explore_reason": status.get("explore_reason") or {},
+            "can_start_mow": (not tipped)
+            and (status["phase"] in {"review", "explore", "complete", "charging"} or bool(status.get("planned_mowable_cells")))
+            and not fence_unusable,
+            "can_reexplore": (not tipped)
+            and status["phase"] in {"review", "mow", "return_home", "complete", "charging"},
+            "can_explore": not tipped,
+            "can_mow": (not tipped) and not fence_unusable,
+            "can_return": (not tipped)
+            and (
+                self.job_state in {"running", "paused", "hold"}
+                or status["phase"] not in {"idle", "complete", ""}
+            ),
+            "explore_reason": explore_reason,
             "tilt_kind": tilt_kind,
             "chassis_tipped": bool(tipped),
             "can_reset": True,
