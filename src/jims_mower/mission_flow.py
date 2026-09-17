@@ -2692,6 +2692,26 @@ class MissionPolicy:
         self._retrace_index = 0
         self._retrace_reason = ""
 
+    def _in_work_area(self, x: float, y: float) -> bool:
+        """Keep retrace on the yard — do not reverse off a 6×5 world lip."""
+        margin = 0.22
+        if x < margin or y < margin:
+            return False
+        if x > float(self.cfg.world.width_m) - margin:
+            return False
+        if y > float(self.cfg.world.height_m) - margin:
+            return False
+        if self.observed is None or self.keep_in_mask is None:
+            return True
+        cell = self.observed.world_to_cell(x, y)
+        if cell is None:
+            return False
+        r, c = cell
+        rows, cols = self.keep_in_mask.shape
+        if not (0 <= r < rows and 0 <= c < cols):
+            return False
+        return bool(self.keep_in_mask[r, c])
+
     def _record_pose_trail(self, pose: Pose) -> None:
         if self.phase not in {MissionPhase.EXPLORE, MissionPhase.MOW}:
             return
@@ -2713,11 +2733,15 @@ class MissionPolicy:
     def _start_retrace(self, pose: Pose, *, reason: str) -> bool:
         if self._chassis_tipped or self._retrace_cool > 0:
             return False
-        wps = retrace_waypoints(
-            self._pose_trail,
-            (pose.x, pose.y),
-            length_m=float(self.settings.retrace_length_m or 2.8),
-        )
+        wps = [
+            pt
+            for pt in retrace_waypoints(
+                self._pose_trail,
+                (pose.x, pose.y),
+                length_m=float(self.settings.retrace_length_m or 2.8),
+            )
+            if self._in_work_area(pt[0], pt[1])
+        ]
         if not wps:
             return False
         self._retrace_wps = wps
@@ -2770,11 +2794,19 @@ class MissionPolicy:
                 return action
         started = self._start_retrace(pose, reason=reason)
         if reason in {"tip_risk", "mow_tip"}:
+            back_x = pose.x - 0.40 * math.cos(float(pose.theta))
+            back_y = pose.y - 0.40 * math.sin(float(pose.theta))
+            if not self._in_work_area(back_x, back_y):
+                return self._lateral_nudge(pose)
             return self._reverse_nudge(pose)
         if started:
             action = self._tick_retrace(pose, self.last_advice)
             if action is not None:
                 return action
+        back_x = pose.x - 0.40 * math.cos(float(pose.theta))
+        back_y = pose.y - 0.40 * math.sin(float(pose.theta))
+        if not self._in_work_area(back_x, back_y):
+            return self._lateral_nudge(pose)
         return self._reverse_nudge(pose)
 
     def _drain_hazard(self, info: Optional[dict[str, Any]]) -> bool:
