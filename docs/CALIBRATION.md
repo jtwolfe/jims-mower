@@ -18,7 +18,7 @@ bench: [`SCALE.md`](SCALE.md). Do not invent Kv.
 
 ## What you are measuring
 
-A **forward stereo pair** on a ~50 cm zero-turn. Body frame: **x
+A **forward stereo pair** on a ~70×70 cm zero-turn. Body frame: **x
 forward, y left, z up**.
 
 | Quantity | Band | Why |

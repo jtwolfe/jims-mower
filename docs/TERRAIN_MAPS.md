@@ -142,7 +142,7 @@ drains/banks so the authored hard areas stay readable.
 
 Suburban/rural **~1-acre** block for explore/mow. Footprint **70×58 m**
 (4060 m² ≈ **1.003 acre**). Cells are **0.25 m** → 280×232 = **64,960**
-cells so the ~0.50 m chassis is not one cell across (0.50 m aliased
+cells so the ~0.70 m chassis is not one cell across (0.50 m aliased
 lips). Golf / default stay at 0.10 m. Not a coverage benchmark.
 See [`CHASSIS_PHYSICS.md`](CHASSIS_PHYSICS.md).
 
