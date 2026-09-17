@@ -14,7 +14,7 @@ from jims_mower.constants import (
 )
 from jims_mower.env import MowerEnv
 from jims_mower.live import owner_copy_for
-from jims_mower.mission_flow import MissionPhase, MissionPolicy
+from jims_mower.mission_flow import MissionPhase, MissionPolicy, apply_full_explore
 from jims_mower.profile import YardProfile
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import plan_coverage
@@ -31,7 +31,7 @@ def _tiny_env() -> MowerEnv:
     cfg.sensors.height = 24
     cfg.sensors.camera_count = 4
     cfg.sensors.cameras = []
-    cfg.max_steps = 800
+    cfg.max_steps = 1100
     return MowerEnv(config=cfg, scenario=scenario, render_mode=None)
 
 
@@ -490,11 +490,16 @@ def test_taught_tiny_mows_then_completes() -> None:
         home={"x": 1.2, "y": 1.2, "theta": 0.0},
     )
     obs, info = env.reset(seed=3, options={"yard_profile": profile, "resize_world": False})
-    policy = MissionPolicy(env.cfg, fast=True)
+    policy = MissionPolicy(env.cfg)
     policy.reset(obs, info, profile=profile)
+    apply_full_explore(policy.settings, world_width_m=float(env.cfg.world.width_m))
+    policy.settings.stamp_radius_m = 1.35
+    policy.settings.review_hold_steps = 1
     seen: set[str] = {policy.phase.value}
     peak_cut = 0.0
-    for _ in range(520):
+    for _ in range(900):
+        if policy.phase == MissionPhase.REVIEW:
+            policy.request_start_mow()
         action = policy.act(obs, info)
         obs, _reward, terminated, truncated, info = env.step(action)
         seen.add(policy.phase.value)

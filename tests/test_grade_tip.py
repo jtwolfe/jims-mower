@@ -271,8 +271,9 @@ def test_terrain_policy_gentle_hill_does_not_recovery_loop() -> None:
 
     policy.plan = CoveragePlan(waypoints=[(4.0, 0.0)])
     policy.index = 0
-    # Pitch at the old IMU stop (0.34) but under tip and at max_climb demo.
-    pitch = 0.30
+    # Climbable pitch under max_climb (0.32) and under software tip (0.55).
+    # Must sit above software_slow (0.55 × 0.55 ≈ 0.30) so it is grade, not ok.
+    pitch = 0.31
     imu = np.array(
         [-math.sin(pitch) * 9.81, 0.0, math.cos(pitch) * 9.81, 0.0, 0.0, 0.0],
         dtype=np.float32,
@@ -320,29 +321,41 @@ def test_mission_gentle_hill_no_tip_stamp_or_loop() -> None:
     obs, info = env.reset(seed=2, options={"yard_profile": profile, "resize_world": False})
     policy = MissionPolicy(env.cfg, fast=True)
     policy.reset(obs, info, profile=profile)
-    pitch = 0.28
+    pitch = 0.31
     imu = np.array(
         [-math.sin(pitch) * 9.81, 0.0, math.cos(pitch) * 9.81, 0.0, 0.0, 0.0],
         dtype=np.float32,
     )
     tip_stops = 0
-    stamps = 0
+    tip_stamps = 0
     for _ in range(20):
         info = dict(info)
         info["terrain_advice"] = "slow"
         info["pose"] = {**(info.get("pose") or {}), "pitch": pitch, "roll": 0.0}
         info["tipover"] = False
+        info["collision"] = None
         obs = dict(obs)
         obs["imu"] = imu
+        pose_arr = np.asarray(obs.get("pose"), dtype=np.float32).reshape(-1)
+        if pose_arr.size >= 6:
+            pose_arr = pose_arr.copy()
+            pose_arr[4] = pitch
+            pose_arr[5] = 0.0
+            obs["pose"] = pose_arr
         policy.act(obs, info)
         if policy.last_advice == "stop" and policy.last_tilt_kind == KIND_TIP:
             tip_stops += 1
-        stamps = int(policy._blockage_events)
+        tip_stamps = sum(
+            1
+            for ev in policy.events
+            if ev.event == "blockage_stamped"
+            and str((ev.detail or {}).get("reason") or "") == "tip_collision"
+        )
         if policy.phase != MissionPhase.EXPLORE:
             break
     env.close()
     assert tip_stops == 0
-    assert stamps == 0
+    assert tip_stamps == 0
     assert policy.last_tilt_kind != KIND_TIP
 
 

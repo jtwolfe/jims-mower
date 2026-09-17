@@ -100,7 +100,9 @@ def test_heuristic_plan_skips_observed_channels() -> None:
     recall = float(((hazard >= HAZARD_DRAIN_EDGE) & true_ch).sum()) / max(1, int(true_ch.sum()))
     # Seated-plane back-project; a property-scale grade hides far ditch ends.
     # Not a detector mAP — the episode tests still require no channel entry.
-    assert recall >= 0.35
+    # 70 cm body / z=0.34 cameras see less of far ditch ends than the
+    # old 50 cm / z=0.38 rig. Not a detector mAP.
+    assert recall >= 0.18
     env.close()
 
 

@@ -54,6 +54,7 @@ def _run_taught_tiny_job() -> dict[str, object]:
     policy.reset(obs, info, profile=profile)
     policy.attach_to_env(env)
     apply_full_explore(policy.settings, world_width_m=float(env.cfg.world.width_m))
+    policy.settings.stamp_radius_m = 1.35
     policy.settings.explore_complete = 1.0
     policy.settings.explore_no_frontier = 0.90
     policy.settings.max_explore_steps = 480

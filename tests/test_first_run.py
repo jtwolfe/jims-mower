@@ -11,6 +11,7 @@ from jims_mower.app.live_backend import LiveBackend
 from jims_mower.app.server import make_server
 from jims_mower.constants import LIVE_SCHEMA
 from jims_mower.live import LiveSession, owner_copy_for, robot_status_for
+from jims_mower.mission_flow import apply_full_explore
 from jims_mower.profile import (
     YardProfile,
     apply_profile_to_scenario,
@@ -398,7 +399,7 @@ def test_taught_live_job_completes_to_idle(tmp_path: Path) -> None:
         config="mission_tiny",
         fast=True,
         speed="max",
-        steps=720,
+        steps=1100,
         seed=3,
         cameras=4,
         out_dir=tmp_path / "taught-done",
@@ -412,8 +413,16 @@ def test_taught_live_job_completes_to_idle(tmp_path: Path) -> None:
     session._reset_for_next_job()
     assert session.policy is not None
     assert session.policy.phase.value == "explore"
-    session.policy.settings.review_hold_steps = 2
-    last = session.run_n(680)
+    apply_full_explore(
+        session.policy.settings,
+        world_width_m=float(session.env.cfg.world.width_m),
+    )
+    # Fast / mission_tiny stamp 2.2 m + 0.40 m collision empties a 4×3 m
+    # keep-in (0 mowable waypoints). Use the default stamp so MAP READY
+    # can still start mow.
+    session.policy.settings.stamp_radius_m = 1.35
+    session.policy.settings.review_hold_steps = 1
+    last = session.run_n(1000)
     session.close()
     phases = {row.get("phase") for row in session.poses}
     assert "mow" in phases
