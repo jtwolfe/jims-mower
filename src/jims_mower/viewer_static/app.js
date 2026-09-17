@@ -786,8 +786,6 @@ function setOwnerBar(frame) {
   if (startMow) startMow.disabled = !!frame.needs_reteach;
   const reexplore = $("btn-reexplore");
   if (reexplore) reexplore.hidden = !frame.can_reexplore;
-  const fullBtn = $("btn-full-explore");
-  if (fullBtn) fullBtn.classList.toggle("active", !!frame.full_explore);
   const reason = frame.explore_reason || {};
   if (reason.label && !tipped) $("save-status").textContent = reason.label;
   setPhaseBar(idle ? "" : (frame.phase || ""));
@@ -834,12 +832,6 @@ function bindOwnerBar() {
   if (explore) explore.addEventListener("click", () => postControl("explore").catch(() => {}));
   const ret = $("btn-return");
   if (ret) ret.addEventListener("click", () => postControl("return").catch(() => {}));
-  const fullBtn = $("btn-full-explore");
-  if (fullBtn) {
-    fullBtn.addEventListener("click", () => {
-      postControl("full_explore", { enabled: !fullBtn.classList.contains("active") }).catch(() => {});
-    });
-  }
   const reexplore = $("btn-reexplore");
   if (reexplore) reexplore.addEventListener("click", () => postControl("reexplore").catch(() => {}));
   const reset = $("btn-reset");

@@ -178,8 +178,10 @@ planner:
 # Calibrate → explore → review → mow. Unknown cells are not mowable.
 mission:
   observe_confidence: 0.35
-  explore_complete: 0.80
-  explore_no_frontier: 0.55
+  explore_complete: 1.0
+  explore_no_frontier: 0.90
+  full_explore: true
+  full_explore_complete: 1.0
   stamp_radius_m: 1.35
   camera_range_m: 6.0
   max_calibrate_steps: 900

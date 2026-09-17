@@ -41,6 +41,7 @@ from jims_mower.mesh import coverage_to_rgb, mesh_from_observed, mesh_to_payload
 from jims_mower.mission_flow import (
     PHASE_LABELS,
     MissionPolicy,
+    apply_full_explore,
     mission_timeline,
     scale_mission_budget,
     session_summary,
@@ -568,6 +569,11 @@ class LiveSession:
         self.obs, self.info = self.env.reset(seed=self.seed, options=reset_opts)
         self.policy = MissionPolicy(self.env.cfg, fast=self.fast)
         self.policy.reset(self.obs, self.info, profile=taught)
+        if not self.fast:
+            apply_full_explore(
+                self.policy.settings,
+                world_width_m=float(self.env.cfg.world.width_m),
+            )
         self.policy.attach_to_env(self.env)
         self.teach_policy = None
         self._taught_env_dirty = False
@@ -841,9 +847,8 @@ class LiveSession:
                 self._stop.clear()
                 self.start_thread()
         elif key == "reexplore" or key == "explore":
-            full = bool(kwargs.get("full") or kwargs.get("full_explore"))
             if self.policy is not None:
-                self.policy.request_explore(full=full)
+                self.policy.request_explore(full=not self.fast)
             if self.job_state == "idle":
                 self.job_state = "running"
                 self._t0_wall = self._t0_wall or time.perf_counter()
@@ -858,11 +863,8 @@ class LiveSession:
                 self._stop.clear()
                 self.start_thread()
         elif key == "full_explore":
-            enabled = kwargs.get("enabled", True)
-            if isinstance(enabled, str):
-                enabled = enabled.strip().lower() not in {"0", "false", "off", "no"}
             if self.policy is not None:
-                self.policy.apply_full_explore_mode(bool(enabled))
+                self.policy.apply_full_explore_mode(True)
         elif key == "estop":
             self.estop = True
             self.job_state = "estop"
@@ -920,7 +922,7 @@ class LiveSession:
                 soc=soc,
             )
         elif key == "reset":
-            raw_clear = kwargs.get("clear_blockages", kwargs.get("clear_learned", False))
+            raw_clear = kwargs.get("clear_blockages", kwargs.get("clear_learned", True))
             if isinstance(raw_clear, str):
                 clear_blockages = raw_clear.strip().lower() not in {"0", "false", "off", "no"}
             else:
@@ -929,6 +931,8 @@ class LiveSession:
             self.done = False
             self._tipped = False
             self._fault_overlay = {}
+            self.speed = parse_speed(1)
+            self.session_card = {}
             reset_info: dict[str, Any] = {}
             home = None
             if self.policy is not None:
@@ -936,6 +940,8 @@ class LiveSession:
                 reset_info = self.policy.owner_reset(clear_blockages=clear_blockages)
             if self.env is not None:
                 self.obs, self.info = self.env.retrieve_from_tip(home)
+                if getattr(self.env, "_coverage", None) is not None:
+                    self.env._coverage.cut.fill(False)
                 if bool((self.info or {}).get("chassis_tipped") or (self.info or {}).get("tipover")):
                     self._tipped = True
                     if self.policy is not None:

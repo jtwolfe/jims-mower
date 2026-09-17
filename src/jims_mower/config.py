@@ -409,8 +409,8 @@ class MissionConfig:
     """Calibrate → explore → review → mow. Unknown is not assumed mowable."""
 
     observe_confidence: float = 0.35
-    explore_complete: float = 0.80
-    explore_no_frontier: float = 0.55
+    explore_complete: float = 1.0
+    explore_no_frontier: float = 0.90
     stamp_radius_m: float = 1.35
     camera_range_m: float = 6.0
     max_calibrate_steps: int = 900
@@ -443,11 +443,11 @@ class MissionConfig:
     # IMU tip-stop: skip this many waypoints, then keep painting.
     mow_skip_cluster: int = 4
     mow_stop_cool: int = 10
-    # Demo profiles may set explore_complete 0.30 / a short step cap.
-    # Owner full-explore ignores that early exit and keeps seeking frontiers
-    # until the production target (or no reachable frontier).
-    full_explore: bool = False
-    full_explore_complete: float = 0.80
+    # Owner path is always the full taught fence. Demo 30% / short-cap
+    # early exits are gone. full_explore stays True so a step cap cannot
+    # declare MAP READY while reachable frontiers remain.
+    full_explore: bool = True
+    full_explore_complete: float = 1.0
     full_explore_steps: int = 4000
     min_explore_steps: int = 8
     # 0 = use YardProfile schedule.min_soc, else runtime.battery.limp_soc.

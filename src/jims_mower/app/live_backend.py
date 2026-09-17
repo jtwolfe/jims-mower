@@ -54,7 +54,7 @@ class LiveBackend:
         session: Optional[LiveSession] = None,
         config: Optional[str] = "acre_yard_demo",
         fast: bool = False,
-        speed: Any = 5.0,
+        speed: Any = 1.0,
         steps: Optional[int] = None,
         seed: int = 7,
         cameras: int = 4,

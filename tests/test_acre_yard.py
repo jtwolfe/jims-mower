@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from jims_mower.constants import (
     STRUCTURE_BUILDING,
     STRUCTURE_BUNKER,
@@ -118,11 +120,11 @@ def test_acre_yard_demo_is_same_acre_with_faster_calibrate() -> None:
     assert scn.ponds and scn.buildings
     assert cfg.mission.calibrate_confirm_m >= 20.0
     assert cfg.mission.max_calibrate_steps < full.mission.max_calibrate_steps
-    assert cfg.mission.explore_complete < full.mission.explore_complete
-    assert cfg.mission.explore_complete <= 0.32
-    assert cfg.mission.max_explore_steps <= 500
-    assert full.mission.explore_complete >= 0.70
+    assert cfg.mission.explore_complete == pytest.approx(1.0)
+    assert full.mission.explore_complete == pytest.approx(1.0)
+    assert cfg.mission.max_explore_steps >= 3000
     assert full.mission.max_explore_steps >= 3000
+    assert cfg.mission.mow_complete_frac == pytest.approx(0.0)
     area = (cfg.mission.calibrate_confirm_m or 0.0) < 80.0
     assert area
     # Tighter keep-in than the full fence, still covers pond + sheds.

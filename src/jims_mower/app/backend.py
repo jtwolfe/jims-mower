@@ -1144,7 +1144,7 @@ def make_backend(
     seed: int = 7,
     cameras: int = 4,
     fast: bool = False,
-    speed: Any = 5.0,
+    speed: Any = 1.0,
     steps: Optional[int] = None,
     out_dir: Optional[Union[str, Path]] = None,
     session: Any = None,

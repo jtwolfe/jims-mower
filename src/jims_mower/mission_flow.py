@@ -334,12 +334,13 @@ class MissionPolicy:
         self._transition(MissionPhase.RETURN_HOME)
         return True
 
-    def owner_reset(self, *, clear_blockages: bool = False) -> dict[str, Any]:
-        """Stop the job transients and return to Explore-ready without reteach.
+    def owner_reset(self, *, clear_blockages: bool = True) -> dict[str, Any]:
+        """Fresh job: keep the taught fence, clear tip / progress / blockages.
 
-        Keeps the taught fence and the observed map. Learned blockages stay
-        unless ``clear_blockages`` is set. Clears tip cool-down, explore
-        spin, software safe/hold, and recovery counters.
+        Owner Reset is not Re-teach. YardProfile stay. Observed fog, learned
+        no-go, explore/mow plans, and tip latch clear so the next Explore
+        starts clean. Default clears blockages; pass ``clear_blockages=False``
+        only when a caller wants to keep them.
         """
         self.clear_owner_hold()
         self.help_requested = False
@@ -351,6 +352,8 @@ class MissionPolicy:
         self._progress_stall = 0
         self._progress_best = 1e9
         self._progress_pose = None
+        self._progress_map = 0.0
+        self._progress_map_stall = 0
         self._replan_cool = 0
         self._detour = []
         self._detour_index = 0
@@ -358,30 +361,47 @@ class MissionPolicy:
         self.last_tilt_kind = "ok"
         self._chassis_tipped = False
         self._tilt_filter.reset()
-        self.safe.clear()
+        self.safe.reset()
+        self.plan = None
+        self.explore_plan = None
+        self.global_plan = None
+        self.snapshot = None
+        self.index = 0
+        self.phase_step = 0
+        self._skipped_global = []
+        self._frontier_xy = []
+        self._review_hold = False
+        self._mow_requested = False
+        self._return_kind = ""
+        self._resume_phase = None
+        self._resume_index = 0
         cleared = 0
-        if clear_blockages and self.observed is not None:
-            cleared = int(self.observed.clear_blockages())
+        if self.observed is not None:
+            if clear_blockages:
+                cleared = int(self.observed.blockage_count())
+            self.observed.clear_progress(clear_blockages=clear_blockages)
+            self.keep_in_mask = self.observed.keep_in_mask(self._geofence)
             self._skipped_frontiers = []
             self._blocked_frontier_count = 0
             self._last_blockage_xy = None
             self._blockage_events = 0
         # Keep a taught fence. Leave calibrate only when a profile already exists.
-        if self.phase == MissionPhase.CALIBRATE_BOUNDARY and self.profile is not None:
-            self._close_calibrate_now()
-        if self.phase in {
+        if self.profile is not None:
+            self._transition(MissionPhase.EXPLORE)
+        elif self.phase == MissionPhase.CALIBRATE_BOUNDARY:
+            pass
+        elif self.phase in {
             MissionPhase.FAULT,
             MissionPhase.SAFE,
             MissionPhase.MOW,
             MissionPhase.RETURN_HOME,
             MissionPhase.CHARGING,
             MissionPhase.COMPLETE,
+            MissionPhase.REVIEW,
+            MissionPhase.EXPLORE,
         }:
-            if self.snapshot is not None:
-                self._transition(MissionPhase.REVIEW)
-            else:
-                self._transition(MissionPhase.EXPLORE)
-        self.explore_reason = self._build_explore_reason(0.0, self._last_info, code="idle")
+            self._transition(MissionPhase.CALIBRATE_BOUNDARY)
+        self.explore_reason = {}
         self._emit(
             "owner_reset",
             {
@@ -2428,15 +2448,16 @@ def apply_full_explore(settings: MissionConfig, *, world_width_m: float = 70.0) 
     settings.full_explore = True
     tiny = float(world_width_m) < 20.0
     if tiny:
-        settings.explore_complete = max(float(settings.explore_complete), 0.70)
+        settings.explore_complete = max(float(settings.explore_complete), 0.95)
         settings.max_explore_steps = max(int(settings.max_explore_steps), 360)
         settings.mow_complete_frac = 0.0
         settings.max_mow_steps = max(int(settings.max_mow_steps), 280)
     else:
         settings.explore_complete = max(
             float(settings.explore_complete),
-            float(settings.full_explore_complete or 0.80),
+            float(settings.full_explore_complete or 1.0),
         )
+        settings.explore_no_frontier = max(float(settings.explore_no_frontier), 0.90)
         settings.max_explore_steps = max(
             int(settings.max_explore_steps),
             int(settings.full_explore_steps or 4000),

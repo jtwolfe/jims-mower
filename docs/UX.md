@@ -8,9 +8,10 @@ height field, not a photogrammetry product.
 After a demo or record run:
 
 ```bash
-# Live owner session (observed terrain + fog). Jamie demo command:
-jims-mower-live --config acre_yard_demo --speed 5
-jims-mower-live --config acre_yard --speed 5
+# Live owner session (observed terrain + fog). Default speed is 1×.
+jims-mower-live --config acre_yard_demo
+jims-mower-live --config acre_yard
+# Optional faster watch: --speed 5 or --speed max
 # open http://127.0.0.1:8765/  — animates while the sim runs
 
 # Finished-episode scrub (post-hoc). Default --steps is 160 (not a 12-step
@@ -37,16 +38,16 @@ browser does not OOM.
 
 `acre_yard_demo` is a **live demo profile**: same ~1 acre features and
 physics as `acre_yard`, slightly tighter keep-in, short calibrate
-confirmation (`calibrate_confirm_m: 28`), and a **demo**
-`explore_complete: 0.30` / `max_explore_steps: 420` so `--speed 5` and
-`--speed max` can reach **MAP READY then MOW** in a practical window
-even with leftover frontiers. `acre_yard` stays at `0.72` / 4000 and a
-full fence lap. It is not a coverage benchmark. See
-[`MISSION_FLOW.md`](MISSION_FLOW.md) and
+confirmation (`calibrate_confirm_m: 28`). Explore / mow still cover the
+**full taught fence** (`explore_complete: 1.0`, no 30% / 420-step
+early exit). Cold start and Reset land at **1×**. It is not a coverage
+benchmark. See [`MISSION_FLOW.md`](MISSION_FLOW.md) and
 [`NAV_BLOCKAGES.md`](NAV_BLOCKAGES.md). The viewer owner bar starts,
 pauses, sets speed, holds MAP READY for a 2 s beat (or **Start mow**),
-and ESTOPs locally. The phone app (`jims-mower-owner --live`) is the
-owner product loop; this desktop bar stays for laptop debugging.
+Resets (fence kept; tip / blockages / progress cleared), and ESTOPs
+locally. The phone app (`jims-mower-owner --live`) is the owner product
+loop; this desktop bar stays for laptop debugging. There is no Full
+explore toggle.
 
 The demo (and `jims-mower-record`) write a viewer bundle next to the
 usual PNGs:

@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--yard", type=Path, default=None, help="YardProfile JSON to load (and persist on PUT)")
     p.add_argument("--seed", type=int, default=7)
     p.add_argument("--cameras", type=int, default=4)
-    p.add_argument("--speed", default="5", help="live wall-clock multiplier: 1, 2, 5, or max")
+    p.add_argument("--speed", default="1", help="live wall-clock multiplier: 1, 2, 5, or max (default 1)")
     p.add_argument("--fast", action="store_true", help="live: mission_tiny + short budgets (CI)")
     p.add_argument("--steps", type=int, default=None, help="live episode budget")
     p.add_argument("--out", type=Path, default=Path("live_out"), help="live bundle directory")
@@ -88,7 +88,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         else:
             print("Phone owns the live job. Pair BT stub → Teach (optional) → Start / Pause / ESTOP.")
         print("Taught YardProfile is the job geofence. Demo confirm-fence is acre_yard_demo without teach.")
-        print("Desktop viewer still: jims-mower-live --config acre_yard_demo --speed 5")
+        print("Desktop viewer still: jims-mower-live --config acre_yard_demo --speed 1")
     serve_app(backend, host=args.host, port=port)
 
 

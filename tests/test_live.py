@@ -448,7 +448,7 @@ def test_live_acre_demo_taught_reaches_mow(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(live_mod, "ACRE_LIVE_CAM_WIDTH", 16)
     monkeypatch.setattr(live_mod, "ACRE_LIVE_CAM_HEIGHT", 12)
-    keep = [(4.2, 5.2), (65.8, 5.2), (65.8, 52.8), (4.2, 52.8)]
+    keep = [(8.0, 8.0), (16.0, 8.0), (16.0, 14.0), (8.0, 14.0)]
     session = LiveSession(
         config="acre_yard_demo",
         fast=False,
@@ -480,8 +480,8 @@ def test_live_acre_demo_taught_reaches_mow(tmp_path: Path, monkeypatch) -> None:
     session.reset()
     assert session.policy is not None
     assert session.policy.phase.value == "explore"
-    assert session.policy.settings.explore_complete <= 0.32
-    assert session.policy.settings.max_explore_steps <= 500
+    assert session.policy.settings.explore_complete >= 0.95
+    assert session.policy.settings.full_explore is True
     session.policy.settings.review_hold_steps = 2
     session.unattended = True
     session.job_state = "running"

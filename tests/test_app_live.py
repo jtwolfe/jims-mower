@@ -53,6 +53,8 @@ def test_app_live_cli_and_owner_flag() -> None:
     assert args.live is True
     assert args.config == "acre_yard_demo"
     assert args.speed == "5"
+    defaults = app.parse_args(["--live"])
+    assert defaults.speed == "1"
     first = app.parse_args(["--live", "--first-run"])
     assert first.first_run is True
     help_text = app.format_help()
@@ -187,7 +189,7 @@ def test_app_live_control_contract(tmp_path: Path) -> None:
         assert "Explore" in js
         assert ">Mow<" in js or "cmd-mow" in js
         assert "Return home" in js
-        assert "Full explore" in js
+        assert "Full explore" not in js
         assert "explore_reason" in js
         assert "Low battery" in js
         assert "low_soc" in js

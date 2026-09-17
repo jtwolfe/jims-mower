@@ -162,9 +162,12 @@ those cells. That is a readability cue, not photoreal water.
 
 ```bash
 jims-mower-demo --config acre_yard --steps 80 --out demo_acre
-# Live owner demo (same acre features; short calibrate confirm → EXPLORE):
-jims-mower-live --config acre_yard_demo --speed 5
-jims-mower-live --config acre_yard --speed 5
+# Live owner demo (same acre features; short calibrate confirm → EXPLORE).
+# Default speed is 1×. Optional --speed 5 / max for a faster watch.
+jims-mower-live --config acre_yard_demo
+jims-mower-live --config acre_yard
+# Local full-acre explore→mow (not CI):
+jims-mower-live --config acre_yard --speed max --prepare-only --steps 20000 --out live_acre_full
 jims-mower-mission-demo --config acre_yard --out mission_acre
 jims-mower-viewer --episode mission_acre
 jims-mower-mesh --out acre.glb --config acre_yard --seed 3 --stride 4
@@ -176,10 +179,11 @@ move, not so the job finishes. Mesh export should use `--stride 3` or
 `4` (default stride 2 is still loadable, just heavier).
 
 `acre_yard_demo` is a **live demo profile**: same 70×58 m physics and
-authored pond/sheds, slightly tighter keep-in, `calibrate_confirm_m: 28`,
-and `explore_complete: 0.30` / `max_explore_steps: 420` so `--speed 5`
-and `--speed max` can reach **MAP READY then MOW** in minutes.
-`acre_yard` stays at `0.72` / 4000 and a full fence lap.
+authored pond/sheds, slightly tighter keep-in, `calibrate_confirm_m: 28`.
+Explore and mow still target the **full taught fence**
+(`explore_complete: 1.0` / `max_explore_steps: 4000`,
+`mow_complete_frac: 0.0`) — same gates as `acre_yard`. There is no
+30% / 420-step demo early exit and no owner Full explore switch.
 A first-run teach (`jims-mower-owner --live` → Teach → Save) replaces
 that authored confirm with a `YardProfile` keep-in; the acre physics
 world does not shrink. The live viewer shows a growing **observed**
