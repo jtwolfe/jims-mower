@@ -88,3 +88,18 @@ button:hover { background: #354026; }
 .hint { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
 #save-status { font-size: 11px; color: var(--muted); white-space: pre-wrap; }
 #scrub-label { color: var(--muted); font-size: 12px; }
+#advanced-layers { margin: 0; }
+#advanced-layers summary {
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 4px 0 8px;
+}
+html.embed body.embed #owner-bar { display: none !important; }
+html.embed body.embed .top { padding: 6px 10px; }
+html.embed body.embed #phase-bar { font-size: 10px; }
+html.embed body.embed main { height: calc(100vh - 72px); }
+html.embed body.embed #panel { width: 220px; }

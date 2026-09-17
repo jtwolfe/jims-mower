@@ -7,7 +7,7 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-from jims_mower.planning.costmap import BLOCKED_COST, Costmap
+from jims_mower.planning.costmap import BLOCKED_COST, CONTOUR_COST, Costmap, slope_from_elevation
 from jims_mower.planning.coverage import shortest_path
 from jims_mower.planning.observed import ObservedMap, downsample_frontiers, frontiers, nearest_frontier
 
@@ -29,10 +29,32 @@ class ExplorePlan:
         return self.no_frontier or not self.waypoints
 
 
-def explore_costmap(omap: ObservedMap, keep_in: Optional[np.ndarray] = None) -> Costmap:
-    """Transit only through known-safe cells. Unknown is blocked."""
+def explore_costmap(
+    omap: ObservedMap,
+    keep_in: Optional[np.ndarray] = None,
+    *,
+    max_climb_slope_rad: Optional[float] = None,
+    tip_lethal_slope_rad: Optional[float] = None,
+    contour_cost: float = CONTOUR_COST,
+) -> Costmap:
+    """Transit only through known-safe cells. Unknown is blocked.
+
+    Tip-dangerous grades (above the tip-safe margin) are lethal. Between
+    ``max_climb`` and that margin, A* prefers a contour (high cost).
+    Climbable hills stay free so explore can climb or walk around.
+    """
     blocked = omap.unknown_blocked(keep_in)
     cost = np.full(blocked.shape, 1.0, dtype=np.float32)
+    if max_climb_slope_rad is not None or tip_lethal_slope_rad is not None:
+        slope = slope_from_elevation(omap.elevation, omap.resolution_m)
+        climb = float(max_climb_slope_rad) if max_climb_slope_rad is not None else 0.32
+        lethal = float(tip_lethal_slope_rad) if tip_lethal_slope_rad is not None else climb
+        if lethal < climb:
+            lethal = climb
+        contour = (slope >= climb) & (slope < lethal) & ~blocked
+        cost[contour] = np.maximum(cost[contour], float(contour_cost))
+        lethal_mask = (slope >= lethal) & ~blocked
+        blocked = blocked | lethal_mask
     cost[blocked] = BLOCKED_COST
     return Costmap(
         cost=cost,
@@ -67,6 +89,9 @@ def plan_explore(
     skip_cells: Optional[Iterable[tuple[int, int]]] = None,
     avoid_xy: Optional[tuple[float, float]] = None,
     cluster_cells: int = 3,
+    max_climb_slope_rad: Optional[float] = None,
+    tip_lethal_slope_rad: Optional[float] = None,
+    contour_cost: float = CONTOUR_COST,
 ) -> ExplorePlan:
     """A* from the robot to the nearest reachable frontier.
 
@@ -75,7 +100,13 @@ def plan_explore(
     Learned blockage cells and ``skip_cells`` (failed no-progress frontiers)
     are not retried — they count as unreachable so the owner line is honest.
     """
-    cm = explore_costmap(omap, keep_in)
+    cm = explore_costmap(
+        omap,
+        keep_in,
+        max_climb_slope_rad=max_climb_slope_rad,
+        tip_lethal_slope_rad=tip_lethal_slope_rad,
+        contour_cost=contour_cost,
+    )
     ignore = np.asarray(omap.blockage, dtype=bool)
     raw = frontiers(omap.observed, omap.free, keep_in=keep_in, ignore_unknown=ignore)
     thin = downsample_frontiers(raw, min_sep=2, limit=80)

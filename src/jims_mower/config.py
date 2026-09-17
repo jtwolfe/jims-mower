@@ -366,6 +366,13 @@ class PlannerConfig:
     cruise_speed: float = 0.55
     imu_slow_frac: float = 0.55
     imu_stop_frac: float = 0.85
+    # Consecutive filtered frames before IMU stop (noise / hill spike).
+    imu_stop_hold_steps: int = 3
+    imu_tilt_window: int = 5
+    # Costmap lethal grade is tip_lethal_frac * min(tip_roll, tip_pitch).
+    # Between max_climb and that margin: high contour cost, not blocked.
+    tip_lethal_frac: float = 0.95
+    contour_cost: float = 12.0
     gps_blend: float = 0.08
     accel_blend: float = 0.10
     max_replans: int = 8
@@ -926,6 +933,14 @@ def validate_config(cfg: EnvConfig) -> EnvConfig:
         raise ConfigError("planner gps_blend/accel_blend must be in [0, 1]")
     if not 0.0 < plan.imu_slow_frac <= plan.imu_stop_frac:
         raise ConfigError("planner imu_slow_frac must be in (0, imu_stop_frac]")
+    if int(plan.imu_stop_hold_steps) < 1:
+        raise ConfigError("planner.imu_stop_hold_steps must be >= 1")
+    if int(plan.imu_tilt_window) < 1:
+        raise ConfigError("planner.imu_tilt_window must be >= 1")
+    if not 0.5 <= float(plan.tip_lethal_frac) <= 1.2:
+        raise ConfigError("planner.tip_lethal_frac must be in [0.5, 1.2]")
+    if float(plan.contour_cost) < 1.0:
+        raise ConfigError("planner.contour_cost must be >= 1")
     kind = str(plan.pose_filter or "").strip().lower()
     if kind not in {"ekf", "complementary", "comp", "stub"}:
         raise ConfigError("planner.pose_filter must be ekf|complementary")

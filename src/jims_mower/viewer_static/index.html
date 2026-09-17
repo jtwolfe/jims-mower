@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>jims-mower World Viewer</title>
-  <link rel="stylesheet" href="/style.css?v=owner-ui-4"/>
+  <link rel="stylesheet" href="/style.css?v=owner-ui-5"/>
   <script type="importmap">
   {
     "imports": {
@@ -62,6 +62,7 @@
       <button type="button" id="btn-return">Return home</button>
       <button type="button" id="btn-reexplore" hidden>Re-explore</button>
       <button type="button" id="btn-full-explore">Full explore</button>
+      <button type="button" id="btn-reset">Reset</button>
       <button type="button" id="btn-estop" class="danger">ESTOP</button>
     </div>
   </div>
@@ -80,6 +81,8 @@
     </section>
 
     <aside id="panel">
+      <details id="advanced-layers">
+      <summary>Advanced</summary>
       <h2>Layers</h2>
       <label><input type="checkbox" id="tog-coverage"/> coverage paint</label>
       <label><input type="checkbox" id="tog-hazard"/> hazard</label>
@@ -112,9 +115,10 @@
         <button type="button" id="btn-save">Save profile</button>
       </div>
       <pre id="save-status"></pre>
+      </details>
     </aside>
   </main>
 
-  <script type="module" src="/app.js?v=owner-ui-4"></script>
+  <script type="module" src="/app.js?v=owner-ui-5"></script>
 </body>
 </html>

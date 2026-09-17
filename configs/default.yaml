@@ -124,9 +124,14 @@ perception:
   interlock_source: auto
 
 planner:
-  # Coverage planner + controller. Steep below max_climb is a slow corridor;
-  # above it (and drain channels / lips) are blocked after drain_clearance_m.
+  # Coverage planner + controller. Steep below max_climb is a slow corridor.
+  # Between max_climb and tip_lethal_frac * tip_roll: high contour cost (not
+  # blocked). Lethal only above that tip-safe margin. See docs/TIP_HILL.md.
   max_climb_slope_rad: 0.32
+  tip_lethal_frac: 0.95
+  contour_cost: 12.0
+  imu_stop_hold_steps: 3
+  imu_tilt_window: 5
   drain_clearance_m: 0.40
   slow_speed_factor: 0.35
   strip_spacing_m: 0.28

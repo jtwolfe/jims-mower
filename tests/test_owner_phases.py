@@ -78,6 +78,7 @@ def test_explore_reason_field_on_status() -> None:
         "blockage_stamped",
         "frontier_skipped",
         "remapping",
+        "steep_grade",
     }
     assert "map" in reason["label"]
     assert "step" in reason["label"]

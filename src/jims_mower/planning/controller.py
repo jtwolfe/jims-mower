@@ -9,7 +9,6 @@ import numpy as np
 
 from jims_mower.config import EnvConfig
 from jims_mower.constants import (
-    GRAVITY_MPS2,
     HAZARD_DRAIN_EDGE,
     HAND_SIGNALS,
     ID_TO_SIGNAL,
@@ -19,7 +18,13 @@ from jims_mower.geofence import GeofenceSpec, gps_world_from_enu
 from jims_mower.kinematics import unicycle_from_wheels, wheels_from_unicycle, wrap_angle
 from jims_mower.planning.costmap import build_costmap
 from jims_mower.planning.coverage import CoveragePlan, plan_coverage
-from jims_mower.planning.fusion import attitude_from_accel, make_pose_filter
+from jims_mower.planning.fusion import make_pose_filter
+from jims_mower.planning.grade_tip import (
+    TipHoldFilter,
+    classify_tilt,
+    read_tilt,
+    tip_lethal_slope_rad,
+)
 from jims_mower.faults import fault_is_immobilised, fault_is_retrieve
 from jims_mower.runtime.budget import budget_advice
 from jims_mower.safe_state import SafeStateMachine, estop_requested
@@ -49,20 +54,25 @@ def imu_advice(
     stop_frac: float,
     pose_pitch: float = 0.0,
     pose_roll: float = 0.0,
+    max_climb_slope_rad: Optional[float] = None,
+    tip_lethal_frac: float = 0.95,
 ) -> str:
-    """Cross-check: accel tilt *or* fused/true pitch-roll vs tip thresholds."""
-    roll, pitch = pose_roll, pose_pitch
-    imu_arr = np.asarray(imu, dtype=np.float32).reshape(-1)
-    spec = float(np.linalg.norm(imu_arr[:3])) if imu_arr.size >= 3 else GRAVITY_MPS2
-    if abs(spec - GRAVITY_MPS2) < 0.75:
-        roll_a, pitch_a = attitude_from_accel(imu_arr)
-        roll = roll_a if abs(roll_a) >= abs(roll) else roll
-        pitch = pitch_a if abs(pitch_a) >= abs(pitch) else pitch
-    if abs(roll) >= stop_frac * tip_roll_rad or abs(pitch) >= stop_frac * tip_pitch_rad:
-        return "stop"
-    if abs(roll) >= slow_frac * tip_roll_rad or abs(pitch) >= slow_frac * tip_pitch_rad:
-        return "slow"
-    return "ok"
+    """Cross-check: accel tilt *or* fused/true pitch-roll vs tip thresholds.
+
+    Pass ``max_climb_slope_rad`` for grade-aware advice (climbable hill →
+    slow/reroute, not tip-stop). Omit it for the legacy fractional trips.
+    """
+    roll, pitch = read_tilt(imu, pose_pitch=pose_pitch, pose_roll=pose_roll)
+    return classify_tilt(
+        roll,
+        pitch,
+        tip_roll_rad=tip_roll_rad,
+        tip_pitch_rad=tip_pitch_rad,
+        slow_frac=slow_frac,
+        stop_frac=stop_frac,
+        max_climb_slope_rad=max_climb_slope_rad,
+        tip_lethal_frac=tip_lethal_frac,
+    ).advice
 
 
 def tracking_action(
@@ -164,6 +174,11 @@ class TerrainPolicy:
         self.last_budget = "ok"
         self._wet = False
         self._battery_soc: Optional[float] = None
+        self._tilt_filter = TipHoldFilter(
+            window=int(cfg.planner.imu_tilt_window),
+            hold_steps=int(cfg.planner.imu_stop_hold_steps),
+        )
+        self.last_tilt_kind = "ok"
 
     def reset(self, obs: dict[str, Any], info: Optional[dict[str, Any]] = None) -> CoveragePlan:
         info = info or {}
@@ -194,6 +209,8 @@ class TerrainPolicy:
         self.safe.reset()
         self.last_safe_mode = self.safe.mode
         self.last_budget = "ok"
+        self._tilt_filter.reset()
+        self.last_tilt_kind = "ok"
         weather = info.get("weather") or {}
         self._wet = bool(weather.get("wet", False))
         if "battery_soc" in info:
@@ -230,6 +247,8 @@ class TerrainPolicy:
             stop_frac=self.cfg.planner.imu_stop_frac,
             pose_pitch=fused.pitch,
             pose_roll=fused.roll,
+            max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
         )
         chassis = imu_advice(
             obs["imu"],
@@ -239,7 +258,32 @@ class TerrainPolicy:
             stop_frac=self.cfg.planner.imu_stop_frac,
             pose_pitch=pose_hint.pitch,
             pose_roll=pose_hint.roll,
+            max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
         )
+        roll, pitch = read_tilt(
+            obs["imu"],
+            pose_pitch=fused.pitch if abs(fused.pitch) >= abs(pose_hint.pitch) else pose_hint.pitch,
+            pose_roll=fused.roll if abs(fused.roll) >= abs(pose_hint.roll) else pose_hint.roll,
+        )
+        raw_cls = classify_tilt(
+            roll,
+            pitch,
+            tip_roll_rad=self.cfg.robot.tip_roll_rad,
+            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+            slow_frac=self.cfg.planner.imu_slow_frac,
+            stop_frac=self.cfg.planner.imu_stop_frac,
+            max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
+        )
+        filtered = self._tilt_filter.update(
+            raw_cls,
+            tip_roll_rad=self.cfg.robot.tip_roll_rad,
+            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+        )
+        sensed = combine_advice(sensed, filtered.advice)
+        chassis = combine_advice(chassis, filtered.advice)
+        self.last_tilt_kind = filtered.kind
         self._geofence = geofence_from_info(info, self.cfg)
         living = str(info.get("living_advice") or "ok")
         fence = str(info.get("geofence_advice") or "ok")
@@ -424,6 +468,12 @@ class TerrainPolicy:
             width_m=self._width_m,
             height_m=self._height_m,
             max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            tip_lethal_slope_rad=tip_lethal_slope_rad(
+                tip_roll_rad=self.cfg.robot.tip_roll_rad,
+                tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+                tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
+            ),
+            contour_cost=self.cfg.planner.contour_cost,
             drain_clearance_m=self.cfg.planner.drain_clearance_m,
             occupancy=occupancy,
             occupancy_inflate_m=self.cfg.planner.occupancy_inflate_m,

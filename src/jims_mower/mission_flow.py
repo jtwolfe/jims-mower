@@ -32,7 +32,15 @@ from jims_mower.planning.controller import (
     observed_hand_signal,
     tracking_action,
 )
-from jims_mower.planning.costmap import build_costmap
+from jims_mower.planning.costmap import build_costmap, slope_from_elevation
+from jims_mower.planning.grade_tip import (
+    KIND_GRADE,
+    KIND_TIP,
+    TipHoldFilter,
+    classify_tilt,
+    read_tilt,
+    tip_lethal_slope_rad,
+)
 from jims_mower.constants import (
     HAZARD_DRAIN,
     MISSION_FLOW_SCHEMA,
@@ -166,6 +174,11 @@ class MissionPolicy:
         self.index = 0
         self.replans = 0
         self.last_advice = "ok"
+        self.last_tilt_kind = "ok"
+        self._tilt_filter = TipHoldFilter(
+            window=int(cfg.planner.imu_tilt_window),
+            hold_steps=int(cfg.planner.imu_stop_hold_steps),
+        )
         self.last_safe_mode = self.safe.mode
         self.help_requested = False
         self.plan: Optional[CoveragePlan] = None
@@ -315,6 +328,71 @@ class MissionPolicy:
         self._emit("owner_return", {"reason": self._return_kind, "from": self.phase.value})
         self._transition(MissionPhase.RETURN_HOME)
         return True
+
+    def owner_reset(self, *, clear_blockages: bool = False) -> dict[str, Any]:
+        """Stop the job transients and return to Explore-ready without reteach.
+
+        Keeps the taught fence and the observed map. Learned blockages stay
+        unless ``clear_blockages`` is set. Clears tip cool-down, explore
+        spin, software safe/hold, and recovery counters.
+        """
+        self.clear_owner_hold()
+        self.help_requested = False
+        self._stop_cool = 0
+        self._calibrate_stall = 0
+        self._explore_spin = 0
+        self._explore_blocked = 0
+        self._explore_recover_cool = 0
+        self._progress_stall = 0
+        self._progress_best = 1e9
+        self._progress_pose = None
+        self._replan_cool = 0
+        self._detour = []
+        self._detour_index = 0
+        self.last_advice = "ok"
+        self.last_tilt_kind = "ok"
+        self._tilt_filter.reset()
+        self.safe.clear()
+        cleared = 0
+        if clear_blockages and self.observed is not None:
+            cleared = int(self.observed.clear_blockages())
+            self._skipped_frontiers = []
+            self._blocked_frontier_count = 0
+            self._last_blockage_xy = None
+            self._blockage_events = 0
+        # Keep a taught fence. Leave calibrate only when a profile already exists.
+        if self.phase == MissionPhase.CALIBRATE_BOUNDARY and self.profile is not None:
+            self._close_calibrate_now()
+        if self.phase in {
+            MissionPhase.FAULT,
+            MissionPhase.SAFE,
+            MissionPhase.MOW,
+            MissionPhase.RETURN_HOME,
+            MissionPhase.CHARGING,
+            MissionPhase.COMPLETE,
+        }:
+            if self.snapshot is not None:
+                self._transition(MissionPhase.REVIEW)
+            else:
+                self._transition(MissionPhase.EXPLORE)
+        self.explore_reason = self._build_explore_reason(0.0, self._last_info, code="idle")
+        self._emit(
+            "owner_reset",
+            {
+                "clear_blockages": bool(clear_blockages),
+                "cleared_cells": int(cleared),
+                "phase": self.phase.value,
+                "kept_fence": self.profile is not None,
+            },
+        )
+        return {
+            "ok": True,
+            "clear_blockages": bool(clear_blockages),
+            "cleared_cells": int(cleared),
+            "phase": self.phase.value,
+            "kept_fence": self.profile is not None,
+            "kept_blockages": not clear_blockages,
+        }
 
     def apply_full_explore_mode(self, enabled: bool = True) -> bool:
         if enabled:
@@ -483,6 +561,8 @@ class MissionPolicy:
         self.index = 0
         self.replans = 0
         self.last_advice = "ok"
+        self.last_tilt_kind = "ok"
+        self._tilt_filter.reset()
         self.help_requested = False
         self.plan = None
         self.explore_plan = None
@@ -665,6 +745,7 @@ class MissionPolicy:
             "resume_phase": self._resume_phase.value if self._resume_phase is not None else "",
             "resume_index": int(self._resume_index),
             "area_legend": ObservedMap.area_legend(),
+            "tilt_kind": self.last_tilt_kind,
             "not_a_benchmark": True,
         }
 
@@ -775,6 +856,8 @@ class MissionPolicy:
         pose_hint: Pose,
     ) -> str:
         env_advice = str(info.get("terrain_advice") or "ok")
+        climb = float(self.cfg.planner.max_climb_slope_rad)
+        lethal_frac = float(self.cfg.planner.tip_lethal_frac)
         sensed = imu_advice(
             obs["imu"],
             tip_roll_rad=self.cfg.robot.tip_roll_rad,
@@ -783,6 +866,8 @@ class MissionPolicy:
             stop_frac=self.cfg.planner.imu_stop_frac,
             pose_pitch=fused.pitch,
             pose_roll=fused.roll,
+            max_climb_slope_rad=climb,
+            tip_lethal_frac=lethal_frac,
         )
         chassis = imu_advice(
             obs["imu"],
@@ -792,7 +877,33 @@ class MissionPolicy:
             stop_frac=self.cfg.planner.imu_stop_frac,
             pose_pitch=pose_hint.pitch,
             pose_roll=pose_hint.roll,
+            max_climb_slope_rad=climb,
+            tip_lethal_frac=lethal_frac,
         )
+        roll, pitch = read_tilt(
+            obs["imu"],
+            pose_pitch=fused.pitch if abs(fused.pitch) >= abs(pose_hint.pitch) else pose_hint.pitch,
+            pose_roll=fused.roll if abs(fused.roll) >= abs(pose_hint.roll) else pose_hint.roll,
+        )
+        filtered = self._tilt_filter.update(
+            classify_tilt(
+                roll,
+                pitch,
+                tip_roll_rad=self.cfg.robot.tip_roll_rad,
+                tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+                slow_frac=self.cfg.planner.imu_slow_frac,
+                stop_frac=self.cfg.planner.imu_stop_frac,
+                max_climb_slope_rad=climb,
+                tip_lethal_frac=lethal_frac,
+            ),
+            tip_roll_rad=self.cfg.robot.tip_roll_rad,
+            tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+        )
+        sensed = combine_advice(sensed, filtered.advice)
+        chassis = combine_advice(chassis, filtered.advice)
+        self.last_tilt_kind = filtered.kind
+        if env_advice == "stop" and bool(info.get("tipover")):
+            self.last_tilt_kind = KIND_TIP
         living = str(info.get("living_advice") or "ok")
         fence = str(info.get("geofence_advice") or "ok")
         power = budget_advice(info)
@@ -807,6 +918,9 @@ class MissionPolicy:
             advice = combine_advice(env_advice, sensed, chassis, living, fence, power)
         if advice not in TERRAIN_ADVICE:
             advice = "ok"
+        # Climbable grade must not ride a physics "slow" + IMU spike into tip-stop.
+        if advice == "stop" and self.last_tilt_kind == KIND_GRADE and not bool(info.get("tipover")):
+            advice = "reroute"
         return advice
 
     def _tick_calibrate(
@@ -963,6 +1077,13 @@ class MissionPolicy:
                 skip_cells=self._skipped_frontiers,
                 avoid_xy=avoid,
                 cluster_cells=int(self.settings.blockage_cluster_cells),
+                max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+                tip_lethal_slope_rad=tip_lethal_slope_rad(
+                    tip_roll_rad=self.cfg.robot.tip_roll_rad,
+                    tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+                    tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
+                ),
+                contour_cost=self.cfg.planner.contour_cost,
             )
             self.index = 0
             if self.explore_plan.target != prev_target:
@@ -979,6 +1100,22 @@ class MissionPolicy:
                         "skipped_frontiers": int(self.explore_plan.skipped_frontiers),
                     },
                 )
+        if advice == "stop" and self.last_tilt_kind == KIND_GRADE:
+            # Climbable / contour grade — do not stamp a no-go or reverse-loop.
+            self._explore_spin = 0
+            self.explore_reason = self._build_explore_reason(
+                completion, info, n_frontiers=len(thin), code="steep_grade"
+            )
+            if self.phase_step % 2 == 0:
+                self.explore_plan = None
+            return self._look_around(pose)
+        if advice == "reroute" and self.last_tilt_kind == KIND_GRADE:
+            self._explore_spin = 0
+            self.explore_reason = self._build_explore_reason(
+                completion, info, n_frontiers=len(thin), code="steep_grade"
+            )
+            if self.phase_step % 3 == 0:
+                self.explore_plan = None
         if advice == "stop":
             self._explore_spin += 1
             if self._explore_spin >= 4:
@@ -1573,6 +1710,8 @@ class MissionPolicy:
         if not code:
             if self.phase != MissionPhase.EXPLORE:
                 code = "idle"
+            elif self.last_tilt_kind == KIND_GRADE:
+                code = "steep_grade"
             elif self.last_advice == "stop":
                 code = "tip_recovery"
             elif self._blockage_events and self._explore_recover_cool > 0:
@@ -1588,7 +1727,8 @@ class MissionPolicy:
         labels = {
             "seeking_frontier": "Seeking frontier",
             "path_blocked": "Path blocked — looking around",
-            "tip_recovery": "Tip recovery",
+            "tip_recovery": "Tip risk — reversing",
+            "steep_grade": "Steep grade — contouring",
             "map_progress": "Map progress",
             "waiting_cap": "Waiting on explore cap",
             "no_frontier": "No reachable frontier",
@@ -1680,7 +1820,7 @@ class MissionPolicy:
         conf = self.observed.confidence if snap is None else snap.confidence
         hazard = _control_hazard(raw_hazard, conf)
         elevation = self.observed.elevation if snap is None else snap.elevation
-        slope = _slope_from_elevation(elevation, self.cfg.world.resolution_m)
+        slope = slope_from_elevation(elevation, self.cfg.world.resolution_m)
         costmap = build_costmap(
             hazard,
             slope,
@@ -1688,6 +1828,12 @@ class MissionPolicy:
             width_m=self.cfg.world.width_m,
             height_m=self.cfg.world.height_m,
             max_climb_slope_rad=self.cfg.planner.max_climb_slope_rad,
+            tip_lethal_slope_rad=tip_lethal_slope_rad(
+                tip_roll_rad=self.cfg.robot.tip_roll_rad,
+                tip_pitch_rad=self.cfg.robot.tip_pitch_rad,
+                tip_lethal_frac=self.cfg.planner.tip_lethal_frac,
+            ),
+            contour_cost=self.cfg.planner.contour_cost,
             drain_clearance_m=self.cfg.planner.drain_clearance_m,
             occupancy=self.observed.occupancy,
             occupancy_inflate_m=max(0.20, self.cfg.planner.occupancy_inflate_m),
@@ -2289,9 +2435,8 @@ def _control_hazard(hazard: np.ndarray, confidence: np.ndarray) -> np.ndarray:
 
 
 def _slope_from_elevation(elevation: np.ndarray, resolution_m: float) -> np.ndarray:
-    res = max(float(resolution_m), 1e-6)
-    gy, gx = np.gradient(np.asarray(elevation, dtype=np.float32), res)
-    return np.arctan(np.hypot(gx, gy)).astype(np.float32)
+    """Back-compat wrapper — prefer ``slope_from_elevation``."""
+    return slope_from_elevation(elevation, resolution_m)
 
 
 def _densify_ring(ring: list[tuple[float, float]], stride_m: float) -> list[tuple[float, float]]:
